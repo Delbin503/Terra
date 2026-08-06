@@ -1,0 +1,279 @@
+/* =====================================================================
+   TERRA DESIGN TOKENS
+   ---------------------------------------------------------------------
+   Single source of truth for color, type, spacing, radius, elevation.
+   Colors are stored as raw HSL channels ("H S% L%") so Tailwind can apply
+   opacity via hsl(var(--token) / <alpha-value>).
+
+   Layers:
+     1. Primitive palette  — literal color ramps (terra, indigo, moss, …)
+     2. Semantic tokens    — roles the UI actually consumes (surface, content…)
+     3. Theme overrides    — dark (default) + light
+   ===================================================================== */
+
+/* ---------- 1. PRIMITIVE PALETTE (mode-stable ramps) ---------- */
+:root {
+  /* Brand — Terra orange (warm, earthy) */
+  --terra-50: 30 90% 96%;
+  --terra-100: 30 92% 90%;
+  --terra-200: 29 92% 80%;
+  --terra-300: 27 92% 68%;
+  --terra-400: 25 92% 58%;
+  --terra-500: 24 90% 52%;   /* base */
+  --terra-600: 21 84% 46%;
+  --terra-700: 18 78% 38%;
+  --terra-800: 16 72% 30%;
+  --terra-900: 15 66% 24%;
+  --terra-950: 14 64% 15%;
+
+  /* Accent — Indigo (AI / generative / 3D actions) */
+  --indigo-50: 246 90% 96%;
+  --indigo-100: 245 88% 92%;
+  --indigo-300: 244 84% 78%;
+  --indigo-400: 244 78% 68%;
+  --indigo-500: 244 68% 62%;  /* base */
+  --indigo-600: 244 60% 55%;
+  --indigo-700: 244 52% 46%;
+
+  /* Moss — success + image credits */
+  --moss-400: 84 46% 55%;
+  --moss-500: 88 46% 47%;
+  --moss-600: 92 48% 38%;
+
+  /* Amber — warning */
+  --amber-400: 40 92% 58%;
+  --amber-500: 36 92% 50%;
+
+  /* Rose — danger */
+  --rose-400: 358 78% 66%;
+  --rose-500: 356 72% 54%;
+  --rose-600: 355 66% 46%;
+
+  /* Neutrals — warm-biased gray (hint of the brand hue, never pure) */
+  --gray-0: 30 8% 100%;
+  --gray-25: 30 10% 98%;
+  --gray-50: 28 9% 96%;
+  --gray-100: 28 8% 92%;
+  --gray-200: 26 7% 85%;
+  --gray-300: 26 6% 72%;
+  --gray-400: 26 5% 58%;
+  --gray-500: 26 5% 45%;
+  --gray-600: 26 6% 34%;
+  --gray-700: 25 7% 22%;
+  --gray-750: 25 8% 17%;
+  --gray-800: 26 9% 13%;
+  --gray-850: 26 10% 10%;
+  --gray-900: 27 11% 8%;
+  --gray-950: 28 12% 5%;
+}
+
+/* ---------- 2 + 3. SEMANTIC TOKENS — DARK (default) ---------- */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --canvas: var(--gray-950);          /* app background */
+  --surface: var(--gray-900);         /* sidebar, base panels */
+  --surface-raised: var(--gray-850);  /* cards */
+  --surface-overlay: var(--gray-800); /* modals, popovers */
+  --surface-sunken: var(--gray-950);  /* wells, tracks */
+
+  /* Content. `subtle` sits over transparent glass on top of an unpredictable
+     (often bright) 3D scene, so it can't go as dim as it would on a solid dark
+     surface — at 44% the panel values were effectively invisible. */
+  --content: 30 12% 96%;
+  --content-muted: 28 6% 82%;
+  --content-subtle: 26 5% 70%;
+  --content-inverse: var(--gray-950);
+
+  /* Lines */
+  --line: 30 8% 100%;                 /* used at low alpha via border-line/8 */
+  --line-strong: 30 8% 100%;
+
+  /* Brand */
+  --brand: var(--terra-500);
+  --brand-hover: var(--terra-400);
+  --brand-soft: 24 80% 16%;
+  --brand-foreground: 30 40% 98%;
+
+  /* Accent (indigo) */
+  --accent: var(--indigo-500);
+  --accent-hover: var(--indigo-400);
+  --accent-soft: 244 40% 20%;
+  --accent-foreground: 246 100% 98%;
+
+  /* Semantic */
+  --success: var(--moss-500);
+  --success-soft: 90 40% 14%;
+  --warning: var(--amber-500);
+  --warning-soft: 38 60% 15%;
+  --danger: var(--rose-500);
+  --danger-soft: 356 50% 18%;
+
+  /* Master Object — a role colour of its own, never reused for state. */
+  --master: 45 93% 58%;
+
+  --ring: var(--terra-500);
+}
+
+/* ---------- LIGHT ---------- */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --canvas: var(--gray-50);
+  --surface: var(--gray-0);
+  --surface-raised: var(--gray-0);
+  --surface-overlay: var(--gray-0);
+  --surface-sunken: var(--gray-100);
+
+  --content: 27 14% 12%;
+  --content-muted: 26 6% 40%;
+  --content-subtle: 26 6% 56%;
+  --content-inverse: var(--gray-0);
+
+  --line: 26 10% 8%;
+  --line-strong: 26 12% 8%;
+
+  --brand: var(--terra-600);
+  --brand-hover: var(--terra-500);
+  --brand-soft: 30 90% 94%;
+  --brand-foreground: 30 40% 99%;
+
+  --accent: var(--indigo-600);
+  --accent-hover: var(--indigo-500);
+  --accent-soft: 245 90% 96%;
+  --accent-foreground: 246 100% 99%;
+
+  --success: var(--moss-600);
+  --success-soft: 88 50% 92%;
+  --warning: var(--amber-500);
+  --warning-soft: 40 90% 92%;
+  --danger: var(--rose-600);
+  --danger-soft: 356 80% 96%;
+
+  --master: 42 88% 45%;
+
+  --ring: var(--terra-500);
+}
+
+/* Follow OS preference when no explicit theme is set */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --canvas: var(--gray-50);
+    --surface: var(--gray-0);
+    --surface-raised: var(--gray-0);
+    --surface-overlay: var(--gray-0);
+    --surface-sunken: var(--gray-100);
+    --content: 27 14% 12%;
+    --content-muted: 26 6% 40%;
+    --content-subtle: 26 6% 56%;
+    --content-inverse: var(--gray-0);
+    --line: 26 10% 8%;
+    --line-strong: 26 12% 8%;
+    --brand: var(--terra-600);
+    --brand-soft: 30 90% 94%;
+    --accent: var(--indigo-600);
+    --accent-soft: 245 90% 96%;
+  }
+}
+
+/* ---------- TYPE / RADIUS / ELEVATION / LAYOUT ---------- */
+:root {
+  --font-display: "Sora Variable", ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+  --font-sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 0.875rem;
+  --radius-2xl: 1.125rem;
+  --radius-3xl: 1.5rem;      /* glass ornaments / floating panels */
+
+  --shadow-xs: 0 1px 2px hsl(0 0% 0% / 0.18);
+  --shadow-sm: 0 1px 3px hsl(0 0% 0% / 0.22), 0 1px 2px hsl(0 0% 0% / 0.16);
+  --shadow-md: 0 4px 12px hsl(0 0% 0% / 0.28);
+  --shadow-lg: 0 12px 32px hsl(0 0% 0% / 0.4);
+  --shadow-pop: 0 8px 24px hsl(0 0% 0% / 0.35), 0 2px 6px hsl(0 0% 0% / 0.28);
+
+  --rail-w: 16rem;
+  --rail-w-collapsed: 4.5rem;
+}
+
+/* =====================================================================
+   GLASS — visionOS overlay material (Terra Web editor)
+   ---------------------------------------------------------------------
+   Glass ornaments are DOM layers floating ABOVE the Three.js/WebGL canvas
+   — never Three.js objects. The material is luminous & "milky": heavy blur,
+   boosted saturation, a lifted brightness, a top specular highlight, a
+   hairline edge, and a soft ambient drop shadow. Selection reads through
+   MORE FROST, never a color fill (see [[terra-visionos-glass-direction]]).
+
+   Source of truth = these vars. Consume them via the .glass* material
+   classes in globals.css, or the `glass` Tailwind color for ad-hoc alpha.
+   ===================================================================== */
+
+/* Material knobs — mode-stable (glass floats over a rendered scene) */
+:root {
+  /* Keep the blur light. At 30px the scene behind an ornament smeared into a
+     flat brown wash — the Figma reference still reads the rock texture through
+     the button, softened rather than erased. Blur enough to separate, not to
+     obliterate. */
+  --glass-blur: 4px;
+  --glass-blur-strong: 8px;         /* modals / full ornaments */
+  /* Saturation stays close to 100%: over a warm scene (desert HDRI) a big boost
+     amplifies the oranges and the glass reads muddy brown rather than neutral
+     frost. Apple's material barely lifts saturation — vibrancy comes from the
+     blur, not from pushing chroma. */
+  --glass-saturate: 125%;
+  --glass-brightness: 1;
+
+  --glass-tint: 0 0% 100%;          /* white — used by hover/edge utilities */
+  --glass-radius: var(--radius-3xl);
+
+  /* Interaction deltas (added on top of the base thickness alpha) */
+  --glass-hover: 0.06;              /* extra frost on hover */
+  --glass-frost-selected: 0.20;     /* frost-not-color selection */
+}
+
+/* Thickness ladder + lighting + shadows — DARK (default, over dark scenes) */
+:root,
+:root[data-theme="dark"] {
+  /* Figma (node 285:15760) specs the toolbar button as rgba(12,12,12,0.3) — a
+     neutral near-black at low alpha, so the scene reads through. `regular` is
+     pinned to that exact value; the rest of the ladder steps around it. */
+  --glass-ink: 0 0% 5%;             /* rgb(12,12,12) — neutral, not blue-tinted */
+  --glass-thin: 0.20;
+  --glass-regular: 0.30;            /* = Figma rgba(12,12,12,0.3) */
+  --glass-thick: 0.40;
+  --glass-chrome: 0.50;             /* pills / circular buttons */
+
+  --glass-border: hsl(0 0% 100% / 0.18);                  /* luminous hairline */
+  --glass-highlight: inset 0 1px 0 hsl(0 0% 100% / 0.22); /* top specular */
+  --glass-inner: inset 0 1px 30px hsl(0 0% 100% / 0.03);  /* faint inner glow */
+
+  /* Soft + neutral. The old near-opaque blue-black shadows (0.5–0.72) pooled
+     under every ornament and read as heavy; glass should float, not sit. */
+  --glass-shadow-sm: 0 2px 10px hsl(0 0% 0% / 0.12);
+  --glass-shadow-md: 0 8px 28px hsl(0 0% 0% / 0.18);
+  --glass-shadow-lg: 0 16px 44px hsl(0 0% 0% / 0.24);
+}
+
+/* Over a bright scene glass needs more body + a darker edge to stay legible */
+:root[data-theme="light"] {
+  --glass-ink: 0 0% 100%;           /* light glass body */
+  --glass-thin: 0.35;
+  --glass-regular: 0.45;
+  --glass-thick: 0.58;
+  --glass-chrome: 0.72;
+
+  --glass-border: hsl(240 20% 20% / 0.14);
+  --glass-highlight: inset 0 1px 0 hsl(0 0% 100% / 0.75);
+  --glass-inner: inset 0 0 24px hsl(0 0% 100% / 0.10);
+
+  --glass-shadow-sm: 0 4px 16px hsl(240 20% 30% / 0.14);
+  --glass-shadow-md: 0 12px 40px hsl(240 20% 30% / 0.20);
+  --glass-shadow-lg: 0 24px 64px hsl(240 20% 30% / 0.28);
+}

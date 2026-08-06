@@ -1,0 +1,20 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+.vite
+*.log
+
+# Build info
+*.tsbuildinfo
+
+# Per-machine Claude Code config
+.claude/settings.local.json
+.claude/*.lock
+
+# Large HDRI environment map — not versioned (see README "HDRI asset")
+public/hdri/
+
+# Stray nested skill scaffold (not part of the app)
+your-project/
