@@ -164,7 +164,7 @@ wrapping row — use `type-scene-plane` (or `-plane-top`) there. Colour and
 - Name a new role when a pattern recurs. Single-use deviations should be rare
   enough to argue about.
 
-Live specimen of every style, chrome and scene: **`<app>/#glass`**.
+Live specimen of every style, chrome and scene: **`<app>/_sb-preview.html`**.
 
 ## 2c. Editor primitives — `src/features/editor/ui/`
 
@@ -284,7 +284,7 @@ hand-roll glass.
 **Tracking convention:** every glass instance carries `data-ui="glass-<name>"`
 (via the `ui` prop), matching the Figma layer name and the `Glass<Thing>`
 component name — one identifier across Figma ↔ code ↔ runtime. Preview:
-`<app>/#glass` ([GlassPreview.tsx](src/features/editor/GlassPreview.tsx)).
+`<app>/_sb-preview.html`.
 
 ### The `overlay` tier — menus and popovers
 

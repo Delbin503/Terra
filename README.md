@@ -27,7 +27,7 @@ The app uses a minimal hash router (`src/App.tsx`):
 | --- | --- |
 | `http://localhost:5173/` | Terra platform home page |
 | `http://localhost:5173/#editor` | **3D HDRI editor** (Three.js viewport) |
-| `http://localhost:5173/#glass` | Glass design-token preview |
+| `http://localhost:5173/_sb-preview.html` | **Design system reference** (static; tokens, type, components) |
 
 `npm run editor` is just `vite --open /#editor` — a shortcut so you don't land
 on the home page when you want the editor.

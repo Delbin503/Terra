@@ -1,10 +1,10 @@
 import { useSyncExternalStore } from "react";
 import { TooltipProvider } from "@/components/ui";
 import { HomePage } from "@/features/home/HomePage";
-import { GlassPreview } from "@/features/editor/GlassPreview";
 import { EditorView } from "@/features/editor/EditorView";
 
-/** Minimal hash router — visit #glass to preview the glass token layer. */
+/** Minimal hash router — #editor is the 3D editor; everything else is the home page.
+ *  The design system reference is a static page at /_sb-preview.html. */
 function useHash() {
   return useSyncExternalStore(
     (cb) => {
@@ -20,7 +20,6 @@ export default function App() {
 
   let view = <HomePage />;
   if (hash === "#editor") view = <EditorView />;
-  else if (hash === "#glass") view = <GlassPreview />;
 
   return <TooltipProvider>{view}</TooltipProvider>;
 }
