@@ -53,6 +53,175 @@
 }
 
 /* =====================================================================
+   TEXT STYLES — the named typographic roles.
+   ---------------------------------------------------------------------
+   Two worlds:
+     .type-*         CHROME — UI type in glass panels and on solid surfaces.
+     .type-scene-*   SCENE  — diegetic type on the 3D-tilted object label.
+
+   A style sets FACE ONLY — family, size, weight, tracking, case. Colour
+   stays a separate utility (`type-body text-content-muted`) so one style
+   works across every tone, and so the scene styles can keep their
+   luminance-adaptive colour as a prop.
+
+   Escape hatch: any Tailwind type utility placed alongside a .type-*
+   class wins (utilities layer > components layer). Use that for genuine
+   one-offs — but don't leave a stale `text-xs` next to a `.type-body`,
+   because it silently defeats the style.
+   ===================================================================== */
+@layer components {
+  /* ---------- CHROME ---------- */
+  .type-display     { @apply font-display text-3xl font-semibold tracking-tight; }
+  .type-title       { @apply font-display text-xl font-semibold tracking-tight; }
+  .type-heading     { @apply font-display text-lg font-semibold; }
+  /* Panel titles inside the editor are Inter, not Sora — the display face is
+     reserved for the marketing/home surfaces and the largest chrome headings. */
+  .type-subheading  { @apply font-sans text-md font-semibold; }
+
+  /* Body — `-strong` is always one weight step up from its base. */
+  .type-body-lg        { @apply font-sans text-md font-normal; }
+  .type-body-lg-strong { @apply font-sans text-md font-medium; }
+  /* Navigation + category rows — sidebar items, asset library categories.
+     Sits between body and body-lg because the row height drives it. */
+  .type-nav            { @apply font-sans text-base font-normal; }
+  .type-body           { @apply font-sans text-sm font-normal; }
+  .type-body-strong    { @apply font-sans text-sm font-medium; }
+  .type-body-dense     { @apply font-sans text-xs font-normal; }
+
+  /* Compact titles that sit below the heading ramp — a panel header bar, a
+     chat author, an asset card's overlay label. */
+  .type-panel-title    { @apply font-sans text-sm font-semibold; }
+  .type-card-title     { @apply font-sans text-2xs font-semibold leading-tight; }
+
+  .type-label          { @apply font-sans text-xs font-medium; }
+  .type-label-strong   { @apply font-sans text-xs font-semibold; }
+  .type-eyebrow        { @apply font-sans text-2xs font-semibold uppercase tracking-wide; }
+  .type-caption        { @apply font-sans text-2xs font-normal; }
+  .type-caption-strong { @apply font-sans text-2xs font-medium; }
+
+  /* Numeric — tabular figures stop transform values jittering as digits
+     change under a drag. */
+  .type-numeric        { @apply font-sans text-xs font-normal tabular-nums; }
+  .type-numeric-sm     { @apply font-sans text-2xs font-normal tabular-nums; }
+
+  /* Monospace — token names, paths, inline code. */
+  .type-code           { @apply font-mono text-sm font-normal; }
+  .type-code-sm        { @apply font-mono text-2xs font-normal; }
+
+  /* Control text. Buttons and badges get their own roles rather than
+     borrowing body styles: their scale is tied to control height, so it
+     needs to move independently of the prose ramp. */
+  .type-button-xs      { @apply font-sans text-xs font-medium; }
+  .type-button-sm      { @apply font-sans text-sm font-medium; }
+  .type-button         { @apply font-sans text-base font-medium; }
+  .type-button-lg      { @apply font-sans text-md font-medium; }
+  .type-badge          { @apply font-sans text-xs font-medium tracking-wide; }
+  .type-badge-sm       { @apply font-sans text-2xs font-medium uppercase tracking-wide; }
+
+  /* Emoji marks (project glyph, picker tiles). No font-family — these must
+     fall through to the platform emoji face. */
+  .type-glyph          { @apply text-lg leading-none; }
+
+  /* ---------- SCENE ----------
+     Built from the --type-scene-* tokens. The title/nav styles carry their
+     own condensing transform because it applies to the text element itself;
+     the meta face does NOT, because its transform sometimes belongs to a
+     wrapping row — use .type-scene-plane for that. */
+  .type-scene-title,
+  .type-scene-nav,
+  .type-scene-badge,
+  .type-scene-body {
+    font-family: var(--font-sans);
+    font-weight: var(--type-scene-weight);
+    letter-spacing: var(--type-scene-tracking);
+  }
+
+  .type-scene-title {
+    margin: 0;
+    font-size: var(--type-scene-title-size);
+    line-height: 0.95;
+    transform: scaleY(var(--type-scene-condense-y)) scaleX(var(--type-scene-condense-x));
+    transform-origin: left center;
+  }
+
+  .type-scene-nav {
+    display: inline-block;
+    font-size: var(--type-scene-nav-size);
+    line-height: 1;
+    transform: scaleY(var(--type-scene-condense-y)) scaleX(var(--type-scene-condense-x));
+    transform-origin: left center;
+  }
+
+  /* Badge/pill labels on the tilted plane — Image, Master Object, Delete. */
+  .type-scene-badge {
+    font-size: var(--type-scene-meta-size);
+  }
+
+  /* The object's description paragraph — same face, prose leading. */
+  .type-scene-body {
+    font-size: var(--type-scene-meta-size);
+    line-height: 1.45;
+  }
+
+  /* The info mark — a glyph, not text, but it belongs to the title's
+     typographic block: it's set relative to the title like a ® on a logo, so
+     its size lives with the scene type rather than as a magic number. */
+  .type-scene-mark {
+    width: var(--type-scene-mark-size);
+    height: var(--type-scene-mark-size);
+  }
+
+  /* The gizmo's live transform readout, floating in the scene next to the
+     handle. Monospace + tabular so the value doesn't reflow while dragging. */
+  .type-scene-readout {
+    font-family: var(--font-mono);
+    font-size: var(--type-scene-readout-size);
+    font-weight: 500;
+    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The meta tier's condensing, as its own class so it can sit on a row
+     wrapper (the badge cluster) or on a single element (description, Delete). */
+  .type-scene-plane {
+    transform: scaleY(var(--type-scene-meta-condense-y))
+      scaleX(var(--type-scene-meta-condense-x));
+    transform-origin: left center;
+  }
+  .type-scene-plane-top {
+    transform: scaleY(var(--type-scene-meta-condense-y))
+      scaleX(var(--type-scene-meta-condense-x));
+    transform-origin: left top;
+  }
+}
+
+/* =====================================================================
+   GRADIENTS — composed from the --scrim-* / --gradient-* tokens.
+   ---------------------------------------------------------------------
+   `.scrim-*` darkens an image beneath a label; it replaces the
+   `bg-gradient-to-t from-black/NN to-transparent` triple so the depth is
+   picked from two named roles instead of a fresh alpha each time.
+   ===================================================================== */
+@layer components {
+  .scrim-strong {
+    background-image: linear-gradient(to top, hsl(0 0% 0% / var(--scrim-strong)), transparent);
+  }
+  .scrim-soft {
+    background-image: linear-gradient(to top, hsl(0 0% 0% / var(--scrim-soft)), transparent);
+  }
+
+  /* The recess an input sits in, inside a glass panel. */
+  .field-well {
+    background-color: hsl(0 0% 0% / var(--field-well));
+    border-color: hsl(var(--glass-tint) / var(--field-border));
+  }
+
+  .gradient-brand { background-image: var(--gradient-brand); }
+  .gradient-brand-warm { background-image: var(--gradient-brand-warm); }
+  .gradient-brand-soft { background-image: var(--gradient-brand-soft); }
+}
+
+/* =====================================================================
    GLASS MATERIAL — composed from the --glass-* tokens (tokens.css).
    Reuse these classes on any floating overlay above the 3D canvas:
      .glass            base "regular" material (panels, inspectors)
@@ -98,6 +267,21 @@
     background-color: hsl(var(--glass-ink) / var(--glass-chrome));
   }
 
+  /* Menus and popovers. Unlike the tiers above, this one sits over OTHER CHROME
+     — the emoji picker covers the left rail, the action menu covers the asset
+     grid — so it has to hide what's beneath it without becoming a different
+     material from the docked panels sitting beside it on screen.
+     It therefore shares `--glass-thick`'s BODY, so a popover and a panel read as
+     the same surface, and spends its whole budget on BLUR instead. */
+  .glass-overlay {
+    background-color: hsl(var(--glass-ink) / var(--glass-thick));
+    backdrop-filter: blur(var(--glass-blur-overlay)) saturate(var(--glass-saturate))
+      brightness(var(--glass-brightness));
+    -webkit-backdrop-filter: blur(var(--glass-blur-overlay))
+      saturate(var(--glass-saturate)) brightness(var(--glass-brightness));
+    box-shadow: var(--glass-highlight), var(--glass-inner), var(--glass-shadow-lg);
+  }
+
   .glass-interactive {
     transition: background-image 0.25s ease, box-shadow 0.25s ease,
       transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
@@ -107,6 +291,41 @@
     background-image: linear-gradient(hsl(0 0% 100% / 0.07), hsl(0 0% 100% / 0.07));
     transform: translateY(-1px);
     box-shadow: var(--glass-highlight), var(--glass-inner), var(--glass-shadow-lg);
+  }
+
+  /* Active role state for a glass ornament — Object/Texture on brand, Master
+     Object on its own yellow. The tint is a background-IMAGE layer so the
+     glass ink underneath survives; setting background-color here would drop
+     the dark base and leave the label washed out over the scene. Blurs harder
+     than resting glass so the label separates from a busy backdrop. */
+  .glass-role {
+    /* One step up the thickness ladder. An active tile has to hold a legible
+       label over an unpredictable scene — at `regular` a bright sky reads
+       straight through and the label washes out, whatever the tint does. */
+    background-color: hsl(var(--glass-ink) / var(--glass-thick));
+    background-image: linear-gradient(
+      hsl(var(--glass-role) / var(--glass-role-alpha)),
+      hsl(var(--glass-role) / var(--glass-role-alpha))
+    );
+    border-color: hsl(var(--glass-role) / var(--glass-role-border));
+    backdrop-filter: blur(var(--glass-blur-active)) saturate(var(--glass-saturate))
+      brightness(var(--glass-brightness));
+    -webkit-backdrop-filter: blur(var(--glass-blur-active))
+      saturate(var(--glass-saturate)) brightness(var(--glass-brightness));
+  }
+  .glass-role-brand  { --glass-role: var(--brand); }
+  .glass-role-master { --glass-role: var(--master); }
+
+  /* Hover on an active tile must stack the frost ON the tint — the plain
+     .glass-interactive:hover rule replaces background-image outright, which
+     would strip the role colour on hover. */
+  .glass-role.glass-interactive:hover {
+    background-image:
+      linear-gradient(hsl(0 0% 100% / 0.07), hsl(0 0% 100% / 0.07)),
+      linear-gradient(
+        hsl(var(--glass-role) / var(--glass-role-alpha)),
+        hsl(var(--glass-role) / var(--glass-role-alpha))
+      );
   }
 
   /* Frost-not-color selection: a brighter light wash + crisper specular edge */

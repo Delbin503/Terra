@@ -25,7 +25,7 @@ export function EditorTopBar({ projectName, onUndo, onRedo, canUndo = false, can
       {/* Project mark — click to pick a different emoji */}
       <ProjectEmojiPicker value={emoji} onChange={setEmoji} projectName={projectName} />
 
-      <span className="text-md font-medium text-content">{projectName}</span>
+      <span className="type-body-lg-strong text-content">{projectName}</span>
 
       <GlassDivider className="mx-1" />
 

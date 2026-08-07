@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { GlassPanel } from "@/components/glass";
+import { Panel, PanelHeader, PanelEyebrow, PanelBody, PanelSection } from "./ui";
 
 /** Picker palette, grouped so the list stays scannable rather than a wall of glyphs. */
 const EMOJI_GROUPS: { label: string; emoji: string[] }[] = [
@@ -43,8 +43,9 @@ export function emojiForProject(projectName: string): string {
 
 /**
  * ProjectEmojiPicker — the top-bar project mark. Click to swap the emoji from a
- * grouped palette. The popover reuses GlassPanel so it reads as the same
- * material as every other floating surface over the 3D scene.
+ * grouped palette. Built from the same Panel primitives as the docked panels,
+ * so its header/body/section layers match theirs exactly — and on the `overlay`
+ * glass tier, because it covers the left rail rather than just the 3D scene.
  */
 export function ProjectEmojiPicker({
   value,
@@ -82,7 +83,7 @@ export function ProjectEmojiPicker({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "grid h-9 w-9 place-items-center rounded-lg border-2 border-brand text-lg leading-none transition-colors hover:bg-glass/15",
+          "grid h-9 w-9 place-items-center rounded-lg border-2 border-brand type-glyph transition-colors hover:bg-glass/15",
           open && "bg-glass/15"
         )}
       >
@@ -90,32 +91,29 @@ export function ProjectEmojiPicker({
       </button>
 
       {open && (
-        <GlassPanel
+        <Panel
           ui="emoji-picker"
-          thickness="regular"
-          className="absolute left-0 top-[calc(100%+10px)] z-50 w-[248px] !rounded-2xl p-3"
+          thickness="overlay"
+          className="absolute left-0 top-[calc(100%+10px)] z-50 max-h-[320px] w-[248px] !rounded-2xl"
         >
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-2xs font-semibold uppercase tracking-wide text-content-subtle">
-              Project emoji
-            </span>
+          <PanelHeader className="px-3 py-2.5">
+            <PanelEyebrow>Project emoji</PanelEyebrow>
             <button
               type="button"
-              data-ui="emoji-reset"
+              data-ui="emoji-picker-reset"
               onClick={() => {
                 onChange(emojiForProject(projectName));
                 setOpen(false);
               }}
-              className="text-2xs text-content-muted transition-colors hover:text-content"
+              className="type-caption text-content-muted transition-colors hover:text-content"
             >
               Reset
             </button>
-          </div>
+          </PanelHeader>
 
-          <div className="max-h-[260px] overflow-y-auto pr-0.5">
+          <PanelBody className="p-2">
             {EMOJI_GROUPS.map((g) => (
-              <div key={g.label} className="mb-2 last:mb-0">
-                <span className="mb-1 block text-2xs font-medium text-content-subtle">{g.label}</span>
+              <PanelSection key={g.label} title={g.label} className="mb-3 last:mb-0">
                 <div className="grid grid-cols-5 gap-1">
                   {g.emoji.map((e) => (
                     <button
@@ -129,7 +127,7 @@ export function ProjectEmojiPicker({
                         setOpen(false);
                       }}
                       className={cn(
-                        "grid h-9 place-items-center rounded-lg text-lg leading-none transition-colors hover:bg-glass/15",
+                        "grid h-9 place-items-center rounded-lg type-glyph transition-colors hover:bg-glass/15",
                         e === value && "bg-brand/25 ring-1 ring-brand/60"
                       )}
                     >
@@ -137,10 +135,10 @@ export function ProjectEmojiPicker({
                     </button>
                   ))}
                 </div>
-              </div>
+              </PanelSection>
             ))}
-          </div>
-        </GlassPanel>
+          </PanelBody>
+        </Panel>
       )}
     </div>
   );

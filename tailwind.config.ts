@@ -37,6 +37,8 @@ const config: Config = {
           hover: "hsl(var(--brand-hover) / <alpha-value>)",
           soft: "hsl(var(--brand-soft) / <alpha-value>)",
           foreground: "hsl(var(--brand-foreground) / <alpha-value>)",
+          // label colour for a role-tinted glass ornament — see tokens.css
+          "on-glass": "hsl(var(--brand-on-glass) / <alpha-value>)",
         },
         accent: {
           DEFAULT: "hsl(var(--accent) / <alpha-value>)",
@@ -55,8 +57,12 @@ const config: Config = {
         danger: {
           DEFAULT: "hsl(var(--danger) / <alpha-value>)",
           soft: "hsl(var(--danger-soft) / <alpha-value>)",
+          "on-glass": "hsl(var(--danger-on-glass) / <alpha-value>)",
         },
-        master: "hsl(var(--master) / <alpha-value>)",
+        master: {
+          DEFAULT: "hsl(var(--master) / <alpha-value>)",
+          "on-glass": "hsl(var(--master-on-glass) / <alpha-value>)",
+        },
         ring: "hsl(var(--ring) / <alpha-value>)",
         // visionOS glass tint — for ad-hoc alpha use (bg-glass/10);
         // prefer the composed .glass* material classes for real ornaments.

@@ -51,6 +51,155 @@ Type scale: `text-2xs … text-4xl`. Fonts: `font-display` (Sora), `font-sans`
 (Inter), `font-mono`. Radii: `rounded-sm … rounded-2xl`. Shadows: `shadow-xs …
 shadow-pop`.
 
+## 2b. Text styles — `src/styles/globals.css`
+
+Never write `text-sm font-medium` directly. **Every text in the editor uses a
+named style.** Terra has two typographic worlds, and the prefix says which:
+
+| | |
+|---|---|
+| `type-*` | **Chrome** — UI in glass panels and on solid surfaces |
+| `type-scene-*` | **Scene** — diegetic type on the tilted 3D object label |
+
+A style sets the **face only** — family, size, weight, tracking, case. Colour
+stays a separate utility, so one style works across every tone:
+
+```tsx
+<p className="type-body text-content-muted">…</p>
+<h2 className="type-eyebrow text-content-subtle">Transform</h2>
+```
+
+`-strong` always means **one weight step up** from its base.
+
+### Chrome
+
+**Headings**
+
+| Style | Face | Use |
+|---|---|---|
+| `type-display` | Sora 2rem semibold | Hero · greeting |
+| `type-title` | Sora 1.25rem semibold | Page + asset titles |
+| `type-heading` | Sora 1.0625rem semibold | Section headings · dialog titles |
+| `type-subheading` | Inter 0.9375rem semibold | Panel titles |
+| `type-panel-title` | Inter 0.8125rem semibold | Panel header bar · chat author |
+| `type-card-title` | Inter 0.6875rem semibold | Asset card overlay label |
+
+**Body**
+
+| Style | Face | Use |
+|---|---|---|
+| `type-nav` | Inter 0.875rem | Sidebar + category rows |
+| `type-body-lg` | Inter 0.9375rem | Prominent body |
+| `type-body-lg-strong` | Inter 0.9375rem medium | Menu rows |
+| `type-body` | Inter 0.8125rem | **Default body** |
+| `type-body-strong` | Inter 0.8125rem medium | List rows · inline emphasis |
+| `type-body-dense` | Inter 0.75rem | Copy inside glass panels |
+
+**Labels**
+
+| Style | Face | Use |
+|---|---|---|
+| `type-label` | Inter 0.75rem medium | Control labels · tooltips |
+| `type-label-strong` | Inter 0.75rem semibold | Field labels · status pills |
+| `type-eyebrow` | Inter 0.6875rem semibold, uppercase | Section eyebrows |
+| `type-caption` | Inter 0.6875rem | Meta · hints · timestamps |
+| `type-caption-strong` | Inter 0.6875rem medium | Emphasised meta |
+
+**Controls** — buttons and badges own their type rather than borrowing body
+styles, because their scale is tied to control height, not to the prose ramp.
+`Button` and `Badge` apply these from their `size` variant; you should not need
+to set them by hand.
+
+| Style | Face | Use |
+|---|---|---|
+| `type-button-xs` | Inter 0.75rem medium | Compact buttons |
+| `type-button-sm` | Inter 0.8125rem medium | `Button size="sm"` |
+| `type-button` | Inter 0.875rem medium | `Button size="md"` |
+| `type-button-lg` | Inter 0.9375rem medium | `Button size="lg"` |
+| `type-badge-sm` | Inter 0.6875rem medium, uppercase | `Badge size="sm"` |
+| `type-badge` | Inter 0.75rem medium | `Badge size="md"` |
+
+**Numeric, mono, glyph**
+
+| Style | Face | Use |
+|---|---|---|
+| `type-numeric` | Inter 0.75rem, tabular | Transform fields |
+| `type-numeric-sm` | Inter 0.6875rem, tabular | Detail readouts |
+| `type-code` | Mono 0.8125rem | Token names · paths |
+| `type-code-sm` | Mono 0.6875rem | Inline codes · hex values |
+| `type-glyph` | 1.0625rem, no family | Emoji marks (falls through to the platform emoji face) |
+
+Sora is reserved for the largest chrome headings — editor panel titles are Inter.
+
+### Scene
+
+Built from the `--type-scene-*` tokens (tokens.css): light Inter (weight 300),
+tall-condensed via a synthetic `scaleY/scaleX` pair, because neither Inter nor
+Sora ships a width axis. Two tiers, two ratios — the title is squeezed harder
+(`1.28/0.8`) than the meta row (`1.18/0.86`) so the block reads as a hierarchy.
+
+| Style | Covers |
+|---|---|
+| `type-scene-title` | The object name (click to rename) |
+| `type-scene-nav` | The "← Back" affordance above it |
+| `type-scene-mark` | The ⓘ mark perched on the title's last letter |
+| `type-scene-badge` | Image · Master Object · Delete pills |
+| `type-scene-body` | The object's description paragraph |
+| `type-scene-readout` | The gizmo's live transform value |
+
+`type-scene-title` and `type-scene-nav` carry their own condensing transform.
+`type-scene-badge` / `-body` don't, because the transform sometimes belongs to a
+wrapping row — use `type-scene-plane` (or `-plane-top`) there. Colour and
+`textShadow` stay props: they adapt to scene luminance.
+
+### Rules
+
+- **Modifiers are fine, faces are not.** `tabular-nums`, `truncate`,
+  `leading-*`, `uppercase`, and colour utilities compose freely with a style.
+  A raw `text-*` or `font-*` next to a `type-*` class means the style is wrong —
+  fix the style or add a new role.
+- A Tailwind type utility beats a `type-*` class (utilities layer > components
+  layer). Never leave a stale `text-xs` next to a `type-body` — it silently
+  defeats the style.
+- Name a new role when a pattern recurs. Single-use deviations should be rare
+  enough to argue about.
+
+Live specimen of every style, chrome and scene: **`<app>/#glass`**.
+
+## 2c. Editor primitives — `src/features/editor/ui/`
+
+The parts every editor panel is assembled from. `@/components/ui` holds the
+solid-surface components; these are their glass-panel counterparts.
+
+| Component | Parts |
+|---|---|
+| `Panel` | `PanelHeader` · `PanelTitle` · `PanelSubtitle` · `PanelEyebrow` · `PanelClose` · `PanelBody` · `PanelFooter` · `PanelSection` · `PanelRow` · `PanelAction` |
+| `Field` | `TextInput` · `TextArea` · `Select` · `NumberInput` · `SearchInput` (sizes `sm`/`md`) |
+| `Pill` | tones `neutral · muted · brand · master · danger · success · outline`; `PillButton` for toggles |
+
+**Layer names.** Every part emits `data-ui="<instance>-<layer>"`, derived from
+the parent's `ui` prop through context — the same Figma ↔ code ↔ runtime
+identifier the glass ornaments use. `<Panel ui="object-info">` produces:
+
+```
+glass-object-info              ← surface (from GlassPanel)
+  object-info-header
+    object-info-title
+    object-info-close
+  object-info-body
+    object-info-section-details
+    object-info-row-position          (…-label, …-value)
+  object-info-footer
+```
+
+`<Field label="Asset Name">` derives `field-asset-name`, `-label`, `-input`.
+`<Pill ui="master">` derives `pill-master`, `-icon`, `-label`.
+
+**Rules.** No primitive sets a raw font size, weight or colour — type comes from
+the `type-*` styles (§2b), colour from the role tokens (§1). Input wells use the
+`.field-well` class so the recess is one token (`--field-well`), not a
+`bg-black/20` retyped per call site.
+
 ## 3. Components — `src/components/ui/`
 
 All accept `className` and forward refs; variants via `class-variance-authority`.
@@ -92,7 +241,8 @@ canvas** — glass ornaments are HTML/CSS, never Three.js objects. The material
 is defined entirely in tokens.
 
 **Tokens (`tokens.css`, `--glass-*`):** blur / saturate / brightness knobs, a
-white `--glass-tint`, a thickness ladder (`--glass-thin/regular/thick/chrome`),
+white `--glass-tint`, a thickness ladder
+(`--glass-thin/regular/thick/chrome/overlay`),
 lighting (`--glass-highlight` specular, `--glass-inner` milky glow,
 `--glass-border` hairline), ambient shadows (`--glass-shadow-sm/md/lg`), and
 interaction deltas (`--glass-hover`, `--glass-frost-selected`). Dark values
@@ -135,6 +285,55 @@ hand-roll glass.
 (via the `ui` prop), matching the Figma layer name and the `Glass<Thing>`
 component name — one identifier across Figma ↔ code ↔ runtime. Preview:
 `<app>/#glass` ([GlassPreview.tsx](src/features/editor/GlassPreview.tsx)).
+
+### The `overlay` tier — menus and popovers
+
+Every tier below `overlay` assumes glass floats over the **scene**. A menu
+doesn't: the emoji picker covers the left rail, the action menu covers the asset
+grid. Blur alone can't fix that — it smears a shape without removing it, so a
+glass button underneath stays perfectly readable at 4–8px.
+
+`overlay` therefore shares `--glass-thick`'s **body** — a popover and a docked
+panel sitting side by side have to read as the same surface, so the tier can't
+buy opacity — and spends its whole budget on **blur** instead
+(`--glass-blur-overlay`, 24px vs the panel's 8px).
+
+Used by the emoji picker, asset action menu, mesh-upload popover and generate
+menu. Reach for it whenever a surface covers other chrome rather than the scene.
+
+### Scene lighting variants
+
+Glass is translucent over a scene we don't control, so one tuning can't work
+everywhere. `EditorView` samples the rendered frame (~5×/sec, one readback,
+shared with the object-title flip) and stamps `data-scene` on the editor root;
+the `[data-scene]` blocks in tokens.css override the thickness ladder and edge
+treatment, and inherit to every ornament below.
+
+| Tier | Body | Edge | Why |
+|---|---|---|---|
+| `dark` | lighter (`regular` 0.22) | strong hairline `/0.30`, brighter specular | The ink has nothing to darken — pull the body back and let the edge define the shape |
+| `dim` | default (0.30) | `/0.18` | The tuned baseline |
+| `bright` | heavier (0.40) | softer `/0.14` | The light label is what's at risk; the edge already reads |
+
+The trade runs the same way in both directions but inverted: **body** hides the
+scene and protects the label, **edge** defines the panel's shape.
+
+Thresholds are calibrated against measured frames — the default desert HDRI sits
+at ~0.39 mean luminance, and a frame only passes ~0.6 if a blown-out sky fills
+it. Each bound has a dead band so a slow orbit doesn't oscillate the chrome.
+
+### Overlay layer order
+
+Two things make z-index non-obvious in the editor, so the order is set
+explicitly in `EditorView`:
+
+- `.glass` sets `backdrop-filter`, which **creates a stacking context** — a
+  popover's own `z-50` can't escape the bar it lives in.
+- An element with no `z-index` paints in DOM order no matter how high its
+  children reach.
+
+Top bar `z-40` (it owns the emoji popover) · left rail `z-20` · object title
+`z-20`. Docked panels sit in the root context at `z-30`/`z-40`.
 
 ## 6. Editor view — `src/features/editor/`
 
@@ -229,3 +428,5 @@ network/LLM — the responses are local so the flows are fully demonstrable.
   expose it in `tailwind.config.ts` under `colors`.
 - **New icon** → add one line to `iconRegistry`.
 - **New component** → build on tokens + `cva`, export from `components/ui/index.ts`.
+- **New text** → use a `type-*` style (§2b). Only add a new style if the role
+  genuinely doesn't exist yet — reach for an override utility first.

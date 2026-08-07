@@ -1,4 +1,5 @@
 import type { AssetType } from "./assets-data";
+import { OBJECT_SWATCHES } from "./scene-palette";
 
 /** Placeholder geometry variants (until real GLB assets are wired in). */
 export type ObjectShape = "sphere" | "cylinder" | "cone" | "torus" | "capsule" | "ico" | "dodec";
@@ -37,17 +38,10 @@ export const SOURCE_LABEL: Record<AssetType, string> = {
   video: "Video",
 };
 
-/** Base-colour swatches for the Texture → Color tab. */
-export const OBJECT_COLORS = [
-  "#9a958f", // warm gray (default)
-  "#c98a5a", // terracotta
-  "#6f7bd0", // indigo
-  "#7fae7f", // moss
-  "#d8b98a", // sand
-  "#c77fb0", // orchid
-  "#2f6f7a", // teal
-  "#e5675f", // rose
-];
+/** Base-colour swatches for the Texture → Color tab. Re-exported from the
+ *  scene palette, which is also what the AI assistant resolves colour words
+ *  against — one list, so "make it red" and the red swatch always agree. */
+export const OBJECT_COLORS = OBJECT_SWATCHES;
 
 let counter = 0;
 

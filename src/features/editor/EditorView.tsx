@@ -20,6 +20,23 @@ import type { AssetType } from "./assets-data";
 
 type GizmoMode = "translate" | "rotate" | "scale";
 
+/** How bright the rendered scene is behind the chrome. Drives the glass
+ *  lighting variants — see the `[data-scene]` blocks in tokens.css. */
+export type SceneTier = "dark" | "dim" | "bright";
+
+/** Transform setting ↔ gizmo handles. Material settings have no gizmo, so the
+ *  map is partial and a miss simply leaves the current mode alone. */
+const SETTING_GIZMO: Partial<Record<SettingKey, GizmoMode>> = {
+  position: "translate",
+  rotation: "rotate",
+  scale: "scale",
+};
+const GIZMO_SETTING: Record<GizmoMode, SettingKey> = {
+  translate: "position",
+  rotate: "rotation",
+  scale: "scale",
+};
+
 /**
  * EditorView — the default project view. Full-bleed Three.js viewport with
  * floating glass chrome. Assets drag/drop from the library into the scene;
@@ -69,9 +86,26 @@ export function EditorView({
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
   const [chatOpen, setChatOpen] = useState(false);
   const [titleDark, setTitleDark] = useState(false);
+  const [sceneTier, setSceneTier] = useState<SceneTier>("dim");
   const [infoOpen, setInfoOpen] = useState(false);
 
   const selectTool = (t: RailTool) => setTool((cur) => (cur === t ? null : t));
+
+  // The Transform rows and the viewport gizmo are ONE control, driven both ways:
+  // picking Position/Rotation/Scale switches the gizmo to the matching handles,
+  // and switching the gizmo highlights the row + opens its numeric control.
+  // Without the pairing the two can disagree — the panel says Rotation while the
+  // viewport still shows translate arrows.
+  const selectSetting = (k: SettingKey) => {
+    setActiveSetting(k);
+    const mode = SETTING_GIZMO[k];
+    if (mode) setGizmoMode(mode);
+  };
+
+  const selectGizmoMode = (m: GizmoMode) => {
+    setGizmoMode(m);
+    setActiveSetting(GIZMO_SETTING[m]);
+  };
 
   const deselect = () => {
     scene.select(null);
@@ -80,35 +114,74 @@ export function EditorView({
     setInfoOpen(false);
   };
 
-  // While an object is focused, sample the scene behind the title (upper-left)
-  // and flip the title between light/dark so it reads on any background.
+  // Sample the rendered frame twice per tick, from one readback:
+  //
+  //   · upper-left region → flips the object title light/dark so it reads
+  //     against whatever is directly behind it.
+  //   · whole frame       → picks the glass lighting tier. Glass is translucent
+  //     over an unpredictable scene, so a single tuning can't work everywhere:
+  //     over a dark scene the dark ink has nothing to darken and the panel reads
+  //     as an edgeless slab; over a bright one the light label loses contrast.
+  //     The tier drives the --glass-* overrides in tokens.css.
+  //
+  // Runs whenever the canvas exists — the glass tier matters even with nothing
+  // selected, which is why this no longer early-returns on `selectedId`.
   const selectedId = scene.selectedId;
   useEffect(() => {
-    if (!selectedId) return;
     const off = document.createElement("canvas");
     off.width = 16;
     off.height = 10;
     const ctx = off.getContext("2d", { willReadFrequently: true });
+
+    /** Mean relative luminance of whatever was last drawn into `off`. */
+    const readLum = () => {
+      const { data } = ctx!.getImageData(0, 0, 16, 10);
+      let sum = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        sum += (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) * (data[i + 3] / 255);
+      }
+      return sum / (data.length / 4) / 255;
+    };
+
     let dark = titleDark;
+    let tier = sceneTier;
     const id = window.setInterval(() => {
       const dom = cameraRef.current?.dom as HTMLCanvasElement | undefined;
       if (!dom || !ctx || !dom.width) return;
       try {
+        // 1 — region behind the title
         ctx.drawImage(dom, 0, dom.height * 0.2, dom.width * 0.42, dom.height * 0.4, 0, 0, 16, 10);
-        const { data } = ctx.getImageData(0, 0, 16, 10);
-        let sum = 0;
-        const n = data.length / 4;
-        for (let i = 0; i < data.length; i += 4) {
-          sum += (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) * (data[i + 3] / 255);
-        }
-        const lum = sum / n / 255;
+        const titleLum = readLum();
         // hysteresis to avoid flicker near the threshold
-        if (lum > 0.58 && !dark) {
+        if (titleLum > 0.58 && !dark) {
           dark = true;
           setTitleDark(true);
-        } else if (lum < 0.48 && dark) {
+        } else if (titleLum < 0.48 && dark) {
           dark = false;
           setTitleDark(false);
+        }
+
+        // 2 — whole frame, for the glass tier.
+        //
+        // Thresholds are calibrated against real frames, not intuition: the
+        // default desert HDRI measures ~0.39 mean luminance, and glass at the
+        // `dim` tuning is already hard to read over it. A frame only exceeds
+        // ~0.6 if a blown-out sky fills it, so anchoring `bright` up there would
+        // mean the tier never fired in practice.
+        //
+        // Each bound has a dead band (enter vs stay) so a slow orbit across a
+        // boundary doesn't oscillate the entire chrome.
+        ctx.drawImage(dom, 0, 0, dom.width, dom.height, 0, 0, 16, 10);
+        const sceneLum = readLum();
+        const next: SceneTier =
+          sceneLum > (tier === "bright" ? 0.3 : 0.36)
+            ? "bright"
+            : sceneLum < (tier === "dark" ? 0.21 : 0.15)
+              ? "dark"
+              : "dim";
+        if (next !== tier) {
+          tier = next;
+          setSceneTier(next);
         }
       } catch {
         /* canvas not ready */
@@ -169,6 +242,9 @@ export function EditorView({
   return (
     <div
       data-ui="editor-view"
+      /* Glass retunes itself to the scene behind it — the --glass-* overrides
+         for each tier live in tokens.css and inherit to every ornament below. */
+      data-scene={sceneTier}
       className="fixed inset-0 overflow-hidden bg-canvas"
       onDragOver={(e) => {
         e.preventDefault();
@@ -197,13 +273,19 @@ export function EditorView({
 
       {/* Overlay chrome */}
       <div className="pointer-events-none absolute inset-0 z-10">
-        <div className="absolute left-4 top-4">
+        {/* Layer order inside the overlay is explicit, because two things make
+            it non-obvious: `.glass` sets backdrop-filter, which creates a
+            stacking context — so a popover's own z-index can't escape its bar —
+            and an element with no z-index paints in DOM order regardless of how
+            high its children reach. The top bar owns the emoji popover, so it
+            has to sit above the rail and the object title. */}
+        <div className="absolute left-4 top-4 z-40">
           <EditorTopBar projectName={projectName} />
         </div>
 
         <div
           className={cn(
-            "absolute left-4 top-28 transition-opacity duration-300",
+            "absolute left-4 top-28 z-20 transition-opacity duration-300",
             selected ? "pointer-events-none opacity-0" : "opacity-100"
           )}
         >
@@ -266,9 +348,9 @@ export function EditorView({
           object={selected}
           group={editTab === "object" ? "Transform" : "Material"}
           active={activeSetting}
-          onSelect={setActiveSetting}
+          onSelect={selectSetting}
           gizmoMode={gizmoMode}
-          setGizmoMode={setGizmoMode}
+          setGizmoMode={selectGizmoMode}
         />
       )}
       {selected && infoOpen && (

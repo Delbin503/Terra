@@ -40,14 +40,18 @@ export function ObjectToolbar({
           aria-pressed={t.master ? isMaster : undefined}
           onClick={t.onClick}
           className={cn(
-            "glass glass-interactive flex min-w-[76px] flex-col items-center gap-1 !rounded-2xl px-4 py-2.5 text-xs font-medium",
+            "type-label glass glass-interactive flex min-w-[76px] flex-col items-center gap-1 !rounded-2xl px-4 py-2.5",
+            // Active tiles tint via .glass-role (globals.css) rather than a
+            // `bg-<role>/x` utility: that sets background-color, which replaces
+            // the glass ink and leaves the label — the same role colour — sitting
+            // on a wash of itself over the scene.
             t.master
               ? // Master Object owns yellow, on or off, so its role stays readable.
                 isMaster
-                ? "!border-master/70 !bg-master/25 text-master"
+                ? "glass-role glass-role-master text-master-on-glass"
                 : "text-master/70 hover:text-master"
               : t.active
-                ? "!border-brand/70 !bg-brand/30 text-brand"
+                ? "glass-role glass-role-brand text-brand-on-glass"
                 : t.danger
                   ? "text-danger"
                   : "text-content-muted hover:text-content"

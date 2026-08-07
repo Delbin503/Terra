@@ -82,7 +82,7 @@ export function HomePage() {
             {communityWorlds.map((w) => (
               <button
                 key={w.id}
-                className="relative aspect-[16/11] overflow-hidden rounded-xl border border-line/10 text-left after:absolute after:inset-0 after:bg-gradient-to-t after:from-black/50 after:to-transparent"
+                className="relative aspect-[16/11] overflow-hidden rounded-xl border border-line/10 text-left after:absolute after:inset-0 after:scrim-soft"
                 style={{ background: w.gradient }}
               >
                 <span className="absolute bottom-2.5 left-3 z-10 text-sm font-medium text-white">

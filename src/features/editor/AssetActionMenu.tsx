@@ -50,7 +50,7 @@ export function AssetActionMenu({
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <GlassPanel
         ui="asset-action-menu"
-        thickness="thick"
+        thickness="overlay"
         role="menu"
         style={{ left, top }}
         className="fixed z-50 w-56 !rounded-2xl p-1.5"
@@ -66,7 +66,7 @@ export function AssetActionMenu({
               onClose();
             }}
             className={
-              "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors " +
+              "type-body flex w-full items-center gap-3 rounded-lg px-3 py-2.5 transition-colors" +
               (it.danger
                 ? "text-danger hover:bg-danger/10"
                 : "text-content-muted hover:bg-glass/12 hover:text-content") +

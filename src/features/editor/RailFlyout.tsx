@@ -69,7 +69,7 @@ function FlyoutButton({
     >
       <Icon name={item.icon} size={20} className={cn(item.accent && "text-brand")} strokeWidth={1.9} />
       {hover && (
-        <span className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-md bg-surface-overlay px-2 py-1 text-xs font-medium text-content shadow-pop">
+        <span className="type-label pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-md bg-surface-overlay px-2 py-1 text-content shadow-pop">
           {item.label}
         </span>
       )}

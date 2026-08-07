@@ -2,21 +2,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useGLTF } from "@react-three/drei";
 import { BackSide, type Object3D } from "three";
 import type { ObjectShape, SceneObject } from "./scene-types";
+import { OUTLINE } from "./scene-palette";
 
 const D2R = Math.PI / 180;
 
-/** Outline colours. These are three.js materials, not CSS, so they can't read the
- *  `--master` token — MASTER is the literal value of `hsl(45 93% 58%)`, kept in
- *  sync with tokens.css by hand. */
+/** Outline colours come from the scene palette — three.js materials can't read
+ *  CSS tokens, and the outline must stay mode-stable regardless. */
 /** How far the outline shell is inflated past the mesh. It's a uniform scale, so
  *  the stroke reads proportionally to the object's on-screen size — keep it small,
  *  since focus mode zooms the object to fill the frame and exaggerates it. */
 const OUTLINE_SCALE = 1.014;
 
-const OUTLINE_SELECTED = "#ffffff";
-const OUTLINE_HOVER = "#d8d8d8";
-const OUTLINE_MASTER = "#f8c630";
-const OUTLINE_MASTER_DIM = "#c79c25";
+const OUTLINE_SELECTED = OUTLINE.selected.css;
+const OUTLINE_HOVER = OUTLINE.hover.css;
+const OUTLINE_MASTER = OUTLINE.master.css;
+const OUTLINE_MASTER_DIM = OUTLINE.masterDim.css;
 
 /** Geometry for a placeholder shape (all roughly 1m so transforms stay consistent). */
 function ShapeGeometry({ shape }: { shape: ObjectShape }) {

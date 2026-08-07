@@ -84,7 +84,7 @@ export function SettingControl({
             style={{ touchAction: "none" }}
           >
             <Icon name="drag" size={13} className="shrink-0 text-content-subtle" />
-            <span className="truncate text-xs font-medium text-content">{LABEL[setting]}</span>
+            <span className="type-label truncate text-content">{LABEL[setting]}</span>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {setting === "scale" && (
@@ -92,7 +92,7 @@ export function SettingControl({
                 type="button"
                 onClick={() => setUniform((u) => !u)}
                 className={cn(
-                  "flex items-center gap-1 rounded-full border px-2 py-0.5 text-2xs font-medium transition-colors",
+                  "type-caption-strong flex items-center gap-1 rounded-full border px-2 py-0.5 transition-colors",
                   uniform ? "border-brand/50 bg-brand/12 text-brand" : "border-glass/14 text-content-muted hover:text-content"
                 )}
               >
@@ -196,8 +196,8 @@ export function SettingControl({
                 />
               </span>
               <span className="min-w-0">
-                <span className="block text-xs font-medium text-content">Custom</span>
-                <span className="block text-2xs uppercase tabular-nums text-content-subtle">{object.color}</span>
+                <span className="type-label block text-content">Custom</span>
+                <span className="type-eyebrow block tabular-nums text-content-subtle">{object.color}</span>
               </span>
             </label>
           </div>

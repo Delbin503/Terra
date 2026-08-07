@@ -1,7 +1,11 @@
 import { useState } from "react";
-import { GlassPanel } from "@/components/glass";
 import { Button } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import {
+  Panel, PanelHeader, PanelTitle, PanelSubtitle, PanelClose, PanelBody,
+  PanelFooter, PanelSection, PanelRow, PanelAction, Pill,
+  Field, TextInput, TextArea, Select,
+} from "./ui";
 import { AssetThumb } from "./AssetThumb";
 import { deriveDetails, type Asset, type AssetType } from "./assets-data";
 
@@ -33,34 +37,19 @@ export function AssetDetailsPanel({
   };
 
   return (
-    <GlassPanel
-      ui="asset-details-panel"
-      thickness="thick"
-      className="pointer-events-auto fixed bottom-6 right-6 top-6 z-30 flex w-[440px] max-w-[calc(100vw-3rem)] flex-col !rounded-3xl"
+    <Panel
+      ui="asset-details"
+      className="fixed bottom-6 right-6 top-6 z-30 w-[440px] max-w-[calc(100vw-3rem)]"
     >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 border-b border-glass/10 p-5">
+      <PanelHeader align="start" className="p-5">
         <div className="min-w-0">
-          <h2 className="truncate font-display text-xl font-bold text-content">
-            {editing ? "Edit Asset" : asset.name}
-          </h2>
-          {!editing && (
-            <p className="mt-1 text-xs text-content-subtle">Created {d.createdAt} · {d.owner}</p>
-          )}
+          <PanelTitle className="type-title">{editing ? "Edit Asset" : asset.name}</PanelTitle>
+          {!editing && <PanelSubtitle>Created {d.createdAt} · {d.owner}</PanelSubtitle>}
         </div>
-        <button
-          type="button"
-          aria-label="Close details"
-          data-ui="details-close"
-          onClick={onClose}
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-content-muted hover:bg-glass/15 hover:text-content"
-        >
-          <Icon name="close" size={16} />
-        </button>
-      </div>
+        <PanelClose label="Close details" onClick={onClose} />
+      </PanelHeader>
 
-      {/* Body */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-5">
+      <PanelBody className="p-5">
         {/* Preview */}
         <div className="mb-5 aspect-[16/10] overflow-hidden rounded-2xl ring-1 ring-glass/10">
           <AssetThumb type={type} seed={asset.seed} />
@@ -78,103 +67,71 @@ export function AssetDetailsPanel({
           />
         ) : (
           <>
-            <Section title="Description">
-              <p className="text-sm leading-relaxed text-content">{d.description}</p>
-            </Section>
+            <PanelSection title="Description">
+              <p className="type-body leading-relaxed text-content">{d.description}</p>
+            </PanelSection>
 
-            <Section title="Smart Tags">
+            <PanelSection title="Smart Tags">
               <Chips items={d.smartTags} smart />
-            </Section>
+            </PanelSection>
 
-            <Section title="Manual Tags">
+            <PanelSection title="Manual Tags">
               <Chips items={d.manualTags} />
-            </Section>
+            </PanelSection>
 
             <div className="my-4 h-px bg-glass/10" />
 
-            <h3 className="mb-2 text-md font-semibold text-content">Details</h3>
-            <dl className="text-sm">
-              <Row k="Saved In" v={d.savedIn} />
-              <Row k="Type" v={d.typeLabel} />
-              <Row k="Format" v={<span className="rounded-md bg-glass/12 px-2 py-0.5 text-xs font-semibold">{d.format}</span>} />
-              <Row k="Size" v={d.size} />
-              <Row k="Dimensions" v={d.dimensions} />
-              <Row k="Owner" v={d.owner} />
-              <Row k="Date Created" v={d.createdAt} />
-            </dl>
+            <PanelSection title="Details">
+              <dl>
+                <PanelRow label="Saved In" value={d.savedIn} />
+                <PanelRow label="Type" value={d.typeLabel} />
+                <PanelRow label="Format" value={<Pill ui="format">{d.format}</Pill>} />
+                <PanelRow label="Size" value={d.size} />
+                <PanelRow label="Dimensions" value={d.dimensions} />
+                <PanelRow label="Owner" value={d.owner} />
+                <PanelRow label="Date Created" value={d.createdAt} />
+              </dl>
+            </PanelSection>
 
             <div className="mt-5 flex flex-col">
-              <button
-                type="button"
-                data-ui="details-edit"
-                onClick={() => setEditing(true)}
-                className="flex items-center gap-3 border-b border-glass/8 py-3.5 text-md font-medium text-content transition-colors hover:text-brand"
-              >
-                <Icon name="edit" size={18} />
+              <PanelAction icon="edit" onClick={() => setEditing(true)}>
                 Edit Asset
-              </button>
-              <button
-                type="button"
-                data-ui="details-delete"
-                onClick={() => onDelete(asset)}
-                className="flex items-center gap-3 py-3.5 text-md font-medium text-danger transition-colors hover:brightness-110"
-              >
-                <Icon name="trash" size={18} />
+              </PanelAction>
+              <PanelAction icon="trash" tone="danger" onClick={() => onDelete(asset)}>
                 Delete
-              </button>
+              </PanelAction>
             </div>
           </>
         )}
-      </div>
+      </PanelBody>
 
-      {/* Edit footer */}
       {editing && (
-        <div className="flex gap-3 border-t border-glass/10 p-4">
-          <Button variant="secondary" className="h-11 flex-1 !rounded-xl" onClick={() => setEditing(false)}>
+        <PanelFooter className="gap-3 p-4">
+          <Button variant="secondary" size="lg" className="flex-1 !rounded-xl" onClick={() => setEditing(false)}>
             Cancel
           </Button>
-          <Button variant="brand" className="h-11 flex-1 !rounded-xl" onClick={save} data-ui="details-save">
+          <Button variant="brand" size="lg" className="flex-1 !rounded-xl" onClick={save} data-ui="details-save">
             Save Changes
           </Button>
-        </div>
+        </PanelFooter>
       )}
-    </GlassPanel>
+    </Panel>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-5">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-content-muted">{title}</h3>
-      {children}
-    </div>
-  );
-}
 
 function Chips({ items, smart }: { items: string[]; smart?: boolean }) {
   return (
     <div className="flex flex-wrap gap-2">
       {items.map((t) => (
-        <span
-          key={t}
-          className="flex items-center gap-1.5 rounded-lg border border-glass/12 bg-glass/6 px-2.5 py-1.5 text-xs text-content"
-        >
-          {smart && <Icon name="generate" size={12} className="text-brand" />}
+        <Pill key={t} ui={t} size="md" icon={smart ? "generate" : undefined}>
           {t}
-        </span>
+        </Pill>
       ))}
     </div>
   );
 }
 
-function Row({ k, v }: { k: string; v: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between border-b border-glass/6 py-2.5 last:border-0">
-      <dt className="text-content-subtle">{k}</dt>
-      <dd className="font-medium text-content">{v}</dd>
-    </div>
-  );
-}
 
 function EditForm({
   name,
@@ -193,23 +150,23 @@ function EditForm({
   setDescription: (v: string) => void;
   smartTags: string[];
 }) {
-  const field = "w-full rounded-xl border border-glass/14 bg-black/20 px-3.5 py-3 text-sm text-content outline-none focus:border-brand/60";
   return (
     <div className="flex flex-col gap-4">
       <Field label="Asset Name" required>
-        <input className={field} value={name} onChange={(e) => setName(e.target.value)} data-ui="edit-name" />
+        <TextInput size="md" value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
       <Field label="Type" required>
-        <select className={field} value={type} onChange={(e) => setType(e.target.value as AssetType)}>
+        <Select size="md" value={type} onChange={(e) => setType(e.target.value as AssetType)}>
           <option value="image">Image</option>
           <option value="environment">Environment</option>
           <option value="video">Video</option>
           <option value="mesh">3D Mesh</option>
-        </select>
+        </Select>
       </Field>
       <Field label="Description" required>
-        <textarea
-          className={field + " min-h-[110px] resize-y leading-relaxed"}
+        <TextArea
+          size="md"
+          className="min-h-[110px]"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
@@ -218,7 +175,7 @@ function EditForm({
         <Chips items={smartTags} smart />
       </Field>
       <Field label="Manual Tags" required>
-        <div className="flex items-center gap-2 rounded-xl border border-dashed border-glass/20 bg-black/15 px-3.5 py-3 text-sm text-content-subtle">
+        <div data-ui="field-manual-tags-add" className="field-well type-body flex items-center gap-2 rounded-xl border border-dashed border-glass/20 px-3.5 py-3 text-content-subtle">
           <Icon name="create" size={15} />
           Add new tag
         </div>
@@ -227,13 +184,3 @@ function EditForm({
   );
 }
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-semibold text-content-muted">
-        {label} {required && <span className="text-brand">*</span>}
-      </span>
-      {children}
-    </label>
-  );
-}

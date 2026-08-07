@@ -10,6 +10,7 @@ import {
   type Mesh,
   type MeshBasicMaterial,
 } from "three";
+import { AXIS } from "./scene-palette";
 
 /**
  * UNREAL ENGINE 5.8 GIZMO SKIN
@@ -48,8 +49,14 @@ import {
  */
 
 /** UE axis colours — the docs specify red/green/blue; lightly desaturated from
- *  pure primaries so they sit better against a lit scene. */
-const AXIS_COLOR = { X: 0xe83a3a, Y: 0x46bf46, Z: 0x3a6ee8 } as const;
+ *  pure primaries so they sit better against a lit scene. Sourced from the
+ *  scene palette so the viewport handles and the Position field prefixes can
+ *  never drift apart again. */
+const AXIS_COLOR = {
+  X: AXIS.X.three,
+  Y: AXIS.Y.three,
+  Z: AXIS.Z.three,
+} as const;
 
 const PLANE_OFFSET = 0.28; // stock 0.15 — "further from center"
 const PLANE_SIZE = 0.13; // stock 0.295

@@ -45,7 +45,7 @@ export function DialogTitle({
 }: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>) {
   return (
     <DialogPrimitive.Title
-      className={cn("font-display text-lg font-semibold", className)}
+      className={cn("type-heading", className)}
       {...props}
     />
   );
@@ -57,7 +57,7 @@ export function DialogDescription({
 }: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description>) {
   return (
     <DialogPrimitive.Description
-      className={cn("text-sm text-content-muted", className)}
+      className={cn("type-body text-content-muted", className)}
       {...props}
     />
   );

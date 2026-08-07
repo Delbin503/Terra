@@ -32,7 +32,7 @@ export function AssetCard({
         <div className="absolute inset-0 grid place-items-center bg-black/45 text-center">
           <div className="flex flex-col items-center gap-1.5 px-2">
             <Icon name="spinner" size={18} className="animate-spin text-brand" />
-            <span className="text-2xs font-semibold leading-tight text-content">{asset.statusLabel}</span>
+            <span className="type-card-title text-content">{asset.statusLabel}</span>
           </div>
         </div>
       </div>
@@ -50,7 +50,7 @@ export function AssetCard({
         <div className="absolute inset-0 opacity-80">
           <AssetThumb type="mesh" seed={asset.seed} />
         </div>
-        <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 bg-gradient-to-t from-black/70 to-transparent p-2 pt-6 text-xs font-semibold text-success">
+        <span className="type-label-strong absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 scrim-strong p-2 pt-6 text-success">
           <Icon name="check" size={13} strokeWidth={3} />
           Ready — pick views
         </span>
@@ -119,9 +119,9 @@ export function AssetCard({
       </button>
 
       {/* Name + hover quick-info */}
-      <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-2 pt-6">
-        <span className="block truncate text-xs font-medium text-white">{asset.name}</span>
-        <span className="mt-0.5 hidden truncate text-2xs text-white/70 group-hover:block">
+      <span className="absolute inset-x-0 bottom-0 scrim-strong p-2 pt-6">
+        <span className="type-label block truncate text-white">{asset.name}</span>
+        <span className="type-caption mt-0.5 hidden truncate text-white/70 group-hover:block">
           {details.typeLabel} · {details.smartTags[0]}
         </span>
       </span>

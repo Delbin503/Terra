@@ -48,7 +48,7 @@ export function Sidebar({
     >
       {/* Brand */}
       <div className={cn("flex items-center px-1.5", collapsed && "justify-center")}>
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand to-terra-700 font-display text-base font-bold text-white">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg gradient-brand-warm font-display text-base font-bold text-white">
           T
         </div>
         {!collapsed && (

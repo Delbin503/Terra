@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
-import { GlassPanel } from "@/components/glass";
 import { Icon, type IconName } from "@/components/icons";
+import { Panel, PanelHeader, PanelEyebrow, PanelBody } from "./ui";
 import type { SceneObject } from "./scene-types";
 
 export type SettingKey =
@@ -73,13 +73,13 @@ export function ObjectPropertiesPanel({
   const items = SETTINGS.filter((s) => s.group === group);
 
   return (
-    <GlassPanel
-      ui="object-properties-panel"
+    <Panel
+      ui="object-properties"
       thickness="regular"
-      className="pointer-events-auto fixed bottom-6 right-6 z-30 flex max-h-[34vh] w-[248px] flex-col !rounded-2xl"
+      className="fixed bottom-6 right-6 z-30 max-h-[34vh] w-[248px] !rounded-2xl"
     >
-      <div className="flex items-center justify-between border-b border-glass/10 px-3 py-2.5">
-        <span className="text-2xs font-semibold uppercase tracking-wide text-content-subtle">{group}</span>
+      <PanelHeader className="px-3 py-2.5">
+        <PanelEyebrow>{group}</PanelEyebrow>
         {group === "Transform" && (
           <Segmented
             value={gizmoMode}
@@ -91,9 +91,9 @@ export function ObjectPropertiesPanel({
             ]}
           />
         )}
-      </div>
+      </PanelHeader>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <PanelBody className="p-2">
         {items.map((s) => {
           const sum = summarize(object, s.key);
           return (
@@ -103,7 +103,7 @@ export function ObjectPropertiesPanel({
               data-ui={`prop-${s.key}`}
               onClick={() => onSelect(s.key)}
               className={cn(
-                "group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
+                "type-body group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 transition-colors",
                 active === s.key ? "bg-glass/14 text-content" : "text-content-muted hover:bg-glass/8 hover:text-content"
               )}
             >
@@ -113,13 +113,13 @@ export function ObjectPropertiesPanel({
               {sum.swatch ? (
                 <span className="h-4 w-4 rounded-full ring-1 ring-glass/20" style={{ background: sum.swatch }} />
               ) : (
-                <span className="text-2xs tabular-nums text-content-subtle">{sum.text}</span>
+                <span className="type-numeric-sm text-content-subtle">{sum.text}</span>
               )}
             </button>
           );
         })}
-      </div>
-    </GlassPanel>
+      </PanelBody>
+    </Panel>
   );
 }
 

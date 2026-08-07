@@ -212,10 +212,10 @@ export function AssetLibrary({ onClose, onPlace }: { onClose: () => void; onPlac
                 placeholder={
                   genMode === "image" ? "Describe the image to generate…" : genMode === "3d" ? "Describe the 3D model to generate…" : "Search assets"
                 }
-                className="min-w-0 flex-1 bg-transparent text-sm text-content outline-none placeholder:text-content-subtle"
+                className="type-body min-w-0 flex-1 bg-transparent text-content outline-none placeholder:text-content-subtle"
               />
               {genMode ? (
-                <span className="hidden shrink-0 items-center gap-1 rounded-md border border-brand/35 px-1.5 py-0.5 text-2xs text-brand sm:flex">↵ Generate</span>
+                <span className="type-caption hidden shrink-0 items-center gap-1 rounded-md border border-brand/35 px-1.5 py-0.5 text-brand sm:flex">↵ Generate</span>
               ) : query ? (
                 <button type="button" aria-label="Clear search" onClick={() => setQuery("")} className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-content-muted hover:bg-glass/15 hover:text-content">
                   <Icon name="close" size={13} />
@@ -237,7 +237,7 @@ export function AssetLibrary({ onClose, onPlace }: { onClose: () => void; onPlac
                 {genMenuOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setGenMenuOpen(false)} />
-                    <GlassPanel ui="generate-menu" thickness="thick" className="absolute right-0 top-[calc(100%+8px)] z-50 w-40 !rounded-xl p-1.5">
+                    <GlassPanel ui="generate-menu" thickness="overlay" className="absolute right-0 top-[calc(100%+8px)] z-50 w-40 !rounded-xl p-1.5">
                       <GenItem icon="input-2d" label="Image" onClick={() => armGenerate("image")} />
                       <GenItem icon="input-3d" label="3D" onClick={() => armGenerate("3d")} />
                     </GlassPanel>
@@ -265,10 +265,10 @@ export function AssetLibrary({ onClose, onPlace }: { onClose: () => void; onPlac
           {/* Selection footer */}
           {selected.size > 0 && (
             <div data-ui="asset-selection-bar" className="flex items-center gap-3 border-t border-glass/10 p-3">
-              <span className="text-sm text-content-muted">
-                <b className="font-semibold text-content">{selected.size}</b> selected
+              <span className="type-body text-content-muted">
+                <b className="type-body-strong text-content">{selected.size}</b> selected
               </span>
-              <button onClick={() => setSelected(new Set())} className="text-sm text-content-muted hover:text-content">
+              <button onClick={() => setSelected(new Set())} className="type-body text-content-muted hover:text-content">
                 Clear
               </button>
               <Button
@@ -321,7 +321,7 @@ export function AssetLibrary({ onClose, onPlace }: { onClose: () => void; onPlac
       )}
 
       {toast && (
-        <div className="pointer-events-none fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-full bg-surface-overlay px-4 py-2 text-sm text-content shadow-pop">
+        <div className="type-body pointer-events-none fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-full bg-surface-overlay px-4 py-2 text-content shadow-pop">
           {toast}
         </div>
       )}
@@ -335,7 +335,7 @@ function GenItem({ icon, label, onClick }: { icon: Parameters<typeof Icon>[0]["n
       type="button"
       onClick={onClick}
       data-ui={`generate-${label.toLowerCase()}`}
-      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-content-muted transition-colors hover:bg-glass/12 hover:text-content"
+      className="type-body flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-content-muted transition-colors hover:bg-glass/12 hover:text-content"
     >
       <Icon name={icon} size={16} />
       {label}
@@ -362,7 +362,7 @@ function CatButton({
       onClick={onClick}
       data-ui={`asset-cat-${label.toLowerCase().replace(/\s+/g, "-")}`}
       className={cn(
-        "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-base transition-colors",
+        "type-nav group relative flex items-center gap-3 rounded-lg px-3 py-2 transition-colors",
         active ? "bg-glass/14 text-content" : "text-content-muted hover:bg-glass/8 hover:text-content"
       )}
     >
@@ -380,7 +380,7 @@ function SubButton({ icon, label, onClick }: { icon: Parameters<typeof Icon>[0][
       type="button"
       onClick={onClick}
       data-ui={`asset-sub-${label.toLowerCase().replace(/\s+/g, "-")}`}
-      className="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm text-content-muted transition-colors hover:bg-glass/8 hover:text-content"
+      className="type-body flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-content-muted transition-colors hover:bg-glass/8 hover:text-content"
     >
       <Icon name={icon} size={15} />
       {label}
@@ -396,7 +396,7 @@ function EmptyState({ category, query, onUpload }: { category: CategoryId; query
       <span className="grid h-14 w-14 place-items-center rounded-2xl bg-glass/8 text-content-subtle">
         <Icon name={isUploads || isMeshes ? "upload" : "search"} size={24} />
       </span>
-      <p className="max-w-xs text-sm text-content-muted">
+      <p className="type-body max-w-xs text-content-muted">
         {query
           ? `No assets match “${query}”.`
           : isMeshes

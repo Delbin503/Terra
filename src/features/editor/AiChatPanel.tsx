@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { GlassPanel } from "@/components/glass";
 import { Icon } from "@/components/icons";
 import { AssetThumb } from "./AssetThumb";
+import { COLOR_WORDS } from "./scene-palette";
 import type { AssetType } from "./assets-data";
 import type { SceneApi } from "./useScene";
 
@@ -19,21 +20,9 @@ interface Msg {
   generating?: boolean;
 }
 
-const COLORS: Record<string, string> = {
-  red: "#e5675f",
-  orange: "#c98a5a",
-  yellow: "#e6c15f",
-  green: "#7fae7f",
-  teal: "#2f6f7a",
-  blue: "#6f7bd0",
-  purple: "#c77fb0",
-  pink: "#e08ab0",
-  brown: "#8a6a4a",
-  white: "#e8e4de",
-  black: "#2a2a2a",
-  gray: "#9a958f",
-  grey: "#9a958f",
-};
+/** Colour words the assistant understands — sourced from the scene palette so
+ *  every word it can resolve is a colour the Color tab can also produce. */
+const COLORS = COLOR_WORDS;
 
 const SUGGESTIONS = ["Add a chair", "Generate a wooden crate", "Make it metallic", "Warmer lighting"];
 
@@ -178,8 +167,8 @@ export function AiChatPanel({ scene, onClose }: { scene: SceneApi; onClose: () =
           <Icon name="ai" size={16} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-content">AI Assistant</p>
-          <p className="text-2xs text-content-subtle">Build & edit the scene by chatting</p>
+          <p className="type-panel-title text-content">AI Assistant</p>
+          <p className="type-caption text-content-subtle">Build & edit the scene by chatting</p>
         </div>
         <button
           type="button"
@@ -198,7 +187,7 @@ export function AiChatPanel({ scene, onClose }: { scene: SceneApi; onClose: () =
           <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
             <div
               className={cn(
-                "max-w-[85%] rounded-2xl px-3 py-2 text-sm",
+                "type-body max-w-[85%] rounded-2xl px-3 py-2",
                 m.role === "user" ? "bg-brand text-brand-foreground" : "bg-glass/10 text-content"
               )}
             >
@@ -219,7 +208,7 @@ export function AiChatPanel({ scene, onClose }: { scene: SceneApi; onClose: () =
                       <span className="block aspect-video">
                         <AssetThumb type={o.type} seed={o.seed} />
                       </span>
-                      <span className="block truncate bg-black/40 px-2 py-1 text-left text-2xs font-medium text-white">{o.name}</span>
+                      <span className="type-caption-strong block truncate bg-black/40 px-2 py-1 text-left text-white">{o.name}</span>
                     </button>
                   ))}
                 </div>
@@ -237,7 +226,7 @@ export function AiChatPanel({ scene, onClose }: { scene: SceneApi; onClose: () =
               key={s}
               type="button"
               onClick={() => send(s)}
-              className="rounded-full border border-glass/12 bg-glass/6 px-3 py-1.5 text-xs text-content-muted transition-colors hover:bg-glass/12 hover:text-content"
+              className="type-body-dense rounded-full border border-glass/12 bg-glass/6 px-3 py-1.5 text-content-muted transition-colors hover:bg-glass/12 hover:text-content"
             >
               {s}
             </button>
@@ -248,7 +237,7 @@ export function AiChatPanel({ scene, onClose }: { scene: SceneApi; onClose: () =
       {/* Input */}
       <div className="border-t border-glass/10 p-3">
         {attached && (
-          <div className="mb-2 inline-flex items-center gap-2 rounded-lg bg-glass/10 px-2 py-1 text-xs text-content-muted">
+          <div className="type-body-dense mb-2 inline-flex items-center gap-2 rounded-lg bg-glass/10 px-2 py-1 text-content-muted">
             <Icon name="attach" size={13} className="text-brand" />
             image.png
             <button type="button" aria-label="Remove image" onClick={() => setAttached(false)} className="text-content-subtle hover:text-danger">
@@ -272,7 +261,7 @@ export function AiChatPanel({ scene, onClose }: { scene: SceneApi; onClose: () =
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send(input)}
             placeholder="Ask to add, generate, or edit…"
-            className="min-w-0 flex-1 bg-transparent text-sm text-content outline-none placeholder:text-content-subtle"
+            className="type-body min-w-0 flex-1 bg-transparent text-content outline-none placeholder:text-content-subtle"
           />
           <button
             type="button"

@@ -6,7 +6,7 @@ export function ProjectCard({ project }: { project: Project }) {
   return (
     <Card interactive className="overflow-hidden">
       <div
-        className="relative aspect-[16/11] after:absolute after:inset-0 after:bg-gradient-to-t after:from-black/45 after:to-transparent"
+        className="relative aspect-[16/11] after:absolute after:inset-0 after:scrim-soft"
         style={{ background: project.gradient }}
       />
       <div className="flex items-center gap-2.5 p-2.5">

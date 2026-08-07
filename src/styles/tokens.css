@@ -114,6 +114,14 @@
   /* Master Object — a role colour of its own, never reused for state. */
   --master: 45 93% 58%;
 
+  /* Role colours ON GLASS. The raw role tokens are tuned for solid dark chrome;
+     on a tinted glass ornament floating over a bright scene they land at nearly
+     the same lightness as their own tint, so the label disappears into its
+     background. These lift the same hue well above it. */
+  --brand-on-glass: 26 100% 72%;
+  --master-on-glass: 45 100% 74%;
+  --danger-on-glass: 0 90% 74%;
+
   --ring: var(--terra-500);
 }
 
@@ -153,6 +161,12 @@
   --danger-soft: 356 80% 96%;
 
   --master: 42 88% 45%;
+
+  /* Light theme: glass gains body and lightens, so the on-glass role colours
+     invert — they go DARKER than the raw token, not lighter. */
+  --brand-on-glass: 18 78% 34%;
+  --master-on-glass: 40 92% 26%;
+  --danger-on-glass: 355 66% 38%;
 
   --ring: var(--terra-500);
 }
@@ -202,6 +216,68 @@
   --rail-w-collapsed: 4.5rem;
 }
 
+/* ---------- GRADIENTS ----------
+   Only the gradients that THEME live here. Content gradients — project covers,
+   seeded asset thumbnails — are mode-stable data and live in
+   src/features/editor/scene-palette.ts alongside the scene colours.
+
+   Scrims: a label sitting on an image needs the image darkened beneath it.
+   This was four different alphas (black/45, /50, /70, /75) for what is really
+   two roles, so the depth is the decision, not the number: `strong` for dense
+   labels on small cards, `soft` for a title on a large cover. */
+:root {
+  --scrim-strong: 0.72;
+  --scrim-soft: 0.48;
+
+  /* Input wells sit INSIDE a glass panel, so they DARKEN rather than lighten —
+     a lighter well reads as another sheet of glass stacked on the panel instead
+     of a recess cut into it. */
+  --field-well: 0.2;
+  --field-border: 0.14;
+
+  /* Brand ramps — the accent→brand sweep used for identity marks. */
+  --gradient-brand: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--brand)));
+  --gradient-brand-warm: linear-gradient(
+    135deg,
+    hsl(var(--brand)),
+    hsl(var(--terra-700))
+  );
+  --gradient-brand-soft: linear-gradient(
+    135deg,
+    hsl(var(--accent) / 0.7),
+    hsl(var(--brand) / 0.6)
+  );
+}
+
+/* ---------- SCENE TYPE (diegetic label on the tilted plane) ----------
+   Terra has two typographic worlds. CHROME type lives in glass panels and
+   uses the Tailwind scale (see the .type-* classes in globals.css). SCENE
+   type is the object label that sits IN the scene on a 3D-tilted plane —
+   a light, tall-condensed Inter face, deliberately not the Sora display
+   face. Neither Inter nor Sora ships a width axis, so the condensed look
+   is synthetic: a scaleY/scaleX pair. Two tiers, two ratios — the title
+   is squeezed harder than the meta row so the block reads as a hierarchy
+   rather than one uniformly stretched slab. */
+:root {
+  --type-scene-weight: 300;
+  --type-scene-tracking: 0.01em;
+
+  /* Title tier — the <h1> and the "Back" label above it */
+  --type-scene-title-size: clamp(3.25rem, 5.4vw, 5.5rem);
+  --type-scene-nav-size: 1.0625rem;
+  --type-scene-condense-y: 1.28;
+  --type-scene-condense-x: 0.8;
+
+  /* Meta tier — badges, description, Delete */
+  --type-scene-meta-size: 0.9375rem;
+  /* The ®-style info mark perched on the title's last letter */
+  --type-scene-mark-size: 1.375rem;
+  /* Gizmo readout — screen-aligned HUD, so it stays small and monospaced */
+  --type-scene-readout-size: 0.6875rem;
+  --type-scene-meta-condense-y: 1.18;
+  --type-scene-meta-condense-x: 0.86;
+}
+
 /* =====================================================================
    GLASS — visionOS overlay material (Terra Web editor)
    ---------------------------------------------------------------------
@@ -223,6 +299,12 @@
      obliterate. */
   --glass-blur: 4px;
   --glass-blur-strong: 8px;         /* modals / full ornaments */
+  /* Menus and popovers float above OTHER CHROME, not just the scene. A glass
+     button under a 4–8px blur is still perfectly readable — blur smears shape
+     but doesn't remove it, so the layer beneath keeps competing for attention.
+     This tier blurs far enough to destroy the shape outright; the body below
+     does the rest. */
+  --glass-blur-overlay: 24px;
   /* Saturation stays close to 100%: over a warm scene (desert HDRI) a big boost
      amplifies the oranges and the glass reads muddy brown rather than neutral
      frost. Apple's material barely lifts saturation — vibrancy comes from the
@@ -236,6 +318,18 @@
   /* Interaction deltas (added on top of the base thickness alpha) */
   --glass-hover: 0.06;              /* extra frost on hover */
   --glass-frost-selected: 0.20;     /* frost-not-color selection */
+
+  /* Role tint for an ACTIVE ornament (toolbar tile, tab, toggle).
+     NB: distinct from --glass-tint above, which is the white edge/hover hue.
+     The tint layers OVER the glass ink, never replaces it — a role colour set
+     as `background-color` wipes out the dark base, and the label (which is the
+     same role colour) then sits on a mid-tone wash of itself over whatever the
+     scene happens to be. Keep this low: the ink carries the contrast, the tint
+     only has to signal which role is on. */
+  --glass-role-alpha: 0.18;
+  --glass-role-border: 0.7;
+  /* Active ornaments blur harder so the label separates from a busy scene. */
+  --glass-blur-active: 10px;
 }
 
 /* Thickness ladder + lighting + shadows — DARK (default, over dark scenes) */
@@ -259,6 +353,50 @@
   --glass-shadow-sm: 0 2px 10px hsl(0 0% 0% / 0.12);
   --glass-shadow-md: 0 8px 28px hsl(0 0% 0% / 0.18);
   --glass-shadow-lg: 0 16px 44px hsl(0 0% 0% / 0.24);
+}
+
+/* ---------- SCENE LIGHTING VARIANTS ----------
+   Glass is translucent over a scene we don't control, so one tuning cannot work
+   everywhere. EditorView samples the rendered frame and stamps `data-scene` on
+   the editor root; these override the thickness ladder and the edge treatment,
+   and inherit to every ornament below. `dim` is the default set above.
+
+   The trade is the same in both directions but inverted: BODY hides the scene
+   and protects the label, EDGE defines the panel's shape. Over a dark scene the
+   ink has nothing left to darken, so pull the body back and let the hairline do
+   the work. Over a bright one the label is what's at risk, so add body — the
+   edge already reads on its own. */
+
+[data-scene="dark"] {
+  --glass-thin: 0.14;
+  --glass-regular: 0.22;
+  --glass-thick: 0.32;
+  --glass-chrome: 0.42;
+
+  --glass-border: hsl(0 0% 100% / 0.30);
+  --glass-highlight: inset 0 1px 0 hsl(0 0% 100% / 0.34);
+  --glass-inner: inset 0 1px 30px hsl(0 0% 100% / 0.06);
+  /* A shadow under a panel on a dark scene just muddies it. */
+  --glass-shadow-sm: 0 2px 10px hsl(0 0% 0% / 0.06);
+  --glass-shadow-md: 0 8px 28px hsl(0 0% 0% / 0.10);
+  --glass-shadow-lg: 0 16px 44px hsl(0 0% 0% / 0.14);
+}
+
+[data-scene="bright"] {
+  --glass-thin: 0.28;
+  --glass-regular: 0.40;
+  --glass-thick: 0.52;
+  --glass-chrome: 0.62;
+
+  --glass-border: hsl(0 0% 100% / 0.14);
+  --glass-highlight: inset 0 1px 0 hsl(0 0% 100% / 0.18);
+  --glass-shadow-sm: 0 2px 12px hsl(0 0% 0% / 0.20);
+  --glass-shadow-md: 0 10px 32px hsl(0 0% 0% / 0.26);
+  --glass-shadow-lg: 0 18px 48px hsl(0 0% 0% / 0.32);
+
+  /* An active tile has to out-contrast a bright backdrop, so its tint carries
+     a little more weight here too. */
+  --glass-role-alpha: 0.22;
 }
 
 /* Over a bright scene glass needs more body + a darker edge to stay legible */

@@ -4,6 +4,7 @@ import { ContactShadows, Environment, OrbitControls, GizmoHelper, GizmoViewcube,
 import { Vector3, type Camera, type Group, type Object3D } from "three";
 import { SceneObjectMesh } from "./SceneObjectMesh";
 import { applyUnrealGizmoSkin } from "./unreal-gizmo";
+import { READOUT, VIEWCUBE } from "./scene-palette";
 import type { SceneApi } from "./useScene";
 
 const R2D = 180 / Math.PI;
@@ -193,17 +194,16 @@ function GizmoReadout({
         <div
           ref={el}
           data-ui="gizmo-readout"
+          className="type-scene-readout"
           style={{
             opacity: 0,
             transform: "translateY(-34px)",
             whiteSpace: "nowrap",
             padding: "3px 8px",
             borderRadius: "6px",
-            background: "rgba(12,12,12,0.82)",
-            border: "1px solid rgba(255,255,255,0.16)",
-            color: "#fff",
-            font: "500 11px/1.4 var(--font-mono)",
-            fontVariantNumeric: "tabular-nums",
+            background: READOUT.bg,
+            border: `1px solid ${READOUT.border}`,
+            color: READOUT.ink,
           }}
         />
       </Html>
@@ -416,7 +416,12 @@ export function SceneCanvas({ scene, gizmoMode, showGizmo, controlsRef, cameraRe
       <KeyboardFly controlsRef={controlsRef} />
 
       <GizmoHelper alignment="top-right" margin={[96, 128]}>
-        <GizmoViewcube color="#68635b" textColor="#f5f2ec" strokeColor="#00000040" hoverColor="#d97a2b" />
+        <GizmoViewcube
+          color={VIEWCUBE.face}
+          textColor={VIEWCUBE.text}
+          strokeColor={VIEWCUBE.stroke}
+          hoverColor={VIEWCUBE.hover}
+        />
       </GizmoHelper>
     </Canvas>
   );

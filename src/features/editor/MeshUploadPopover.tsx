@@ -27,11 +27,11 @@ export function MeshUploadPopover({
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <GlassPanel
         ui="mesh-upload-popover"
-        thickness="thick"
+        thickness="overlay"
         className="fixed bottom-[calc(40vh+2.5rem)] left-1/2 z-50 w-[340px] max-w-[92vw] -translate-x-1/2 !rounded-3xl p-4"
       >
         <div className="mb-3 flex items-center justify-between">
-          <span className="text-md font-semibold text-content">
+          <span className="type-subheading text-content">
             {mode === "multiview" ? "Multi-view result" : "Upload to generate a mesh"}
           </span>
           <button
@@ -49,7 +49,7 @@ export function MeshUploadPopover({
             <>
               <div className="relative aspect-square overflow-hidden rounded-2xl bg-glass/8">
                 <div className="grid h-full w-full place-items-center">
-                  <span className="h-3/5 w-3/5 rounded-xl bg-gradient-to-br from-accent/70 to-brand/60 shadow-lg" />
+                  <span className="h-3/5 w-3/5 rounded-xl gradient-brand-soft shadow-lg" />
                 </div>
                 <button
                   type="button"
@@ -75,8 +75,8 @@ export function MeshUploadPopover({
               <span className="grid h-10 w-10 place-items-center rounded-full border border-glass/25">
                 <Icon name="create" size={20} />
               </span>
-              <span className="text-sm text-content-muted">Upload your asset</span>
-              <span className="text-2xs">JPG, PNG, WEBP · size &lt; 20 MB</span>
+              <span className="type-body text-content-muted">Upload your asset</span>
+              <span className="type-caption">JPG, PNG, WEBP · size &lt; 20 MB</span>
             </button>
           )
         ) : (
@@ -85,7 +85,7 @@ export function MeshUploadPopover({
               {[0, 1, 2].map((i) => (
                 <div key={i} className="aspect-square overflow-hidden rounded-xl bg-glass/8">
                   <div className="grid h-full w-full place-items-center">
-                    <span className="h-3/5 w-3/5 rounded-lg bg-gradient-to-br from-accent/70 to-brand/60" />
+                    <span className="h-3/5 w-3/5 rounded-lg gradient-brand-soft" />
                   </div>
                 </div>
               ))}

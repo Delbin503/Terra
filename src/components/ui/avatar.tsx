@@ -19,7 +19,7 @@ export function Avatar({ name, src, size = 34, className, ...props }: AvatarProp
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-medium text-white",
+        "type-label flex shrink-0 items-center justify-center overflow-hidden rounded-full text-white",
         className
       )}
       style={{
@@ -27,7 +27,7 @@ export function Avatar({ name, src, size = 34, className, ...props }: AvatarProp
         height: size,
         background: src
           ? undefined
-          : "linear-gradient(135deg, hsl(var(--accent)), hsl(var(--brand)))",
+          : "var(--gradient-brand)",
       }}
       {...props}
     >

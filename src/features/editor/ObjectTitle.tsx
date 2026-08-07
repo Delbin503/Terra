@@ -1,18 +1,12 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Icon } from "@/components/icons";
+import { SCENE_LABEL } from "./scene-palette";
 
-/** The title's face, at meta scale — shared by the badges, View Info and copy. */
-const metaTextStyle: CSSProperties = {
-  fontFamily: "var(--font-sans)",
-  fontWeight: 300,
-  fontSize: "0.9375rem",
-  letterSpacing: "0.01em",
-  padding: 0,
-  border: 0,
-};
+/* The face for this whole block is the `type-scene-*` text styles (globals.css)
+   — a light, tall-condensed Inter, deliberately not the Sora display face.
+   Only the box and the luminance-adaptive colour live here as inline style. */
 
 const badgeStyle: CSSProperties = {
-  ...metaTextStyle,
   display: "inline-flex",
   alignItems: "center",
   gap: "0.35rem",
@@ -80,14 +74,48 @@ export function ObjectTitle({
   onViewInfo: () => void;
   onDelete: () => void;
 }) {
-  const color = dark ? "#17130e" : "#ffffff";
-  const line = dark ? "rgba(23,19,14,0.7)" : "rgba(255,255,255,0.8)";
-  const shadow = dark
-    ? "0 1px 14px rgba(255,255,255,0.45), 0 1px 2px rgba(255,255,255,0.5)"
-    : "0 3px 22px rgba(0,0,0,0.55), 0 1px 2px rgba(0,0,0,0.5)";
+  // `dark` = the sampled backdrop is bright, so the label inks dark.
+  const label = dark ? SCENE_LABEL.onBright : SCENE_LABEL.onDark;
+  const { ink: color, rule: line, shadow } = label;
 
   const ref = useRef<HTMLHeadingElement>(null);
+  const outerRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
+  // Where the info mark sits — pinned to the top-right of the LAST letter of the
+  // title's first line, like a ® on a logo. Measured (see below), not guessed,
+  // because the face is condensed + tilted and the name wraps/truncates.
+  const [infoPos, setInfoPos] = useState<{ left: number; top: number } | null>(null);
+
+  // Position of the end of the title's first *visual* line, relative to the
+  // (untransformed) outer container. `range.getClientRects()` returns each line's
+  // rect in true viewport space — it reflects the h1's scale AND the parent's 3D
+  // tilt — so `rects[0]` is the first line as painted. A line can be split into
+  // several fragments (word boundaries, the inserted ellipsis), so we take the
+  // top-most fragment group and its right-most edge.
+  const measureInfoPos = useCallback(() => {
+    const el = ref.current;
+    const outer = outerRef.current;
+    if (!el || !outer) return null;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const rects = Array.from(range.getClientRects());
+    if (!rects.length) return null;
+    const top0 = Math.min(...rects.map((r) => r.top));
+    const lineH = rects[0].bottom - rects[0].top; // first line height, viewport-space
+    const firstLine = rects.filter((r) => r.top - top0 < lineH * 0.5);
+    const right = Math.max(...firstLine.map((r) => r.right));
+    const top = Math.min(...firstLine.map((r) => r.top));
+    const bottom = Math.max(...firstLine.map((r) => r.bottom));
+    const h = bottom - top;
+    const o = outer.getBoundingClientRect();
+    // Returns the icon's target CENTRE (paired with a translate(-50%,-50%) on the
+    // element). `top + h*0.30` is roughly the glyph cap-top; we then lift the
+    // centre by ~17px so the mark's lower edge clears the caps by a few px —
+    // perched just ABOVE the last letter with a small gap, like a ®, rather than
+    // sitting on the glyph. A hair left of the right edge (scaled by height, not
+    // a fixed px) keeps it over the last glyph's corner.
+    return { left: right - h * 0.07 - o.left, top: top + h * 0.3 - 17 - o.top };
+  }, []);
 
   // Keep the DOM text in sync when the name changes from outside (e.g. a fresh
   // object), and clamp it to two lines while we're not editing.
@@ -103,35 +131,57 @@ export function ObjectTitle({
     if (!el || editing) return;
     el.textContent = name;
 
-    const cs = getComputedStyle(el);
-    const lineH = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 0.95;
-    // Calibrate against a real single line rather than assuming 2 × lineHeight:
-    // line-height here is 0.95 (tighter than the glyphs), so a rendered line's
-    // scrollHeight overshoots lineHeight and a naive 2× test rejects text that
-    // does fit on two lines.
-    el.textContent = "X";
-    const twoLines = el.scrollHeight + lineH;
-    el.textContent = name;
-    if (el.scrollHeight <= twoLines) return;
+    // Wrapped in an IIFE so its early exits (text already fits / too short to
+    // shorten) skip only the truncation — the info-mark measurement below still
+    // runs on every non-editing path.
+    (() => {
+      const cs = getComputedStyle(el);
+      const lineH = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 0.95;
+      // Calibrate against a real single line rather than assuming 2 × lineHeight:
+      // line-height here is 0.95 (tighter than the glyphs), so a rendered line's
+      // scrollHeight overshoots lineHeight and a naive 2× test rejects text that
+      // does fit on two lines.
+      el.textContent = "X";
+      const twoLines = el.scrollHeight + lineH;
+      el.textContent = name;
+      if (el.scrollHeight <= twoLines) return;
 
-    const TAIL = 3; // trailing characters kept after the ellipsis
-    if (name.length <= TAIL + 2) return; // too short to shorten usefully
-    const tail = name.slice(-TAIL);
-    let lo = 1;
-    let hi = name.length - TAIL;
-    let best = 1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      el.textContent = `${name.slice(0, mid)}…${tail}`;
-      if (el.scrollHeight <= twoLines) {
-        best = mid;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
+      const TAIL = 3; // trailing characters kept after the ellipsis
+      if (name.length <= TAIL + 2) return; // too short to shorten usefully
+      const tail = name.slice(-TAIL);
+      let lo = 1;
+      let hi = name.length - TAIL;
+      let best = 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        el.textContent = `${name.slice(0, mid)}…${tail}`;
+        if (el.scrollHeight <= twoLines) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
       }
-    }
-    el.textContent = `${name.slice(0, best)}…${tail}`;
-  }, [name, editing]);
+      el.textContent = `${name.slice(0, best)}…${tail}`;
+    })();
+
+    setInfoPos(measureInfoPos());
+  }, [name, editing, measureInfoPos]);
+
+  // Re-anchor the info mark on resize (the title is responsive) and once the
+  // variable fonts finish loading (first-paint metrics are off until then).
+  useEffect(() => {
+    const recompute = () => setInfoPos(measureInfoPos());
+    window.addEventListener("resize", recompute);
+    let alive = true;
+    document.fonts?.ready.then(() => {
+      if (alive) recompute();
+    });
+    return () => {
+      alive = false;
+      window.removeEventListener("resize", recompute);
+    };
+  }, [measureInfoPos]);
 
   const startEditing = () => {
     setEditing(true);
@@ -162,21 +212,22 @@ export function ObjectTitle({
 
   return (
     <div
+      ref={outerRef}
       data-ui="object-title"
       className="pointer-events-none fixed left-12 top-[27%] z-20 w-[30rem] max-w-[44vw] select-none"
       style={{ perspective: "900px" }}
     >
       <div style={{ transform: "rotateY(19deg) rotateX(7deg)", transformOrigin: "left center" }}>
-        {/* Back + info share a row above the title.
+        {/* Back sits on its own row above the title.
             `relative z-10`: the title below is scaled up (scaleY(1.28)), so its
             painted box creeps back over this row and would otherwise swallow the
             clicks — starting a rename instead. */}
-        <div className="relative z-10 mb-2.5 flex w-[17rem] max-w-full items-center justify-between gap-6">
+        <div className="relative z-10 mb-6">
         <button
           type="button"
           data-ui="object-title-back"
           onClick={onBack}
-          className="pointer-events-auto flex items-center gap-1.5 bg-transparent transition-opacity hover:opacity-75"
+          className="pointer-events-auto inline-flex items-center gap-1.5 bg-transparent transition-opacity hover:opacity-75"
           style={{ color, textShadow: shadow }}
         >
           <Icon name="back" size={17} strokeWidth={1.6} />
@@ -184,34 +235,7 @@ export function ObjectTitle({
               light weight, and the same tall-condensed scale — so the two read as
               one typographic unit. Only the label is scaled; scaling the whole
               button would squash the arrow too. */}
-          <span
-            style={{
-              display: "inline-block",
-              fontFamily: "var(--font-sans)",
-              fontWeight: 300,
-              fontSize: "1.0625rem",
-              lineHeight: 1,
-              letterSpacing: "0.01em",
-              transform: "scaleY(1.28) scaleX(0.8)",
-              transformOrigin: "left center",
-            }}
-          >
-            Back
-          </span>
-        </button>
-
-        {/* Info replaces the old "View Info" text link that sat in the badge row. */}
-        <button
-          type="button"
-          aria-label="View info"
-          data-ui="object-view-info"
-          onClick={onViewInfo}
-          /* No border/ring wrapper — the lucide `info` glyph already draws its
-             own circle, so adding one rendered a double ring. */
-          style={{ color, filter: `drop-shadow(0 2px 6px rgba(0,0,0,0.6))` }}
-          className="pointer-events-auto shrink-0 bg-transparent transition-opacity hover:opacity-75"
-        >
-          <Icon name="info" size={26} strokeWidth={1.5} />
+          <span className="type-scene-nav">Back</span>
         </button>
         </div>
         <h1
@@ -229,16 +253,8 @@ export function ObjectTitle({
               ref.current?.blur();
             }
           }}
-          className="pointer-events-auto outline-none transition-opacity hover:opacity-80"
+          className="type-scene-title pointer-events-auto outline-none transition-opacity hover:opacity-80"
           style={{
-            margin: 0,
-            fontFamily: "var(--font-sans)",
-            fontWeight: 300,
-            fontSize: "clamp(3.25rem, 5.4vw, 5.5rem)",
-            lineHeight: 0.95,
-            letterSpacing: "0.01em",
-            transform: "scaleY(1.28) scaleX(0.8)",
-            transformOrigin: "left center",
             color,
             textShadow: shadow,
             transition: "color 0.3s ease, opacity 0.15s ease",
@@ -268,7 +284,9 @@ export function ObjectTitle({
             width: "58%",
             marginTop: "0.8rem",
             background: line,
-            transform: "scaleX(0.8)",
+            /* Matches the title's horizontal squeeze so the rule ends flush
+               with the widest glyph rather than overshooting it. */
+            transform: "scaleX(var(--type-scene-condense-x))",
             transformOrigin: "left",
             transition: "background 0.3s ease",
           }}
@@ -278,21 +296,28 @@ export function ObjectTitle({
             as the title so the whole block reads as one diegetic label on the
             tilted plane. */}
         <div
+          className="type-scene-plane"
           style={{
             display: "flex",
             alignItems: "center",
             gap: "0.5rem",
             marginTop: "0.9rem",
-            transform: "scaleY(1.18) scaleX(0.86)",
-            transformOrigin: "left center",
           }}
         >
-          <span data-ui="badge-type" style={{ ...badgeStyle, ...typeBadgeStyle }}>
+          <span
+            data-ui="badge-type"
+            className="type-scene-badge"
+            style={{ ...badgeStyle, ...typeBadgeStyle }}
+          >
             <Icon name="input-3d" size={13} />
             {typeLabel}
           </span>
           {isMaster && (
-            <span data-ui="badge-master" style={{ ...badgeStyle, ...masterBadgeStyle }}>
+            <span
+              data-ui="badge-master"
+              className="type-scene-badge"
+              style={{ ...badgeStyle, ...masterBadgeStyle }}
+            >
               <Icon name="master" size={13} />
               Master Object
             </span>
@@ -302,15 +327,13 @@ export function ObjectTitle({
         {description && (
           <p
             data-ui="object-description"
+            className="type-scene-body type-scene-plane-top"
             style={{
-              ...metaTextStyle,
               margin: "0.75rem 0 0",
               maxWidth: "26rem",
               lineHeight: 1.45,
               color,
               textShadow: shadow,
-              transform: "scaleY(1.18) scaleX(0.86)",
-              transformOrigin: "left top",
             }}
           >
             {description}
@@ -328,16 +351,42 @@ export function ObjectTitle({
             ...deleteBadgeStyle,
             marginTop: "2.25rem",
             padding: "0.3rem 0.75rem",
-            transform: "scaleY(1.18) scaleX(0.86)",
-            transformOrigin: "left center",
             cursor: "pointer",
           }}
-          className="pointer-events-auto transition-opacity hover:opacity-75"
+          className="type-scene-badge type-scene-plane pointer-events-auto transition-opacity hover:opacity-75"
         >
           <Icon name="trash" size={14} />
           Delete
         </button>
       </div>
+
+      {/* Info mark — a ®-style superscript pinned to the top-right of the last
+          letter of the title's first line (see `measureInfoPos`). Lives OUTSIDE
+          the tilted plane, in the untransformed outer box, so its measured
+          viewport position maps straight to left/top without inverting the tilt;
+          being screen-aligned rather than tilted reads fine for a small mark.
+          Hidden while renaming, when the layout is in flux. */}
+      {!editing && infoPos && (
+        <button
+          type="button"
+          aria-label="View info"
+          data-ui="object-view-info"
+          onClick={onViewInfo}
+          /* No border/ring wrapper — the lucide `info` glyph already draws its
+             own circle, so adding one rendered a double ring. */
+          style={{
+            position: "absolute",
+            left: infoPos.left,
+            top: infoPos.top,
+            transform: "translate(-50%, -50%)",
+            color,
+            filter: SCENE_LABEL.markShadow,
+          }}
+          className="pointer-events-auto z-30 bg-transparent transition-opacity hover:opacity-75"
+        >
+          <Icon name="info" className="type-scene-mark" strokeWidth={1.5} />
+        </button>
+      )}
     </div>
   );
 }

@@ -1,3 +1,5 @@
+import { COVER_GRADIENTS } from "@/features/editor/scene-palette";
+
 export type ProjectKind = "FSD" | "HSD";
 
 export interface Project {
@@ -9,13 +11,9 @@ export interface Project {
   gradient: string;
 }
 
-const gradients = [
-  "linear-gradient(160deg,#3f6f3a,#6ea94a 45%,#8fc95e)",
-  "linear-gradient(160deg,#c1521f,#e08a2b 50%,#f0b352)",
-  "linear-gradient(160deg,#7b3fb0,#c05aa8 50%,#e58fb0)",
-  "linear-gradient(160deg,#25607a,#3f9bb0 50%,#7fd0c9)",
-  "linear-gradient(160deg,#4a5d2a,#7fa23e 50%,#b9cf6a)",
-];
+/** Cover ramps are content, so they live with the scene palette rather than in
+ *  tokens.css — they never theme, and the same stops feed SVG and canvas. */
+const gradients = COVER_GRADIENTS;
 
 export const projects: Project[] = [
   { id: "p1", name: "Sand Dune Project", editedLabel: "Edited 4 days ago", kind: "HSD", gradient: gradients[0] },
