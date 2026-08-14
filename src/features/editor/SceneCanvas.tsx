@@ -1,13 +1,118 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { ContactShadows, Environment, OrbitControls, GizmoHelper, GizmoViewcube, Html, TransformControls } from "@react-three/drei";
-import { Vector3, type Camera, type Group, type Object3D } from "three";
+import { Environment, Line, OrbitControls, GizmoHelper, Html, TransformControls } from "@react-three/drei";
+import { Mesh, Plane, Vector3, type Camera, type Group, type Object3D, type Ray } from "three";
+
+/** Reused by the rig handles' orbit plane — allocating per pointer event would
+ *  churn a Vector3 every frame of a drag. */
+const UP = new Vector3(0, 1, 0);
 import { SceneObjectMesh } from "./SceneObjectMesh";
+import { CameraObjectMesh, GhostCamera } from "./CameraObjectMesh";
 import { applyUnrealGizmoSkin } from "./unreal-gizmo";
-import { READOUT, VIEWCUBE } from "./scene-palette";
+import { ViewCube, CUBE_PX, TRI_TIP } from "./ViewCube";
+import { distance } from "./camera-rig";
+import { CAMERA_RIG, READOUT } from "./scene-palette";
 import type { SceneApi } from "./useScene";
 
 const R2D = 180 / Math.PI;
+
+/** How far the orientation cube's outermost ink reaches from its centre. The
+ *  overlay chrome needs it too — the view readout hangs under the cube. */
+export const GIZMO_REACH = Math.round(TRI_TIP * CUBE_PX);
+
+const noop = () => {};
+
+/**
+ * SceneWorld — the lit, populated scene, minus every editor affordance (gizmo,
+ * controls, orientation cube). Extracted so the camera-POV preview can render
+ * the exact same world from a different camera without duplicating the object
+ * graph. `interactive={false}` (the preview) drops selection outlines and click
+ * handling; `hideId` skips one object — the camera you're looking *from*, which
+ * would otherwise clip the near plane.
+ */
+export function SceneWorld({
+  scene,
+  register,
+  selectedId,
+  onSelect,
+  interactive = true,
+  hideId,
+  hideIds,
+  hideCameras = false,
+}: {
+  scene: SceneApi;
+  register?: (id: string, mesh: Object3D | null) => void;
+  selectedId?: string | null;
+  onSelect?: (id: string) => void;
+  interactive?: boolean;
+  hideId?: string;
+  /**
+   * Objects standing aside for something drawn in their place — the rig's two
+   * cameras while their near-distance preview is up. Hidden rather than moved,
+   * because the preview is a picture of a number and must not become an edit.
+   */
+  hideIds?: readonly string[];
+  /** Drop the rigs and their sweep lines. TerraGen doesn't render its own
+   *  cameras into the dataset, so a preview of a captured frame must not show
+   *  them — it would be previewing a shot that never exists. */
+  hideCameras?: boolean;
+}) {
+  const reg = register ?? noop;
+  const sel = onSelect ?? noop;
+  return (
+    <>
+      <directionalLight
+        position={[8, 12, 6]}
+        intensity={0.4 * scene.env.brightness}
+        color={warmColor(scene.env.warmth)}
+        castShadow
+      />
+
+      <Environment
+        files="/hdri/aarfontein_dusk_4k.exr"
+        background
+        environmentIntensity={0.35}
+        ground={{ height: 15, radius: 60, scale: 400 }}
+      />
+
+      {/* The sweep each rig will travel. Drawn before the cameras so the line
+          passes behind their bodies rather than through them. */}
+      {!hideCameras &&
+        scene.rigs.map((rig) => {
+          const { start, end } = scene.rigCameras(rig);
+          if (!start || !end) return null;
+          // A hidden camera takes its sweep with it — the line is the rig's
+          // path, and drawing it to a camera that isn't there points at nothing.
+          if (start.hidden || end.hidden) return null;
+          return <SweepLine key={rig.id} from={start.position} to={end.position} />;
+        })}
+
+      {scene.objects
+        .filter((o) => o.id !== hideId && !hideIds?.includes(o.id) && !o.hidden)
+        .filter((o) => !(hideCameras && o.source === "camera"))
+        .map((o) =>
+          o.source === "camera" ? (
+            <CameraObjectMesh
+              key={o.id}
+              object={o}
+              masterPosition={scene.master ? scene.master.position : null}
+              selected={interactive && o.id === selectedId}
+              onSelect={sel}
+              register={reg}
+            />
+          ) : (
+            <SceneObjectMesh
+              key={o.id}
+              object={o}
+              selected={interactive && o.id === selectedId}
+              onSelect={sel}
+              register={reg}
+            />
+          )
+        )}
+    </>
+  );
+}
 
 /** Warmth (-1 cool … +1 warm) → a light tint. */
 function warmColor(w: number): string {
@@ -33,6 +138,90 @@ interface SceneCanvasProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   controlsRef: React.MutableRefObject<any>;
   cameraRef: React.MutableRefObject<CameraHandle | null>;
+  /** fires when the named orientation the camera looks from changes */
+  onViewChange?: (view: ViewState) => void;
+  /** rings drawn around the master while a camera setting is being edited */
+  cameraGuide?: CameraGuide | null;
+  /** the orbit ring was dragged to this angle */
+  onOrbit?: (deg: number) => void;
+  /** the sweep's climb handle was dragged to this vertical separation */
+  onSpan?: (metres: number) => void;
+  /**
+   * Extra px the orientation cube steps left, away from the right edge.
+   *
+   * The panel dock now starts at the same content line as the cube rather than
+   * below it, so the two would occupy the same corner. The cube yields, because
+   * it's an ornament and the dock is where the work happens — and it yields by
+   * moving rather than hiding, so the orbit readout it anchors stays reachable.
+   */
+  gizmoInset?: number;
+}
+
+/**
+ * ViewProbe — names the orientation the camera is currently looking from, for
+ * the readout under the orientation cube.
+ *
+ * The cube itself shows which way is which, but not *where you are*: on a
+ * three-quarter view every face is partly visible and none of them is the
+ * answer. So this reports the nearest named view plus whether the camera is
+ * actually snapped to it — "Front" and "Front, off-axis" are different facts,
+ * and only the first means clicking that face would change nothing.
+ *
+ * Runs on the render loop but only calls back when the label changes, so a
+ * slow orbit doesn't re-render the whole editor sixty times a second.
+ */
+const NAMED_VIEWS: [Vector3, string][] = [
+  [new Vector3(0, 0, 1), "Front"],
+  [new Vector3(0, 0, -1), "Back"],
+  [new Vector3(1, 0, 0), "Right"],
+  [new Vector3(-1, 0, 0), "Left"],
+  [new Vector3(0, 1, 0), "Top"],
+  [new Vector3(0, -1, 0), "Bottom"],
+];
+
+export interface ViewState {
+  label: string;
+  /** the camera is on that axis, within a degree or so */
+  snapped: boolean;
+}
+
+function ViewProbe({
+  controlsRef,
+  onChange,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  controlsRef: React.MutableRefObject<any>;
+  onChange: (v: ViewState) => void;
+}) {
+  const last = useRef<string>("");
+  const dir = useRef(new Vector3());
+
+  useFrame(({ camera }) => {
+    const target = controlsRef.current?.target as Vector3 | undefined;
+    dir.current.copy(camera.position);
+    if (target) dir.current.sub(target);
+    if (dir.current.lengthSq() === 0) return;
+    dir.current.normalize();
+
+    let best = NAMED_VIEWS[0];
+    let bestDot = -Infinity;
+    for (const entry of NAMED_VIEWS) {
+      const d = dir.current.dot(entry[0]);
+      if (d > bestDot) {
+        bestDot = d;
+        best = entry;
+      }
+    }
+
+    const next: ViewState = { label: best[1], snapped: bestDot > 0.9995 };
+    const key = `${next.label}:${next.snapped}`;
+    if (key !== last.current) {
+      last.current = key;
+      onChange(next);
+    }
+  });
+
+  return null;
 }
 
 /** Captures the live camera + canvas element so the DOM drop handler can raycast. */
@@ -303,7 +492,735 @@ function KeyboardFly({
   return null;
 }
 
-export function SceneCanvas({ scene, gizmoMode, showGizmo, controlsRef, cameraRef }: SceneCanvasProps) {
+/**
+ * The travel path between a rig's two cameras — the range the capture fills in.
+ * Rebuilt whenever either end moves, which is why the geometry is keyed on the
+ * endpoints rather than mutated in place.
+ */
+function SweepLine({ from, to }: { from: [number, number, number]; to: [number, number, number] }) {
+  // drei's Line rather than the `<line>` intrinsic: in TSX that name resolves to
+  // SVGLineElement, so the three.js props don't typecheck. Line also gives a
+  // real stroke width, which a 1px GL line can't.
+  const points = useMemo(
+    () => [from, to] as [number, number, number][],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [from[0], from[1], from[2], to[0], to[1], to[2]]
+  );
+  return (
+    <Line
+      points={points}
+      color={CAMERA_RIG.path}
+      lineWidth={1.5}
+      dashed
+      dashSize={0.35}
+      gapSize={0.25}
+      transparent
+      opacity={0.8}
+      raycast={() => null}
+    />
+  );
+}
+
+
+/* ------------------------------------------------------------------------- */
+/*  Camera guides — the rings that make a rig's numbers visible in the scene  */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * What the viewport should draw around the master while a camera setting is
+ * open. Built in EditorView from the same values the panel edits, so the ring
+ * and the slider are two views of one number rather than two sources of truth.
+ */
+export type CameraGuide =
+  | {
+      kind: "distance";
+      centre: [number, number, number];
+      /**
+       * The ring each end of the rig actually travels on: its own height and
+       * its own ground radius. The rig's two cameras differ in elevation as
+       * well as reach, so one shared circle would be a picture of neither.
+       */
+      near: { y: number; radius: number };
+      far: { y: number; radius: number };
+      /** the handle under the cursor, if any: its ring reads as the live one */
+      active: "min" | "max" | null;
+      /**
+       * THE PREVIEW. While the Distance control is open the pair is shown at
+       * the NEAR reach — the end being edited — and the far positions they will
+       * return to are left behind as afterimages. The rig itself never moves:
+       * the near distance is a number on the rig, so this is a picture of what
+       * that number means, not a temporary edit that has to be undone on close.
+       */
+      previews: [number, number, number][];
+      afterimages: [number, number, number][];
+      /** the real cameras the preview stands in for, hidden while it's up */
+      hides: string[];
+    }
+  | {
+      /** the master's turntable, drawn around the master itself */
+      kind: "orbit";
+      centre: [number, number, number];
+      y: number;
+      radius: number;
+      /** the master's current heading, where the drag handle sits */
+      azimuth: number;
+      /**
+       * The wedge the capture actually turns through. A full revolution is
+       * 0 → 360 and draws as the whole ring; anything narrower draws the ring
+       * dashed with the live arc laid over it, so what is captured and what is
+       * merely possible are never the same line.
+       */
+      arc: { start: number; end: number };
+    }
+  | {
+      /**
+       * The rig itself, grabbable in the viewport. Shown whenever a rig camera
+       * is selected rather than only inside a setting: a slider you have to go
+       * and find is not how anyone aims a camera at a thing they can see.
+       */
+      kind: "rig";
+      centre: [number, number, number];
+      start: [number, number, number];
+      end: [number, number, number];
+    }
+  | {
+      /**
+       * WHERE THE SHOTS COME FROM. Open Shots / Distance or Shots / Rotation and
+       * the counts stop being abstract: every stop the rig makes is a dot on the
+       * sweep, and every frame it takes there is a tick on that stop's ring.
+       * Counting them is how you tell 24 from 36 without trusting the label.
+       */
+      kind: "shots";
+      centre: [number, number, number];
+      /** one per pass: where the rig stands, and the circle it turns on */
+      stops: { position: [number, number, number]; y: number; radius: number }[];
+      /** bearings within the arc that each pass shoots from */
+      bearings: number[];
+      /** which of the two counts is being edited — that half reads live */
+      focus: "distance" | "rotation";
+    };
+
+const RING_SEGMENTS = 96;
+
+/** A horizontal circle of `radius` around `centre`, at height `y`. */
+function ringPoints(centre: [number, number, number], y: number, radius: number) {
+  const pts: [number, number, number][] = [];
+  for (let i = 0; i <= RING_SEGMENTS; i++) {
+    const t = (i / RING_SEGMENTS) * Math.PI * 2;
+    pts.push([centre[0] + Math.sin(t) * radius, y, centre[2] + Math.cos(t) * radius]);
+  }
+  return pts;
+}
+
+function GuideRing({
+  centre,
+  y,
+  radius,
+  live,
+  dashed,
+}: {
+  centre: [number, number, number];
+  y: number;
+  radius: number;
+  live: boolean;
+  dashed?: boolean;
+}) {
+  const points = useMemo(() => ringPoints(centre, y, radius), [centre, y, radius]);
+  return (
+    <Line
+      points={points}
+      color={live ? CAMERA_RIG.selected : CAMERA_RIG.path}
+      lineWidth={live ? 2 : 1.25}
+      dashed={dashed}
+      dashSize={0.4}
+      gapSize={0.3}
+      transparent
+      opacity={live ? 0.95 : 0.5}
+      raycast={() => null}
+      depthTest={false}
+      renderOrder={3}
+    />
+  );
+}
+
+/**
+ * The two halos: the nearest and furthest the rig reaches from the master.
+ *
+ * Both are always drawn, but the one you are NOT dragging is the point of the
+ * pair — a nearest distance is only meaningful against the furthest one it has
+ * to leave room for. Whichever handle is in hand lights up; the other stays as
+ * the dashed reference, with the camera pair itself stood on it in orange.
+ */
+function DistanceHalos({ guide }: { guide: Extract<CameraGuide, { kind: "distance" }> }) {
+  return (
+    <>
+      <GuideRing
+        centre={guide.centre}
+        y={guide.near.y}
+        radius={guide.near.radius}
+        live={guide.active === "min"}
+        dashed={guide.active !== "min"}
+      />
+      <GuideRing
+        centre={guide.centre}
+        y={guide.far.y}
+        radius={guide.far.radius}
+        live={guide.active === "max"}
+        dashed={guide.active !== "max"}
+      />
+      {/* Where the pair will stand at this near reach — solid, because for as
+          long as the control is open this IS the rig you are setting. */}
+      {guide.previews.map((p, i) => (
+        <GhostCamera key={`near-${i}`} position={p} lookAt={guide.centre} solid />
+      ))}
+
+      {/* And where they go back to. Yellow, so a spot the rig will RETURN to is
+          never mistaken for a spot the rig is. */}
+      {guide.afterimages.map((p, i) => (
+        <GhostCamera key={`far-${i}`} position={p} lookAt={guide.centre} tint={CAMERA_RIG.afterimage} />
+      ))}
+
+      {/* The travel between the two, so the preview reads as a move rather than
+          two unrelated pairs of cameras. */}
+      {guide.previews.map((p, i) =>
+        guide.afterimages[i] ? (
+          <Line
+            key={`travel-${i}`}
+            points={[p, guide.afterimages[i]]}
+            color={CAMERA_RIG.afterimage}
+            lineWidth={1.25}
+            dashed
+            dashSize={0.25}
+            gapSize={0.2}
+            transparent
+            opacity={0.7}
+            raycast={() => null}
+            depthTest={false}
+            renderOrder={3}
+          />
+        ) : null
+      )}
+    </>
+  );
+}
+
+/**
+ * SHOT MARKERS — every frame the capture will take, as a dot.
+ *
+ * Counts are the one part of a capture plan nobody can picture: 24 shots per
+ * rotation and 36 look identical as numbers and completely different as
+ * coverage. So each pass draws the circle it turns on and a tick at every
+ * bearing it fires from, and each stop on the sweep draws a dot where the rig
+ * stands. Whichever count is being edited reads live; the other stays quiet.
+ *
+ * Ticks are capped: a 12 × 120 plan is 1,440 markers, which is a mesh per frame
+ * of a dataset and a picture of nothing. Past the cap only the two end rings
+ * carry ticks — the shape is still legible and the scene still moves.
+ */
+const TICK_BUDGET = 240;
+
+function ShotMarkers({ guide }: { guide: Extract<CameraGuide, { kind: "shots" }> }) {
+  const { centre, stops, bearings, focus } = guide;
+  const tickRings =
+    stops.length * bearings.length <= TICK_BUDGET || stops.length < 3
+      ? stops
+      : [stops[0], stops[stops.length - 1]];
+
+  const dot = Math.max(0.08, (stops[0]?.radius ?? 4) * 0.02);
+
+  return (
+    <group>
+      {stops.map((stop, i) => (
+        <GuideRing
+          key={`ring-${i}`}
+          centre={centre}
+          y={stop.y}
+          radius={stop.radius}
+          live={focus === "rotation"}
+          dashed
+        />
+      ))}
+
+      {/* One tick per shot, on the ring of the pass that takes it. */}
+      {tickRings.map((stop, i) =>
+        bearings.map((deg, j) => {
+          const t = (deg * Math.PI) / 180;
+          return (
+            <mesh
+              key={`tick-${i}-${j}`}
+              position={[
+                centre[0] + Math.sin(t) * stop.radius,
+                stop.y,
+                centre[2] + Math.cos(t) * stop.radius,
+              ]}
+              raycast={() => null}
+              renderOrder={4}
+            >
+              <sphereGeometry args={[dot, 8, 8]} />
+              <meshBasicMaterial
+                color={focus === "rotation" ? CAMERA_RIG.selected : CAMERA_RIG.start}
+                toneMapped={false}
+                depthTest={false}
+                transparent
+                opacity={focus === "rotation" ? 0.95 : 0.6}
+              />
+            </mesh>
+          );
+        })
+      )}
+
+      {/* Where the rig stands for each pass — the other count, made of dots. */}
+      {stops.map((stop, i) => (
+        <mesh key={`stop-${i}`} position={stop.position} raycast={() => null} renderOrder={5}>
+          <sphereGeometry args={[dot * 2.4, 14, 14]} />
+          <meshBasicMaterial
+            color={focus === "distance" ? CAMERA_RIG.selected : CAMERA_RIG.start}
+            toneMapped={false}
+            depthTest={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/**
+ * The orbit ring: the master's turntable, drawn around the master and dragged
+ * to turn it. The cameras hold still — they're locked on the master, so the
+ * only rotation that changes what they capture is the subject's own.
+ *
+ * The drag target is a large invisible disc rather than the ring itself,
+ * because a 2px ring is impossible to stay on with a mouse. It only enters the
+ * raycast once a drag has started — otherwise it would swallow every click in
+ * the viewport, including the ones that select objects.
+ */
+function OrbitRing({
+  guide,
+  onOrbit,
+}: {
+  guide: Extract<CameraGuide, { kind: "orbit" }>;
+  onOrbit: (deg: number) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const { centre, y, radius, azimuth, arc } = guide;
+
+  // OrbitControls binds its own DOM listeners, so R3F's stopPropagation can't
+  // hold it off — without suspending it, dragging the ring tumbles the VIEW at
+  // the same time as it swings the rig, and neither movement is controllable.
+  // `makeDefault` on OrbitControls is what puts it in state.controls.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const controls = useThree((s) => s.controls as any);
+  const suspend = (off: boolean) => {
+    if (controls) controls.enabled = !off;
+  };
+
+  const handleAt = (deg: number): [number, number, number] => {
+    const t = (deg * Math.PI) / 180;
+    return [centre[0] + Math.sin(t) * radius, y, centre[2] + Math.cos(t) * radius];
+  };
+
+  const angleFrom = (point: Vector3) =>
+    (Math.atan2(point.x - centre[0], point.z - centre[2]) * 180) / Math.PI;
+
+  const start = (e: { stopPropagation: () => void; target: unknown; pointerId: number }) => {
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture(e.pointerId);
+    setDragging(true);
+    suspend(true);
+  };
+
+  const end = (e: { target: unknown; pointerId: number }) => {
+    (e.target as Element).releasePointerCapture(e.pointerId);
+    setDragging(false);
+    suspend(false);
+  };
+
+  /** The captured wedge, as its own polyline over the full circle. */
+  const arcPoints = (() => {
+    const sweep = ((arc.end - arc.start) % 360 + 360) % 360 || 360;
+    const steps = Math.max(8, Math.round((sweep / 360) * RING_SEGMENTS));
+    return Array.from({ length: steps + 1 }, (_, i) => {
+      const t = ((arc.start + (sweep * i) / steps) * Math.PI) / 180;
+      return [centre[0] + Math.sin(t) * radius, y, centre[2] + Math.cos(t) * radius] as [
+        number,
+        number,
+        number,
+      ];
+    });
+  })();
+
+  const full = Math.abs((((arc.end - arc.start) % 360) + 360) % 360) === 0;
+
+  return (
+    <group>
+      {/* The whole turntable, dashed — everything the rig COULD sweep. */}
+      <GuideRing centre={centre} y={y} radius={radius} live={dragging} dashed={!full} />
+
+      {/* And the wedge it will actually sweep, laid over it solid. Drawn only
+          when the arc is narrower than a revolution; over a full turn the two
+          lines would be the same circle drawn twice. */}
+      {!full && (
+        <Line
+          points={arcPoints}
+          color={CAMERA_RIG.selected}
+          lineWidth={2.5}
+          transparent
+          opacity={0.95}
+          raycast={() => null}
+          depthTest={false}
+          renderOrder={4}
+        />
+      )}
+
+      {/* Where the arc opens and closes. Two marks rather than one, because
+          "from here, round to there" is the shape of the setting. */}
+      {!full &&
+        ([
+          ["start", arc.start],
+          ["end", arc.end],
+        ] as const).map(([which, deg]) => (
+          <mesh key={which} position={handleAt(deg)} raycast={() => null} renderOrder={5}>
+            <sphereGeometry args={[Math.max(0.18, radius * 0.035), 16, 16]} />
+            <meshBasicMaterial
+              color={which === "start" ? CAMERA_RIG.selected : CAMERA_RIG.afterimage}
+              toneMapped={false}
+              depthTest={false}
+            />
+          </mesh>
+        ))}
+
+      {/* Invisible drag plane, live only while dragging. */}
+      <mesh
+        position={[centre[0], y, centre[2]]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        visible={false}
+        /* `undefined` does NOT mean "default" here: R3F assigns the prop
+           straight onto the object, so it leaves `mesh.raycast === undefined`
+           and three.js then throws "object.raycast is not a function" on every
+           subsequent raycast — one drag of this ring and the viewport stops
+           responding to clicks entirely. The default has to be named. */
+        raycast={dragging ? Mesh.prototype.raycast : () => null}
+        onPointerMove={(e) => {
+          if (!dragging) return;
+          e.stopPropagation();
+          onOrbit(angleFrom(e.point));
+        }}
+        onPointerUp={end}
+      >
+        <circleGeometry args={[Math.max(radius * 4, 200), 8]} />
+        <meshBasicMaterial />
+      </mesh>
+
+      {/* The grab handle, sitting on the ring at the camera's own angle. */}
+      <mesh
+        position={handleAt(azimuth)}
+        onPointerDown={start}
+        onPointerMove={(e) => {
+          if (!dragging) return;
+          e.stopPropagation();
+          onOrbit(angleFrom(e.point));
+        }}
+        onPointerUp={end}
+        onPointerOver={() => (document.body.style.cursor = "grab")}
+        onPointerOut={() => (document.body.style.cursor = "auto")}
+        renderOrder={4}
+      >
+        <sphereGeometry args={[Math.max(0.25, radius * 0.045), 20, 20]} />
+        <meshBasicMaterial
+          color={dragging ? CAMERA_RIG.selected : CAMERA_RIG.start}
+          toneMapped={false}
+          depthTest={false}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+/**
+ * The climb grip — a flat bar across the sweep line, not a ball on it.
+ *
+ * A sphere reads as a joint: something to swing the line around. This is a
+ * SLIDER, and the shape people already know for one is a short bar lying across
+ * the track, which is also what the panels' own resize grips look like. It
+ * turns to face the viewer so it stays a bar rather than collapsing to a line
+ * when the rig is orbited, and it carries an invisible box around it because a
+ * 4px-thick target is not something anyone can reliably grab.
+ */
+function ClimbGrip({
+  position,
+  size,
+  live,
+  ...handlers
+}: {
+  position: [number, number, number];
+  size: number;
+  live: boolean;
+} & Pick<
+  React.ComponentProps<"mesh">,
+  "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerOver" | "onPointerOut"
+>) {
+  const ref = useRef<Group>(null);
+
+  useFrame(({ camera }) => {
+    const g = ref.current;
+    if (!g) return;
+    // Billboarded about Y only: the bar stays horizontal (it measures height)
+    // while its face keeps turning to the camera.
+    g.rotation.y = Math.atan2(camera.position.x - position[0], camera.position.z - position[2]);
+  });
+
+  const width = size * 3.4;
+  const thickness = size * 0.5;
+
+  return (
+    <group ref={ref} position={position}>
+      {/* The visible bar, plus a paler cap line above it so the grip reads as a
+          control with a direction rather than a floating slab. */}
+      <mesh renderOrder={5} {...handlers}>
+        <boxGeometry args={[width, thickness, thickness * 0.6]} />
+        <meshBasicMaterial
+          color={live ? CAMERA_RIG.selected : CAMERA_RIG.start}
+          toneMapped={false}
+          depthTest={false}
+        />
+      </mesh>
+
+      {/* Grab target: generous and see-through. TRANSPARENT, not `visible=false`
+          — an invisible object is skipped by the raycaster, so the pointer fell
+          straight past this to OrbitControls and dragging the grip tumbled the
+          view instead of moving the rig. */}
+      <mesh renderOrder={6} {...handlers}>
+        <boxGeometry args={[width * 1.3, size * 2.6, size * 2.6]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} depthTest={false} />
+      </mesh>
+    </group>
+  );
+}
+
+/**
+ * RIG HANDLES — direct manipulation of a capture rig in the viewport.
+ *
+ * Two gestures, because a turntable rig only has two degrees of freedom worth
+ * dragging once the master is chosen:
+ *
+ *   · Grab either CAMERA and swing it. Both ends travel — the pair is one
+ *     instrument, and orbiting half a sweep would tilt the plane the capture
+ *     runs in. Each keeps its own height and its own ground radius, so the
+ *     shot's framing is untouched and only the bearing changes.
+ *
+ *   · Grab the handle on the SWEEP LINE and pull it up or down. That is the
+ *     climb between the two ends. The far camera stays exactly as far from the
+ *     master as it was (see `withVerticalSpan`), so raising the sweep arcs it
+ *     over the object instead of walking it away — which is what keeps this
+ *     gesture and the Distance control talking about the same rig.
+ *
+ * Both suspend OrbitControls for the duration. R3F's stopPropagation can't hold
+ * it off — it binds its own DOM listeners — so without this the view tumbles
+ * underneath the drag and neither movement is controllable.
+ */
+function RigHandles({
+  guide,
+  onOrbit,
+  onSpan,
+}: {
+  guide: Extract<CameraGuide, { kind: "rig" }>;
+  onOrbit: (deg: number) => void;
+  onSpan: (metres: number) => void;
+}) {
+  // The gesture lives in a REF as well as state. A pointermove can land in the
+  // same tick as the pointerdown that started the drag, before React has
+  // re-rendered with the new state — so the guard reads the ref (synchronous,
+  // always current) while the colour reads the state.
+  const active = useRef<null | "orbit" | "span">(null);
+  /** cursor-to-grip distance at pointer-down, so the grip can't jump */
+  const grabOffset = useRef(0);
+  const [drag, setDrag] = useState<null | "orbit" | "span">(null);
+  const { centre, start, end } = guide;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const controls = useThree((s) => s.controls as any);
+  const camera = useThree((s) => s.camera);
+  const plane = useMemo(() => new Plane(), []);
+  const hit = useMemo(() => new Vector3(), []);
+  const normal = useMemo(() => new Vector3(), []);
+  const point = useMemo(() => new Vector3(), []);
+
+  /**
+   * Where the pointer is in the world, resolved against the surface the gesture
+   * moves along — NOT against the handle's own geometry.
+   *
+   * `e.point` would be the spot on the grab sphere the ray happened to touch,
+   * which drifts by the sphere's radius and stops updating the moment the
+   * pointer leaves it. Since the handle holds pointer capture for the whole
+   * drag, the ray is the only thing that keeps tracking, so both gestures
+   * intersect it with a plane of their own:
+   *
+   *   · orbit — the horizontal plane the near camera stands on
+   *   · climb — a vertical plane through the rig, turned to face the viewer, so
+   *     dragging up is dragging up from wherever you happen to be orbiting
+   */
+  const orbitAt = (ray: Ray): number | null => {
+    plane.set(UP, -start[1]);
+    if (!ray.intersectPlane(plane, hit)) return null;
+    return (Math.atan2(hit.x - centre[0], hit.z - centre[2]) * 180) / Math.PI;
+  };
+
+  const heightAt = (ray: Ray): number | null => {
+    normal.set(camera.position.x - start[0], 0, camera.position.z - start[2]);
+    if (normal.lengthSq() < 1e-6) return null;
+    plane.setFromNormalAndCoplanarPoint(
+      normal.normalize(),
+      point.set(start[0], start[1], start[2])
+    );
+    return ray.intersectPlane(plane, hit) ? hit.y : null;
+  };
+
+  const suspend = (off: boolean) => {
+    if (controls) controls.enabled = !off;
+  };
+
+  const begin =
+    (kind: "orbit" | "span") =>
+    (e: { stopPropagation: () => void; target: unknown; pointerId: number; ray?: Ray }) => {
+      e.stopPropagation();
+      (e.target as Element).setPointerCapture(e.pointerId);
+      // Where the grip was grabbed, relative to where it sits. Without this the
+      // climb jumps to wherever the cursor happened to be on the first frame —
+      // and since the grip rides the MIDPOINT of the sweep, that jump halved
+      // the rig's height the instant you touched it.
+      if (kind === "span" && e.ray) {
+        const y = heightAt(e.ray);
+        grabOffset.current = y === null ? 0 : y - (start[1] + end[1]) / 2;
+      }
+      active.current = kind;
+      setDrag(kind);
+      suspend(true);
+    };
+
+  const move =
+    (kind: "orbit" | "span") =>
+    (e: { stopPropagation: () => void; ray: Ray }) => {
+      if (active.current !== kind) return;
+      e.stopPropagation();
+      if (kind === "orbit") {
+        const deg = orbitAt(e.ray);
+        if (deg !== null) onOrbit(deg);
+      } else {
+        // The grip is the sweep's MIDPOINT, so it moves half as far as the far
+        // camera does: drag it down a metre and the top of the rig comes down
+        // two. Solving the midpoint back into a climb is what makes the gesture
+        // read as "pull the rig down" rather than "set a number".
+        const y = heightAt(e.ray);
+        if (y !== null) onSpan(2 * (y - grabOffset.current - start[1]));
+      }
+    };
+
+  const finish = (e: { target: unknown; pointerId: number }) => {
+    (e.target as Element).releasePointerCapture(e.pointerId);
+    active.current = null;
+    setDrag(null);
+    suspend(false);
+    document.body.style.cursor = "auto";
+  };
+
+  const cursor = (c: string) => () => {
+    if (!active.current) document.body.style.cursor = c;
+  };
+
+  const groundRadius = Math.hypot(start[0] - centre[0], start[2] - centre[2]);
+  const endRadius = Math.hypot(end[0] - centre[0], end[2] - centre[2]);
+  const grip = Math.max(0.22, groundRadius * 0.05);
+
+  return (
+    <group>
+      {/* The circle each end runs along, so the result of a swing is legible
+          before it's made. */}
+      <GuideRing centre={centre} y={start[1]} radius={groundRadius} live={drag === "orbit"} dashed />
+      <GuideRing centre={centre} y={end[1]} radius={endRadius} live={drag === "orbit"} dashed />
+
+      {/* Grab spheres on both cameras — either one swings the pair. */}
+      {[start, end].map((p, i) => (
+        <mesh
+          key={i}
+          position={p}
+          onPointerDown={begin("orbit")}
+          onPointerMove={move("orbit")}
+          onPointerUp={finish}
+          onPointerOver={cursor("grab")}
+          onPointerOut={cursor("auto")}
+          renderOrder={4}
+        >
+          <sphereGeometry args={[grip, 18, 18]} />
+          <meshBasicMaterial
+            color={drag === "orbit" ? CAMERA_RIG.selected : CAMERA_RIG.start}
+            toneMapped={false}
+            transparent
+            opacity={0.85}
+            depthTest={false}
+          />
+        </mesh>
+      ))}
+
+      {/* --------------------------------------------------------- climb grip */}
+      {/* A knob ON the sweep line, not a ruler beside it.
+          The offset gauge was a second vertical bar a metre to the side of the
+          dotted one, and with the rig orbited it was ambiguous which of the two
+          you were meant to grab — so the handle now rides the line it edits, at
+          its midpoint, where it can't be mistaken for anything else. Dragging it
+          moves the FAR camera; the near end is the datum the climb measures
+          from. */}
+      <ClimbGrip
+        position={[(start[0] + end[0]) / 2, (start[1] + end[1]) / 2, (start[2] + end[2]) / 2]}
+        size={grip}
+        live={drag === "span"}
+        onPointerDown={begin("span")}
+        onPointerMove={move("span")}
+        onPointerUp={finish}
+        onPointerOver={cursor("ns-resize")}
+        onPointerOut={cursor("auto")}
+      />
+
+      {/* The climb in metres, next to the knob, so the drag has a number. */}
+      <Html
+        position={[
+          (start[0] + end[0]) / 2,
+          (start[1] + end[1]) / 2,
+          (start[2] + end[2]) / 2,
+        ]}
+        center
+        distanceFactor={10}
+        style={{ pointerEvents: "none", transform: "translateX(38px)" }}
+      >
+        <span
+          style={{
+            background: READOUT.bg,
+            color: drag === "span" ? CAMERA_RIG.selected : READOUT.ink,
+            padding: "2px 6px",
+            borderRadius: 6,
+            fontSize: 11,
+            fontVariantNumeric: "tabular-nums",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {(end[1] - start[1]).toFixed(1)} m
+        </span>
+      </Html>
+    </group>
+  );
+}
+
+export function SceneCanvas({
+  scene,
+  gizmoMode,
+  showGizmo,
+  controlsRef,
+  cameraRef,
+  onViewChange,
+  cameraGuide,
+  onOrbit,
+  onSpan,
+  gizmoInset = 0,
+}: SceneCanvasProps) {
   const [meshes, setMeshes] = useState<Record<string, Object3D>>({});
 
   // Auto-orbit around the focused object. Held off until FocusRig's fly-in has
@@ -327,9 +1244,27 @@ export function SceneCanvas({ scene, gizmoMode, showGizmo, controlsRef, cameraRe
     });
   }, []);
 
+  /**
+   * Objects a guide is standing in for, and which therefore aren't in the scene
+   * graph right now. Nothing may attach to them — see `gizmoOn`.
+   */
+  const guideHides = cameraGuide?.kind === "distance" ? cameraGuide.hides : undefined;
+
   const selMesh = scene.selectedId ? meshes[scene.selectedId] : null;
-  // Gizmo (and its readout/skin) only exist while Object settings is open.
-  const gizmoOn = !!selMesh && showGizmo;
+  // Gizmo (and its readout/skin) only exist while Object settings is open — and
+  // never on a locked object, which is the whole point of the lock: still
+  // selectable and inspectable, just not draggable.
+  //
+  // Nor on anything a guide has hidden. TransformControls throws outright when
+  // its target leaves the scene graph ("must be a part of the scene graph"),
+  // and that throw comes from inside the render loop — one frame later the
+  // whole viewport is black. The distance preview unmounts the two rig cameras,
+  // so this is not hypothetical.
+  const gizmoOn =
+    !!selMesh &&
+    showGizmo &&
+    !scene.selected?.locked &&
+    !(scene.selectedId && guideHides?.includes(scene.selectedId));
 
   const commitTransform = () => {
     if (!selMesh || !scene.selectedId) return;
@@ -339,6 +1274,27 @@ export function SceneCanvas({ scene, gizmoMode, showGizmo, controlsRef, cameraRe
       scale: [selMesh.scale.x, selMesh.scale.y, selMesh.scale.z],
     });
   };
+
+  // Framing for the focus fly-in. A camera isn't framed on its own body — its
+  // job is to capture, so selecting one pulls back to show the WHOLE rig (both
+  // cameras and the sweep between them) rather than zooming onto one lens.
+  const sel = scene.selected;
+  const rig = sel?.rigId ? scene.rigs.find((r) => r.id === sel.rigId) : undefined;
+  let focusCenter: [number, number, number] | null = sel ? sel.position : null;
+  let focusRadius = sel ? 0.7 * Math.max(...sel.scale) : 0;
+  if (sel && rig) {
+    const { start, end } = scene.rigCameras(rig);
+    if (start && end) {
+      focusCenter = [
+        (start.position[0] + end.position[0]) / 2,
+        (start.position[1] + end.position[1]) / 2,
+        (start.position[2] + end.position[2]) / 2,
+      ];
+      // Half the separation frames both ends; the floor keeps a collapsed rig
+      // from framing to nothing.
+      focusRadius = Math.max(1.5, distance(start.position, end.position) * 0.6);
+    }
+  }
 
   return (
     <Canvas
@@ -350,29 +1306,13 @@ export function SceneCanvas({ scene, gizmoMode, showGizmo, controlsRef, cameraRe
     >
       <CameraGrabber cameraRef={cameraRef} />
 
-      <directionalLight
-        position={[8, 12, 6]}
-        intensity={0.4 * scene.env.brightness}
-        color={warmColor(scene.env.warmth)}
-        castShadow
+      <SceneWorld
+        scene={scene}
+        register={register}
+        selectedId={scene.selectedId}
+        onSelect={scene.select}
+        hideIds={guideHides}
       />
-
-      <Environment
-        files="/hdri/aarfontein_dusk_4k.exr"
-        background
-        environmentIntensity={0.35}
-        ground={{ height: 15, radius: 60, scale: 400 }}
-      />
-
-      {scene.objects.map((o) => (
-        <SceneObjectMesh
-          key={o.id}
-          object={o}
-          selected={o.id === scene.selectedId}
-          onSelect={scene.select}
-          register={register}
-        />
-      ))}
 
       {gizmoOn && (
         <TransformControls
@@ -408,21 +1348,94 @@ export function SceneCanvas({ scene, gizmoMode, showGizmo, controlsRef, cameraRe
       <FocusRig
         controlsRef={controlsRef}
         focusId={scene.selectedId}
-        center={scene.selected ? scene.selected.position : null}
-        radius={scene.selected ? 0.7 * Math.max(...scene.selected.scale) : 0}
+        center={focusCenter}
+        radius={focusRadius}
         onSettled={() => setFocusSettled(true)}
       />
 
       <KeyboardFly controlsRef={controlsRef} />
 
-      <GizmoHelper alignment="top-right" margin={[96, 128]}>
-        <GizmoViewcube
-          color={VIEWCUBE.face}
-          textColor={VIEWCUBE.text}
-          strokeColor={VIEWCUBE.stroke}
-          hoverColor={VIEWCUBE.hover}
-        />
-      </GizmoHelper>
+      {onViewChange && <ViewProbe controlsRef={controlsRef} onChange={onViewChange} />}
+
+      {cameraGuide?.kind === "distance" && <DistanceHalos guide={cameraGuide} />}
+      {cameraGuide?.kind === "shots" && <ShotMarkers guide={cameraGuide} />}
+      {cameraGuide?.kind === "rig" && onOrbit && onSpan && (
+        <RigHandles guide={cameraGuide} onOrbit={onOrbit} onSpan={onSpan} />
+      )}
+      {cameraGuide?.kind === "orbit" && onOrbit && (
+        <OrbitRing guide={cameraGuide} onOrbit={onOrbit} />
+      )}
+
+      <OrientationGizmo inset={gizmoInset} controlsRef={controlsRef} />
     </Canvas>
+  );
+}
+
+/** Matches the dock panel's own arrival — `panel-in`, 0.26s, the same curve. A
+ *  shared duration is what makes the two read as one movement. */
+const GIZMO_STEP_MS = 300;
+const easeOutExpo = (t: number) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
+
+/**
+ * The orientation cube, and the easing that carries it out of the dock's way.
+ *
+ * The cube steps left when a tool panel opens. It used to arrive there in one
+ * frame — the panel slid in over 260ms while the cube teleported — and since
+ * every other ornament anchored to the cube had to hold still with it, the whole
+ * right-hand corner snapped while the panel eased. That mismatch was the part
+ * that read as broken.
+ *
+ * GizmoHelper positions the cube from its `margin` prop, and it OVERWRITES the
+ * group's quaternion every frame to track the camera, so a tween can't be hidden
+ * in a child group — a child offset would tumble with the cube. The margin is
+ * therefore what has to move, which means React state, which means a re-render
+ * per frame of the tween. That's why this is its own component: the re-renders
+ * are confined to the gizmo subtree rather than running through the whole canvas.
+ */
+function OrientationGizmo({
+  inset,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  controlsRef,
+}: {
+  inset: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  controlsRef: React.MutableRefObject<any>;
+}) {
+  const [eased, setEased] = useState(inset);
+  const from = useRef(inset);
+
+  useEffect(() => {
+    const start = performance.now();
+    const a = from.current;
+    if (a === inset) return;
+
+    let raf = 0;
+    const step = () => {
+      const t = Math.min(1, (performance.now() - start) / GIZMO_STEP_MS);
+      const next = a + (inset - a) * easeOutExpo(t);
+      from.current = next;
+      setEased(next);
+      if (t < 1) raf = requestAnimationFrame(step);
+      else from.current = inset;
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [inset]);
+
+  return (
+    /* Sits under the top-right action cluster, and lines up with the left
+       rail: the rail's first tool starts at x=16 / y=80, so the cube's ink
+       has to start there too.
+
+       The margin is measured to the cube's CENTRE, not to its ink, so both
+       numbers have to carry the ring's reach — the step arrows are the
+       outermost thing drawn, tips at TRI_TIP × CUBE_PX from centre in every
+       direction. Derived rather than typed, so resizing the cube keeps the
+       ornament aligned instead of silently drifting into the corner. */
+    <GizmoHelper alignment="top-right" margin={[16 + eased + GIZMO_REACH, 80 + GIZMO_REACH]}>
+      {/* The ring arrows need the real scene camera and orbit pivot, which the
+          gizmo's HUD store doesn't expose — the controls carry both. */}
+      <ViewCube controlsRef={controlsRef} />
+    </GizmoHelper>
   );
 }

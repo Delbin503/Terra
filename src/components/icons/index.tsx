@@ -77,12 +77,33 @@ import {
   Rotate3d,
   Scale3d,
   Lock,
+  LockOpen,
+  Eye,
+  EyeOff,
+  Copy,
+  ClipboardPaste,
+  CopyPlus,
+  Group,
+  ListFilter,
   GripHorizontal,
   Crown,
   SunMedium,
   ScanSearch,
   Send,
   ImagePlus,
+  Minimize2,
+  SquareStack,
+  Tag,
+  Database,
+  FolderOpen,
+  Paperclip,
+  AtSign,
+  Braces,
+  CircleAlert,
+  TriangleAlert,
+  RotateCcw,
+  LayoutTemplate,
+  FileText,
   type LucideIcon,
 } from "lucide-react";
 
@@ -126,6 +147,11 @@ export const iconRegistry = {
   info: Info,
   "select-check": CircleCheck,
   spinner: Loader2,
+  folder: FolderClosed,
+  "folder-open": FolderOpen,
+  tag: Tag,
+  /** open the asset library as a chooser */
+  "library-picker": Database,
 
   // Object editing (gizmo / toolbar / panels)
   back: ArrowLeft,
@@ -137,15 +163,44 @@ export const iconRegistry = {
   rotate: Rotate3d,
   scale: Scale3d,
   lock: Lock,
+  unlock: LockOpen,
   drag: GripHorizontal,
   master: Crown,
+
+  // Scene layers (tree rows + their context menu)
+  /** a container object — children nest inside it */
+  group: Group,
+  /** the object is rendered in the viewport */
+  visible: Eye,
+  /** the object is excluded from the viewport */
+  hidden: EyeOff,
+  copy: Copy,
+  paste: ClipboardPaste,
+  duplicate: CopyPlus,
+  /** narrow a list down to chosen types */
+  filter: ListFilter,
 
   // AI flyout + chat
   "ai-chat": Sparkles,
   asa: ScanSearch,
   mat: ImagePlus,
+  sab: SquareStack,
   send: Send,
-  attach: ImagePlus,
+  attach: Paperclip,
+  /** @-mention a library, material or style in the composer */
+  mention: AtSign,
+  /** a bundle of scene objects referenced as one thing */
+  nodes: Layers,
+  /** the agent's work categories, on its work cards */
+  layout: LayoutTemplate,
+  /** technical output — a query, a log, a script */
+  code: Braces,
+  /** re-run the thing that failed */
+  retry: RotateCcw,
+  /** a referenced project file */
+  file: FileText,
+  /** collapse a working panel down to its progress toast */
+  minimize: Minimize2,
 
   // Viewport gizmo
   "gizmo-home": Home,
@@ -153,6 +208,8 @@ export const iconRegistry = {
   "gizmo-focus": Focus,
   "gizmo-reset": Orbit,
   "gizmo-save": Save,
+  /** the turntable capture pass */
+  capture: Orbit,
 
   // World / scene inputs
   "input-2d": Image,
@@ -172,6 +229,12 @@ export const iconRegistry = {
   "sign-out": LogOut,
   command: Command,
   tune: SlidersHorizontal,
+
+  // Status / severity
+  /** a failure — an operation that stopped */
+  error: CircleAlert,
+  /** a caution — approaching a limit, nothing broken yet */
+  warning: TriangleAlert,
 
   // Credits / status
   credits: Zap,

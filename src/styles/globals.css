@@ -313,8 +313,11 @@
     -webkit-backdrop-filter: blur(var(--glass-blur-active))
       saturate(var(--glass-saturate)) brightness(var(--glass-brightness));
   }
-  .glass-role-brand  { --glass-role: var(--brand); }
-  .glass-role-master { --glass-role: var(--master); }
+  .glass-role-brand   { --glass-role: var(--brand); }
+  .glass-role-master  { --glass-role: var(--master); }
+  .glass-role-distractor { --glass-role: var(--distractor); }
+  .glass-role-backdrop   { --glass-role: var(--backdrop); }
+  .glass-role-success { --glass-role: var(--success); }
 
   /* Hover on an active tile must stack the frost ON the tint — the plain
      .glass-interactive:hover rule replaces background-image outright, which

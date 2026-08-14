@@ -15,8 +15,18 @@ const OUTLINE_SCALE = 1.014;
 
 const OUTLINE_SELECTED = OUTLINE.selected.css;
 const OUTLINE_HOVER = OUTLINE.hover.css;
-const OUTLINE_MASTER = OUTLINE.master.css;
-const OUTLINE_MASTER_DIM = OUTLINE.masterDim.css;
+
+/**
+ * Outline colour per dataset role. An object that carries a role outlines in
+ * that role's hue instead of white, so which objects are the hero, the clutter
+ * and the dressing is answerable by looking at the scene rather than by
+ * clicking through the layer list. `none` falls through to the neutral pair.
+ */
+const ROLE_OUTLINE: Record<string, { on: string; dim: string }> = {
+  master: { on: OUTLINE.master.css, dim: OUTLINE.masterDim.css },
+  distractor: { on: OUTLINE.distractor.css, dim: OUTLINE.distractorDim.css },
+  background: { on: OUTLINE.backdrop.css, dim: OUTLINE.backdropDim.css },
+};
 
 /** Geometry for a placeholder shape (all roughly 1m so transforms stay consistent). */
 function ShapeGeometry({ shape }: { shape: ObjectShape }) {
@@ -104,12 +114,18 @@ export function SceneObjectMesh({
         <Model url={object.modelUrl} />
       ) : (
         <>
-          <mesh castShadow receiveShadow>
+          {/* A pending object is a placeholder for something still generating.
+              It casts no shadow and reads through — the scene should show that
+              the spot is taken without claiming the object has arrived. */}
+          <mesh castShadow={!object.pending} receiveShadow={!object.pending}>
             <ShapeGeometry shape={object.shape} />
             <meshStandardMaterial
               color={object.color}
               metalness={object.metalness}
               roughness={object.roughness}
+              transparent={object.pending}
+              opacity={object.pending ? 0.35 : 1}
+              wireframe={object.pending}
             />
           </mesh>
 
@@ -121,18 +137,19 @@ export function SceneObjectMesh({
               `raycast` is disabled so the shell can't steal the pointer from the
               mesh and thrash the hover state.
 
-              A master object outlines in its own yellow instead of white, so the
-              scene's hero object stays identifiable while it's focused. Hover is
-              the same hue a step dimmer, keeping selection the stronger read. */}
+              An object with a dataset role outlines in that role's own colour
+              instead of white, so the hero, the clutter and the dressing stay
+              identifiable while focused. Hover is the same hue a step dimmer,
+              keeping selection the stronger read. */}
           {(selected || hovered) && (
             <mesh scale={OUTLINE_SCALE} raycast={() => null}>
               <ShapeGeometry shape={object.shape} />
               <meshBasicMaterial
                 color={
-                  object.isMaster
+                  ROLE_OUTLINE[object.role]
                     ? selected
-                      ? OUTLINE_MASTER
-                      : OUTLINE_MASTER_DIM
+                      ? ROLE_OUTLINE[object.role].on
+                      : ROLE_OUTLINE[object.role].dim
                     : selected
                       ? OUTLINE_SELECTED
                       : OUTLINE_HOVER
