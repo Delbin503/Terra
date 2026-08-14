@@ -59,9 +59,19 @@ const config: Config = {
           soft: "hsl(var(--danger-soft) / <alpha-value>)",
           "on-glass": "hsl(var(--danger-on-glass) / <alpha-value>)",
         },
+        // The three object roles. Master is the hero, distractor is the clutter
+        // a detector must ignore, backdrop is the dressing behind both.
         master: {
           DEFAULT: "hsl(var(--master) / <alpha-value>)",
           "on-glass": "hsl(var(--master-on-glass) / <alpha-value>)",
+        },
+        distractor: {
+          DEFAULT: "hsl(var(--distractor) / <alpha-value>)",
+          "on-glass": "hsl(var(--distractor-on-glass) / <alpha-value>)",
+        },
+        backdrop: {
+          DEFAULT: "hsl(var(--backdrop) / <alpha-value>)",
+          "on-glass": "hsl(var(--backdrop-on-glass) / <alpha-value>)",
         },
         ring: "hsl(var(--ring) / <alpha-value>)",
         // visionOS glass tint — for ad-hoc alpha use (bg-glass/10);
@@ -112,15 +122,46 @@ const config: Config = {
       keyframes: {
         "fade-in": { from: { opacity: "0" }, to: { opacity: "1" } },
         "overlay-in": { from: { opacity: "0" }, to: { opacity: "1" } },
+        // A centred modal. The `translate(-50%, -50%)` is NOT decoration — it is
+        // the dialog's own centring, repeated inside the keyframes because an
+        // animation's `transform` REPLACES the element's for the whole run.
+        // Without it the dialog jumped a half-width down and right on open, slid
+        // to that wrong spot, then snapped back to centre on the last frame.
         "modal-in": {
-          from: { opacity: "0", transform: "translateY(8px) scale(0.98)" },
-          to: { opacity: "1", transform: "translateY(0) scale(1)" },
+          from: { opacity: "0", transform: "translate(-50%, -50%) translateY(8px) scale(0.98)" },
+          to: { opacity: "1", transform: "translate(-50%, -50%) translateY(0) scale(1)" },
+        },
+        // A docked drawer slides in from its own edge rather than scaling up —
+        // it arrives from off-screen, it doesn't grow out of nothing.
+        "drawer-in": {
+          from: { opacity: "0", transform: "translateX(-16px)" },
+          to: { opacity: "1", transform: "translateX(0)" },
+        },
+        // A panel arriving in the right-hand dock. Mirrors drawer-in — it comes
+        // from ITS edge, which is the right one now, not the left.
+        "panel-in": {
+          from: { opacity: "0", transform: "translateX(16px)" },
+          to: { opacity: "1", transform: "translateX(0)" },
+        },
+        // Indeterminate work: a highlight travelling across a track.
+        shimmer: {
+          from: { transform: "translateX(-110%)" },
+          to: { transform: "translateX(210%)" },
+        },
+        // …and the three dots under it, offset per dot by animationDelay.
+        "thinking-dot": {
+          "0%, 80%, 100%": { opacity: "0.25", transform: "translateY(0)" },
+          "40%": { opacity: "1", transform: "translateY(-2px)" },
         },
       },
       animation: {
         "fade-in": "fade-in 0.2s ease",
         "overlay-in": "overlay-in 0.18s ease",
         "modal-in": "modal-in 0.2s cubic-bezier(0.16,1,0.3,1)",
+        "drawer-in": "drawer-in 0.26s cubic-bezier(0.16,1,0.3,1)",
+        "panel-in": "panel-in 0.26s cubic-bezier(0.16,1,0.3,1)",
+        shimmer: "shimmer 1.5s ease-in-out infinite",
+        "thinking-dot": "thinking-dot 1.1s ease-in-out infinite",
       },
     },
   },

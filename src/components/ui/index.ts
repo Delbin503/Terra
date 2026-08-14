@@ -4,7 +4,7 @@ export { Badge, type BadgeProps } from "./badge";
 export { Card } from "./card";
 export { Avatar } from "./avatar";
 export { Meter } from "./meter";
-export { Tooltip, TooltipProvider } from "./tooltip";
+export { Tooltip, TooltipProvider, type TooltipTone } from "./tooltip";
 export {
   Dialog,
   DialogTrigger,

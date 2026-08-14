@@ -4,25 +4,34 @@ import { AssetThumb } from "./AssetThumb";
 import { typeIcon, deriveDetails, type Asset } from "./assets-data";
 
 /**
- * AssetCard — a library tile. Normal state shows a real placeholder thumbnail
- * with a type badge, a hover •••-menu, and a hover quick-info line. It also
- * renders the two async pipeline states: `generating` (spinner + label) and
- * `ready` (multi-view result, click to continue the mesh flow).
+ * AssetCard — a library tile. Normal state shows a placeholder thumbnail with a
+ * type badge, a hover ⋮ menu, and a hover quick-info line. It also renders the
+ * `generating` pipeline state (spinner + label).
+ *
+ * A plain click means "open info" until multi-select is armed from the ⋮ menu,
+ * at which point it means "toggle". One click, one meaning at a time.
  */
 export function AssetCard({
   asset,
+  selectMode,
   selected,
+  disabled,
+  showMenu = true,
   onToggle,
+  onOpen,
   onMenu,
-  onReadyClick,
 }: {
   asset: Asset;
+  selectMode: boolean;
   selected: boolean;
+  /** selection cap reached and this card isn't part of it */
+  disabled?: boolean;
+  /** the ⋮ trigger is noise while the library is acting as a chooser */
+  showMenu?: boolean;
   onToggle: (id: string) => void;
+  onOpen: (asset: Asset) => void;
   onMenu: (asset: Asset, rect: DOMRect) => void;
-  onReadyClick: (asset: Asset) => void;
 }) {
-  // ---- async pipeline cells ----
   if (asset.status === "generating") {
     return (
       <div className="relative aspect-square overflow-hidden rounded-2xl ring-1 ring-brand/40">
@@ -39,26 +48,11 @@ export function AssetCard({
     );
   }
 
-  if (asset.status === "ready") {
-    return (
-      <button
-        type="button"
-        data-ui={`asset-card-${asset.id}`}
-        onClick={() => onReadyClick(asset)}
-        className="group relative aspect-square overflow-hidden rounded-2xl ring-1 ring-success/50 transition-transform hover:-translate-y-0.5"
-      >
-        <div className="absolute inset-0 opacity-80">
-          <AssetThumb type="mesh" seed={asset.seed} />
-        </div>
-        <span className="type-label-strong absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 scrim-strong p-2 pt-6 text-success">
-          <Icon name="check" size={13} strokeWidth={3} />
-          Ready — pick views
-        </span>
-      </button>
-    );
-  }
-
   const details = deriveDetails(asset);
+  const activate = () => {
+    if (disabled) return;
+    selectMode ? onToggle(asset.id) : onOpen(asset);
+  };
 
   return (
     <div
@@ -73,18 +67,19 @@ export function AssetCard({
         e.dataTransfer.effectAllowed = "copy";
       }}
       data-ui={`asset-card-${asset.id}`}
-      aria-pressed={selected}
+      aria-pressed={selectMode ? selected : undefined}
       aria-label={`${asset.name} — ${asset.type}${selected ? ", selected" : ""}`}
-      onClick={() => onToggle(asset.id)}
+      onClick={activate}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onToggle(asset.id);
+          activate();
         }
       }}
       className={cn(
-        "group relative aspect-square cursor-pointer overflow-hidden rounded-2xl text-left outline-none transition-transform",
-        "ring-1 ring-glass/10 hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-ring",
+        "group relative aspect-square overflow-hidden rounded-2xl text-left outline-none transition-transform",
+        "ring-1 ring-glass/10 focus-visible:ring-2 focus-visible:ring-ring",
+        disabled ? "cursor-not-allowed opacity-40" : "cursor-pointer hover:-translate-y-0.5",
         selected && "ring-2 ring-brand"
       )}
     >
@@ -97,26 +92,38 @@ export function AssetCard({
         <Icon name={typeIcon[asset.type]} size={13} strokeWidth={2} />
       </span>
 
-      {/* Selected check (top-left, hidden while hovering so ••• can take over) */}
-      {selected && (
-        <span className="absolute left-2 top-2 grid h-6 w-6 place-items-center rounded-full bg-brand text-brand-foreground group-hover:hidden">
+      {/* Select mode owns the top-left slot entirely: a persistent checkbox
+          (empty until ticked) and no ⋮ — the only meaning of a click here is
+          "toggle", so the actions menu would just be a mistrigger. */}
+      {selectMode ? (
+        <span
+          aria-hidden
+          data-ui={`asset-check-${asset.id}`}
+          className={cn(
+            "absolute left-2 top-2 grid h-6 w-6 place-items-center rounded-md border backdrop-blur-sm transition-colors",
+            selected
+              ? "border-brand bg-brand text-brand-foreground"
+              : "border-white/70 bg-black/40 text-transparent"
+          )}
+        >
           <Icon name="check" size={14} strokeWidth={3} />
         </span>
+      ) : (
+        showMenu && (
+          <button
+            type="button"
+            aria-label={`Actions for ${asset.name}`}
+            data-ui={`asset-menu-${asset.id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onMenu(asset, (e.currentTarget as HTMLElement).getBoundingClientRect());
+            }}
+            className="absolute left-2 top-2 hidden h-6 w-6 place-items-center rounded-md bg-black/50 text-white/90 backdrop-blur-sm hover:bg-black/70 group-hover:grid"
+          >
+            <Icon name="more" size={15} />
+          </button>
+        )
       )}
-
-      {/* ••• actions (top-left, on hover) */}
-      <button
-        type="button"
-        aria-label={`Actions for ${asset.name}`}
-        data-ui={`asset-menu-${asset.id}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onMenu(asset, (e.currentTarget as HTMLElement).getBoundingClientRect());
-        }}
-        className="absolute left-2 top-2 hidden h-6 w-6 place-items-center rounded-md bg-black/50 text-white/90 backdrop-blur-sm hover:bg-black/70 group-hover:grid"
-      >
-        <Icon name="more" size={15} />
-      </button>
 
       {/* Name + hover quick-info */}
       <span className="absolute inset-x-0 bottom-0 scrim-strong p-2 pt-6">

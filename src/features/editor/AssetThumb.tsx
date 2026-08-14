@@ -1,14 +1,26 @@
 import type { AssetType } from "./assets-data";
 import { THUMB } from "./scene-palette";
+import { PlaceholderImage } from "./PlaceholderImage";
 
 const shift = (h: number, by: number) => (h + by) % 360;
 
 /**
- * AssetThumb — a self-contained SVG placeholder that *looks like a real asset
- * preview* (seeded mini-scene), rather than a flat color card. Fully offline,
- * theme-agnostic, and crisp at any size. Motif varies by asset type.
+ * AssetThumb — the preview shown on asset cards, the layers list and the asset
+ * details panel. It prefers the shared placeholder photo and falls back to a
+ * self-contained SVG mini-scene (seeded, offline, theme-agnostic) when no photo
+ * is available.
  */
 export function AssetThumb({ type, seed }: { type: AssetType; seed: number }) {
+  return (
+    <PlaceholderImage
+      className="h-full w-full object-cover"
+      fallback={<AssetThumbArt type={type} seed={seed} />}
+    />
+  );
+}
+
+/** The procedural fallback artwork. Motif varies by asset type. */
+function AssetThumbArt({ type, seed }: { type: AssetType; seed: number }) {
   const h = (seed * 47) % 360;
   const gid = `sky-${seed}`;
   const vid = `vig-${seed}`;
@@ -35,6 +47,8 @@ export function AssetThumb({ type, seed }: { type: AssetType; seed: number }) {
 
       {type === "mesh" ? (
         <MeshMotif />
+      ) : type === "camera" ? (
+        <CameraMotif />
       ) : (
         <SceneMotif type={type} hillNear={hillNear} hillFar={hillFar} hue={h} />
       )}
@@ -74,6 +88,34 @@ function SceneMotif({
           <path d="M55 51 L71 60 L55 69 Z" fill="#fff" opacity="0.92" />
         </>
       )}
+    </>
+  );
+}
+
+/**
+ * A utility, not content — so it gets a diagram rather than a scene: the two
+ * cameras, the sweep between them, and the subject they both point at.
+ */
+function CameraMotif() {
+  const line = "hsl(0 0% 100%)";
+  const brand = "#f36f16";
+  return (
+    <>
+      <rect width="120" height="120" fill="#000" opacity={THUMB.meshBackdrop} />
+      {/* the subject on its turntable */}
+      <ellipse cx="60" cy="86" rx="26" ry="7" fill="none" stroke={line} strokeOpacity="0.28" strokeWidth="1" />
+      <rect x="52" y="64" width="16" height="20" rx="2" fill={line} fillOpacity="0.18" stroke={line} strokeOpacity="0.5" strokeWidth="1" />
+      {/* sweep between start and end */}
+      <path d="M26 74 L26 36" stroke={brand} strokeOpacity="0.7" strokeWidth="1.2" strokeDasharray="3 3" />
+      {/* start (low) + end (high) cameras, both aimed at the subject */}
+      <g fill={brand} fillOpacity="0.9">
+        <rect x="18" y="68" width="14" height="10" rx="2" />
+        <rect x="18" y="30" width="14" height="10" rx="2" fillOpacity="0.6" />
+      </g>
+      <g stroke={brand} strokeOpacity="0.55" strokeWidth="1">
+        <path d="M32 73 L50 78" />
+        <path d="M32 35 L50 66" />
+      </g>
     </>
   );
 }

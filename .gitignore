@@ -18,3 +18,8 @@ public/hdri/
 
 # Stray nested skill scaffold (not part of the app)
 your-project/
+
+# Internal design docs — derived from confidential source material, and this
+# repo is public. Keep them local; push deliberately if that ever changes.
+TERRAGEN-PANEL.md
+TERRAGEN-DISCUSSION.md

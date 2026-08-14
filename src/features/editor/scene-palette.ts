@@ -41,18 +41,28 @@ export type Axis = keyof typeof AXIS;
 /**
  * Selection + hover outline shells (SceneObjectMesh).
  *
- * `master` is deliberately the same value as the `--master` token in
- * tokens.css (hsl(45 93% 58%) === #f8c630) — a Master Object reads yellow in
- * the panel and yellow in the viewport. It lives here rather than being read
- * from CSS because the outline must NOT follow the light theme's darker
- * `--master`; a 3D outline is judged against the scene, not the chrome.
- * If you retune one, retune the other.
+ * The three role colours are deliberately the same values as the matching
+ * tokens in tokens.css — an object reads the same hue in the panel as it does
+ * in the viewport:
+ *
+ *   master      hsl(45 93% 58%)  === #f8c630
+ *   distractor  hsl(190 92% 55%) === #23d3f6
+ *   backdrop    hsl(280 78% 70%) === #c677ee
+ *
+ * They live here rather than being read from CSS because the outline must NOT
+ * follow the light theme's darker tokens; a 3D outline is judged against the
+ * scene, not the chrome. If you retune one, retune the other. Each `*Dim` is
+ * its hue at ~80% value, used for hover so selection stays the stronger read.
  */
 export const OUTLINE = {
   selected: hex("#ffffff"),
   hover: hex("#d8d8d8"),
   master: hex("#f8c630"),
   masterDim: hex("#c79c25"),
+  distractor: hex("#23d3f6"),
+  distractorDim: hex("#1ca9c5"),
+  backdrop: hex("#c677ee"),
+  backdropDim: hex("#9e5fbe"),
 } as const;
 
 /**
@@ -85,12 +95,89 @@ export const READOUT = {
   ink: "#fff",
 } as const;
 
-/** The orientation cube in the top-right corner (drei GizmoViewcube). */
+/**
+ * The capture rig's two cameras. Start and end read as one family a step apart
+ * rather than two unrelated colours — they're ends of the same sweep, and the
+ * line drawn between them has to belong to both.
+ */
+export const CAMERA_RIG = {
+  start: "#f36f16",
+  end: "#ffb27a",
+  /**
+   * Where the rig will go BACK to — the afterimage left at the far distance
+   * while a nearer one is being previewed. Yellow rather than another orange so
+   * "this is a memory of the rig" can't be misread as "this is the rig": the
+   * two are on screen at the same time, a metre apart, doing opposite jobs.
+   */
+  afterimage: "#ffd84d",
+  /** the start→end sweep line */
+  path: "#f36f16",
+  selected: "#ffffff",
+  hover: "#ffd9bd",
+} as const;
+
+/**
+ * The orientation cube in the top-right corner.
+ *
+ * Built from the glass roles rather than its own greys: the cube floats over
+ * the same scene as every other ornament, so it uses the same dark ink, the
+ * same hairline stroke and the same top specular as a glass panel. `--glass-ink`
+ * is hsl(0 0% 5%); `--brand` is --terra-500, hsl(24 90% 52%).
+ */
 export const VIEWCUBE = {
-  face: "#68635b",
-  text: "#f5f2ec",
-  stroke: "#00000040",
-  hover: "#d97a2b",
+  /**
+   * Face body. Lighter and far more translucent than the glass tokens would
+   * suggest, because a canvas texture gets no backdrop-filter: the blur and
+   * brightness that make a real glass panel read as frosted aren't available
+   * here, so matching `--glass-thick`'s alpha just produces a black box. The
+   * scene showing through is what sells the material instead.
+   */
+  face: "rgba(20,19,18,0.58)",
+  /** hairline edge — carries the silhouette when the fill is this sheer */
+  stroke: "rgba(255,255,255,0.30)",
+  /** the top-lit specular wash across the upper half of each face */
+  specular: "rgba(255,255,255,0.26)",
+  text: "#ffffff",
+  /** keeps the label legible where a blown-out sky sits behind the face */
+  textShadow: "rgba(0,0,0,0.55)",
+  /** hover: brand fill + a brighter brand edge, matching an active ornament */
+  hoverFace: "rgba(243,111,22,0.88)",
+  hoverStroke: "rgba(255,175,110,0.95)",
+  hoverText: "#ffffff",
+  /** edge / corner hit targets, invisible until pointed at */
+  hoverAccent: "#f36f16",
+  /**
+   * WHERE YOU ARE, painted onto the cube.
+   *
+   * This used to be a text pill under the cube reading "Front" — a label that
+   * named a face while the object that draws faces sat right above it saying
+   * nothing. The cube tells you now: the face you're looking down carries the
+   * brand fill.
+   *
+   * Deliberately weaker than `hoverFace`. Hover is a live answer to the pointer
+   * and has to win; the current view is ambient state that is lit the whole time
+   * and would otherwise shout over everything else in the corner.
+   */
+  activeFace: "rgba(243,111,22,0.52)",
+  activeStroke: "rgba(255,175,110,0.85)",
+  /**
+   * Off-axis: the nearest face, but the camera isn't on its axis. A wash and an
+   * edge rather than a fill — "closest to this" is a different claim from "on
+   * this", and the two must not look the same, or the cube starts lying about
+   * whether clicking that face would move anything.
+   */
+  nearFace: "rgba(243,111,22,0.16)",
+  nearStroke: "rgba(243,111,22,0.62)",
+  /**
+   * Orientation ring — the four step arrows and the two turntable arcs around
+   * the cube. Same ink and hairline as a face, a shade denser: an arrowhead is
+   * ~14px on screen, and at that size the sheer face alpha reads as a smudge
+   * against a blown-out sky.
+   */
+  indicatorFill: "rgba(20,19,18,0.62)",
+  indicatorStroke: "rgba(255,255,255,0.62)",
+  /** the arcs are stroke-only, so they carry the light on their own */
+  arc: "rgba(255,255,255,0.70)",
 } as const;
 
 /**

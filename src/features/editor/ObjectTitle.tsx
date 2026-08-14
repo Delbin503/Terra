@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Icon } from "@/components/icons";
 import { SCENE_LABEL } from "./scene-palette";
+import { ROLE_LABEL, type ObjectRole } from "./scene-types";
 
 /* The face for this whole block is the `type-scene-*` text styles (globals.css)
    — a light, tall-condensed Inter, deliberately not the Sora display face.
@@ -26,10 +27,24 @@ const badgeStyle: CSSProperties = {
 
 // Text sits a good deal lighter than the raw role colour so it stays legible
 // against the dark pill (the raw tokens are tuned for light-on-dark UI chrome).
-const masterBadgeStyle: CSSProperties = {
-  color: "hsl(45 100% 74%)",
-  borderColor: "hsl(var(--master) / 0.6)",
-  background: "hsl(45 90% 13% / 0.3)",
+// One entry per content role; `none` gets no badge at all rather than a fourth
+// colour, because "this object is nothing in particular" isn't worth a pill.
+const roleBadgeStyle: Record<Exclude<ObjectRole, "none">, CSSProperties> = {
+  master: {
+    color: "hsl(45 100% 74%)",
+    borderColor: "hsl(var(--master) / 0.6)",
+    background: "hsl(45 90% 13% / 0.3)",
+  },
+  distractor: {
+    color: "hsl(189 100% 70%)",
+    borderColor: "hsl(var(--distractor) / 0.6)",
+    background: "hsl(190 90% 13% / 0.3)",
+  },
+  background: {
+    color: "hsl(280 100% 82%)",
+    borderColor: "hsl(var(--backdrop) / 0.6)",
+    background: "hsl(280 90% 15% / 0.3)",
+  },
 };
 
 const typeBadgeStyle: CSSProperties = {
@@ -56,9 +71,10 @@ const deleteBadgeStyle: CSSProperties = {
 export function ObjectTitle({
   name,
   dark,
-  isMaster,
+  role,
   typeLabel,
   description,
+  insetLeft = 0,
   onRename,
   onBack,
   onViewInfo,
@@ -66,9 +82,11 @@ export function ObjectTitle({
 }: {
   name: string;
   dark: boolean;
-  isMaster: boolean;
+  role: ObjectRole;
   typeLabel: string;
   description: string;
+  /** px of left edge the caller needs kept clear — a docked left panel */
+  insetLeft?: number;
   onRename: (name: string) => void;
   onBack: () => void;
   onViewInfo: () => void;
@@ -214,8 +232,9 @@ export function ObjectTitle({
     <div
       ref={outerRef}
       data-ui="object-title"
-      className="pointer-events-none fixed left-12 top-[27%] z-20 w-[30rem] max-w-[44vw] select-none"
-      style={{ perspective: "900px" }}
+      className="pointer-events-none fixed top-[27%] z-20 w-[30rem] max-w-[44vw] select-none transition-[left] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+      // 48px normally (left-12); more when a left panel is docked over that edge.
+      style={{ perspective: "900px", left: 48 + insetLeft }}
     >
       <div style={{ transform: "rotateY(19deg) rotateX(7deg)", transformOrigin: "left center" }}>
         {/* Back sits on its own row above the title.
@@ -312,14 +331,14 @@ export function ObjectTitle({
             <Icon name="input-3d" size={13} />
             {typeLabel}
           </span>
-          {isMaster && (
+          {role !== "none" && (
             <span
-              data-ui="badge-master"
+              data-ui={`badge-role-${role}`}
               className="type-scene-badge"
-              style={{ ...badgeStyle, ...masterBadgeStyle }}
+              style={{ ...badgeStyle, ...roleBadgeStyle[role] }}
             >
               <Icon name="master" size={13} />
-              Master Object
+              {ROLE_LABEL[role]}
             </span>
           )}
         </div>

@@ -111,8 +111,14 @@
   --danger: var(--rose-500);
   --danger-soft: 356 50% 18%;
 
-  /* Master Object — a role colour of its own, never reused for state. */
+  /* OBJECT ROLES — a colour per dataset role, never reused for state.
+     Master keeps the yellow it has always owned. The other two are picked far
+     from it and from each other on the wheel, because their whole job is to be
+     told apart at badge size: a distractor and a background object sitting in
+     the same layer list must not need a legend. */
   --master: 45 93% 58%;
+  --distractor: 190 92% 55%;
+  --backdrop: 280 78% 70%;
 
   /* Role colours ON GLASS. The raw role tokens are tuned for solid dark chrome;
      on a tinted glass ornament floating over a bright scene they land at nearly
@@ -120,6 +126,8 @@
      background. These lift the same hue well above it. */
   --brand-on-glass: 26 100% 72%;
   --master-on-glass: 45 100% 74%;
+  --distractor-on-glass: 189 100% 70%;
+  --backdrop-on-glass: 280 100% 82%;
   --danger-on-glass: 0 90% 74%;
 
   --ring: var(--terra-500);
@@ -161,11 +169,15 @@
   --danger-soft: 356 80% 96%;
 
   --master: 42 88% 45%;
+  --distractor: 192 90% 32%;
+  --backdrop: 278 62% 48%;
 
   /* Light theme: glass gains body and lightens, so the on-glass role colours
      invert — they go DARKER than the raw token, not lighter. */
   --brand-on-glass: 18 78% 34%;
   --master-on-glass: 40 92% 26%;
+  --distractor-on-glass: 193 92% 22%;
+  --backdrop-on-glass: 278 70% 34%;
   --danger-on-glass: 355 66% 38%;
 
   --ring: var(--terra-500);

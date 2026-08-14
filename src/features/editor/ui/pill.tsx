@@ -32,7 +32,12 @@ const pillVariants = cva("inline-flex shrink-0 items-center border transition-co
       neutral: "border-glass/12 bg-glass/6 text-content",
       muted: "border-glass/12 bg-glass/6 text-content-muted",
       brand: "border-brand/55 bg-brand/12 text-brand",
+      // The three object roles. Master had a tone before the other two existed;
+      // they are siblings, so they are toned the same way rather than being
+      // hand-rolled at each call site.
       master: "border-master/55 bg-master/15 text-master",
+      distractor: "border-distractor/55 bg-distractor/15 text-distractor",
+      backdrop: "border-backdrop/55 bg-backdrop/15 text-backdrop",
       danger: "border-danger/55 bg-danger/12 text-danger",
       success: "border-success/55 bg-success/12 text-success",
       /** no fill — for a tag that must not compete with the content behind it */

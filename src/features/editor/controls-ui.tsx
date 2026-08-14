@@ -70,14 +70,21 @@ export function FactorCard({
   label,
   value,
   onChange,
+  min = 0,
   max = 1,
   step = 0.01,
+  /** decimals in the readout — a shot COUNT shouldn't render as "24.00" */
+  precision = 2,
+  unit,
 }: {
   label: string;
   value: number;
   onChange: (v: number) => void;
+  min?: number;
   max?: number;
   step?: number;
+  precision?: number;
+  unit?: string;
 }) {
   return (
     <div>
@@ -86,15 +93,16 @@ export function FactorCard({
         <input
           type="range"
           aria-label={label}
-          min={0}
+          min={min}
           max={max}
           step={step}
           value={value}
           onChange={(e) => onChange(parseFloat(e.target.value))}
           className="h-1 flex-1 cursor-pointer accent-brand"
         />
-        <div className="field-well type-numeric w-12 shrink-0 rounded-md border px-1.5 py-0.5 text-center text-content">
-          {value.toFixed(2)}
+        <div className="field-well type-numeric w-14 shrink-0 rounded-md border px-1.5 py-0.5 text-center text-content">
+          {value.toFixed(precision)}
+          {unit}
         </div>
       </div>
     </div>

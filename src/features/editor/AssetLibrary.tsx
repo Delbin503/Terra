@@ -2,74 +2,205 @@ import { useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { GlassPanel, GlassGhostButton } from "@/components/glass";
 import { Button } from "@/components/ui";
-import { Icon } from "@/components/icons";
+import { Icon, type IconName } from "@/components/icons";
 import { AssetCard } from "./AssetCard";
 import { AssetActionMenu, type MenuAnchor } from "./AssetActionMenu";
-import { MeshUploadPopover } from "./MeshUploadPopover";
 import { AssetDetailsPanel } from "./AssetDetailsPanel";
+import { FolderPicker } from "./FolderPicker";
+import { TextInput } from "./ui";
+import type { AssetStore } from "./useAssets";
 import {
+  applyFilters,
   categories,
+  collectTags,
   filterByCategory,
-  initialAssets,
+  typeIcon,
+  uploadViews,
   type Asset,
+  type AssetFolder,
   type AssetType,
   type CategoryId,
+  type UploadView,
 } from "./assets-data";
+import { SOURCE_LABEL } from "./scene-types";
 
-type GenMode = "image" | "3d";
+/** What the header's primary button does in the current view. */
+interface HeaderAction {
+  label: string;
+  run: () => void;
+}
+
+/**
+ * Pick mode turns the library into a chooser for another panel (today: the 3D
+ * Generate panel's reference images). It narrows the library to the user's own
+ * uploaded images and caps how many can come back.
+ */
+export interface PickRequest {
+  /** how many more the caller can accept */
+  max: number;
+  /** what the caller is collecting — shown in the prompt bar */
+  purpose: string;
+  onConfirm: (assets: Asset[]) => void;
+  onCancel: () => void;
+}
+
+/** Extension → the asset kind we file an upload under. */
+function typeForFile(file: File): AssetType {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (["glb", "gltf", "obj", "fbx", "usdz"].includes(ext)) return "mesh";
+  if (["hdr", "exr"].includes(ext)) return "environment";
+  if (["mp4", "mov", "webm"].includes(ext)) return "video";
+  return "image";
+}
 
 /**
  * AssetLibrary — the editor's asset browser (bottom dock). Terra glass idiom.
- * Wires: category filter · live search · Generate (image/3D prompt) · 3D-mesh
- * upload→multiview→model pipeline · hover •••-menu · right-docked details panel.
- * Floating pieces (menu, mesh popover, details) render fixed so they escape the
- * panel's clipping; the panel shrinks its right edge when details is open.
+ *
+ * Categories: Assets (the whole GLTS library) · Images · HDRI Map · Uploads
+ * (My Assets / Folders) · 3D Meshes. Each view keeps the same header shape —
+ * search, tag filter, one primary action — so moving between them doesn't move
+ * the controls; only the action changes (Generate 3D / Upload / Create Folder).
+ *
+ * Floating pieces (menu, folder picker, details) render fixed so they escape
+ * the panel's clipping; the panel shrinks its right edge when details is open.
  */
-export function AssetLibrary({ onClose, onPlace }: { onClose: () => void; onPlace: (asset: Asset) => void }) {
-  const [assets, setAssets] = useState<Asset[]>(initialAssets);
-  const [category, setCategory] = useState<CategoryId>("all");
+export function AssetLibrary({
+  store,
+  initialCategory = "all",
+  pick,
+  onClose,
+  onPlace,
+  onGenerate3D,
+}: {
+  store: AssetStore;
+  /** open straight onto a category — used when a generation finishes */
+  initialCategory?: CategoryId;
+  /** when set, the library acts as a chooser instead of a browser */
+  pick?: PickRequest;
+  onClose: () => void;
+  onPlace: (asset: Asset) => void;
+  onGenerate3D: () => void;
+}) {
+  const { assets, folders } = store;
+  const picking = Boolean(pick);
+
+  const [category, setCategory] = useState<CategoryId>(picking ? "uploads" : initialCategory);
+  const [uploadView, setUploadView] = useState<UploadView>("assets");
+  const [uploadsOpen, setUploadsOpen] = useState(picking || initialCategory === "uploads");
+  const [openFolderId, setOpenFolderId] = useState<string | null>(null);
+
   const [query, setQuery] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  // Uploads mixes every kind of file the user brought in, so it's the one view
+  // that earns a type filter on top of the tag filter.
+  const [types, setTypes] = useState<AssetType[]>([]);
+  const [typesOpen, setTypesOpen] = useState(false);
+
+  // Multi-select is armed from the ⋮ menu ("Select Items") rather than being
+  // always-on: a plain click on a card otherwise has two meanings at once.
+  // Pick mode is the exception — choosing is the only thing a click can mean.
+  const [selectMode, setSelectMode] = useState(picking);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [uploadsOpen, setUploadsOpen] = useState(false);
-
-  const [genMode, setGenMode] = useState<GenMode | null>(null);
-  const [genMenuOpen, setGenMenuOpen] = useState(false);
-  const [prompt, setPrompt] = useState("");
-
-  const [meshPopover, setMeshPopover] = useState<"upload" | "multiview" | null>(null);
-  const meshTarget = useRef<string | null>(null);
 
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
   const [detailsId, setDetailsId] = useState<string | null>(null);
+  /** asset ids waiting to be filed — null when the picker is closed */
+  const [filing, setFiling] = useState<string[] | null>(null);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [folderName, setFolderName] = useState("");
   const [toast, setToast] = useState<string | null>(null);
 
-  const idc = useRef(0);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const newId = (p: string) => `${p}-${(idc.current += 1)}`;
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const inFolders = category === "uploads" && uploadView === "folders";
+  const openFolder = openFolderId ? folders.find((f) => f.id === openFolderId) ?? null : null;
+  const showFolderGrid = inFolders && !openFolder;
+
+  // The assets this view is about, before search/tags. Pick mode narrows to the
+  // user's own uploaded images — the only thing a reference slot can take.
+  const scope = useMemo(() => {
+    if (picking) return assets.filter((a) => a.uploaded && a.type === "image");
+    if (openFolder) return assets.filter((a) => openFolder.assetIds.includes(a.id));
+    if (showFolderGrid) return [];
+    return filterByCategory(assets, category);
+  }, [assets, category, openFolder, showFolderGrid, picking]);
 
   const visible = useMemo(() => {
-    const inCat = filterByCategory(assets, category);
+    const base = applyFilters(scope, query, tags);
+    return types.length ? base.filter((a) => types.includes(a.type)) : base;
+  }, [scope, query, tags, types]);
+  const tagOptions = useMemo(() => collectTags(scope), [scope]);
+  // Only the types the uploads actually contain, so the menu never offers a
+  // filter that would empty the grid.
+  const typeOptions = useMemo(() => {
+    const seen: AssetType[] = [];
+    scope.forEach((a) => {
+      if (!seen.includes(a.type)) seen.push(a.type);
+    });
+    return seen;
+  }, [scope]);
+  // Uploads is the only category that mixes types; everywhere else the category
+  // itself already is the type filter.
+  const showTypeFilter = category === "uploads" && !showFolderGrid && !picking;
+  const visibleFolders = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return q ? inCat.filter((a) => a.name.toLowerCase().includes(q)) : inCat;
-  }, [assets, category, query]);
+    return q ? folders.filter((f) => f.name.toLowerCase().includes(q)) : folders;
+  }, [folders, query]);
 
   const detailsAsset = detailsId ? assets.find((a) => a.id === detailsId) ?? null : null;
-  const showUpload = category === "meshes";
 
-  // ---- selection ----
+  const flash = (msg: string) => {
+    setToast(msg);
+    window.setTimeout(() => setToast((t) => (t === msg ? null : t)), 1900);
+  };
+
+  /* ------------------------------------------------------------ navigation */
+
+  const goCategory = (id: CategoryId) => {
+    setCategory(id);
+    setOpenFolderId(null);
+    setTags([]);
+    setTypes([]);
+    if (id === "uploads") setUploadsOpen(true);
+  };
+
+  const goUploadView = (v: UploadView) => {
+    setCategory("uploads");
+    setUploadView(v);
+    setOpenFolderId(null);
+    setTags([]);
+    setTypes([]);
+  };
+
+  /* ------------------------------------------------------------- selection */
+
+  const atPickLimit = picking && pick !== undefined && selected.size >= pick.max;
+
   const toggleSelect = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      // Refuse rather than evict: silently dropping someone's earlier choice to
+      // make room for a new one is the worse surprise.
+      else if (!atPickLimit) next.add(id);
       return next;
     });
 
-  // ---- data mutations ----
-  const update = (id: string, patch: Partial<Asset>) =>
-    setAssets((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+  const clearSelection = () => {
+    setSelected(new Set());
+    setSelectMode(false);
+  };
+
+  const armSelect = (a: Asset) => {
+    setSelectMode(true);
+    setSelected(new Set([a.id]));
+  };
+
+  /* --------------------------------------------------------------- mutation */
 
   const remove = (asset: Asset) => {
-    setAssets((prev) => prev.filter((a) => a.id !== asset.id));
+    store.remove(asset.id);
     setSelected((prev) => {
       const n = new Set(prev);
       n.delete(asset.id);
@@ -78,90 +209,101 @@ export function AssetLibrary({ onClose, onPlace }: { onClose: () => void; onPlac
     if (detailsId === asset.id) setDetailsId(null);
   };
 
-  const flash = (msg: string) => {
-    setToast(msg);
-    window.setTimeout(() => setToast((t) => (t === msg ? null : t)), 1800);
+  /* ---------------------------------------------------------------- uploads */
+
+  const handleFiles = (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    const files = Array.from(list);
+    files.forEach((file) =>
+      store.add({
+        name: file.name.replace(/\.[^.]+$/, ""),
+        type: typeForFile(file),
+        uploaded: true,
+      })
+    );
+    goUploadView("assets");
+    flash(`${files.length} ${files.length === 1 ? "file" : "files"} uploaded`);
   };
 
-  // ---- generate (image / 3D from prompt) ----
-  const disarm = () => {
-    setGenMode(null);
-    setPrompt("");
-  };
-  const armGenerate = (mode: GenMode) => {
-    setGenMode(mode);
-    setGenMenuOpen(false);
-    requestAnimationFrame(() => inputRef.current?.focus());
-  };
-  const runGenerate = () => {
-    if (!genMode || !prompt.trim()) return;
-    const type: AssetType = genMode === "image" ? "image" : "mesh";
-    const id = newId("gen");
-    const name = prompt.trim().slice(0, 48);
-    setAssets((prev) => [
-      { id, name, type, seed: 210 + idc.current * 17, status: "generating", statusLabel: genMode === "image" ? "Generating image" : "Generating 3D mesh" },
-      ...prev,
-    ]);
-    disarm();
-    window.setTimeout(() => update(id, { status: undefined, statusLabel: undefined }), 1600);
+  /* ---------------------------------------------------------------- folders */
+
+  const fileInto = (folderId: string, assetIds: string[]) => {
+    store.fileInto(folderId, assetIds);
+    const name = folders.find((f) => f.id === folderId)?.name ?? "folder";
+    flash(`Added to ${name}`);
   };
 
-  // ---- 3D mesh pipeline ----
-  const generateMultiview = () => {
-    setMeshPopover(null);
-    const id = newId("mesh");
-    setAssets((prev) => [
-      { id, name: "Uploaded mesh", type: "mesh", seed: 320 + idc.current * 17, uploaded: true, status: "generating", statusLabel: "Generating multi views" },
-      ...prev,
-    ]);
-    setCategory("meshes");
-    window.setTimeout(() => update(id, { status: "ready", statusLabel: "Ready" }), 1700);
-  };
-  const openMultiview = (asset: Asset) => {
-    meshTarget.current = asset.id;
-    setMeshPopover("multiview");
-  };
-  const generateModel = () => {
-    const id = meshTarget.current;
-    setMeshPopover(null);
-    if (!id) return;
-    update(id, { status: "generating", statusLabel: "Generating 3D mesh" });
-    window.setTimeout(() => update(id, { status: undefined, statusLabel: undefined, name: "Generated mesh" }), 1800);
+  const submitNewFolder = () => {
+    const name = folderName.trim();
+    if (!name) return;
+    store.createFolder(name);
+    setFolderName("");
+    setCreatingFolder(false);
+    flash(`Folder “${name}” created`);
   };
 
-  // ---- uploads (device / url) ----
-  const handleUpload = (source: "device" | "url") => {
-    const id = newId("upl");
-    setAssets((prev) => [
-      { id, name: source === "device" ? "Uploaded image" : "Linked asset", type: "image", seed: 400 + idc.current * 17, uploaded: true },
-      ...prev,
-    ]);
-    setCategory("uploads");
-    setUploadsOpen(true);
-  };
+  /* ----------------------------------------------------------------- header */
+
+  const headerAction: HeaderAction | null =
+    category === "meshes"
+      ? { label: "Generate 3D", run: onGenerate3D }
+      : category === "uploads" && uploadView === "assets"
+        ? { label: "Upload", run: () => fileRef.current?.click() }
+        : showFolderGrid
+          ? { label: "Create Folder", run: () => setCreatingFolder(true) }
+          : null;
 
   const openMenu = (asset: Asset, rect: DOMRect) => setMenu({ asset, x: rect.left, y: rect.bottom + 4 });
 
+  const placeSelected = () => {
+    selected.forEach((sid) => {
+      const a = assets.find((x) => x.id === sid);
+      if (a) onPlace(a);
+    });
+    clearSelection();
+  };
+
   return (
     <>
+      <input
+        ref={fileRef}
+        type="file"
+        multiple
+        hidden
+        data-ui="asset-upload-input"
+        accept="image/*,video/*,.glb,.gltf,.obj,.fbx,.usdz,.hdr,.exr"
+        onChange={(e) => {
+          handleFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+
       <GlassPanel
         ui="asset-library"
         thickness="thick"
         className={cn(
           "pointer-events-auto absolute bottom-6 left-6 flex h-[40vh] max-h-[392px] min-h-[260px] overflow-hidden !rounded-3xl transition-[right] duration-300",
-          detailsId ? "right-[464px]" : "right-6"
+          // details card: 16px right margin + 320px panel + a 16px gutter
+          detailsId ? "right-[352px]" : "right-6"
         )}
       >
         {/* Category nav */}
-        <nav data-ui="asset-categories" className="flex w-48 shrink-0 flex-col gap-0.5 border-r border-glass/10 p-3">
-          {categories.map((c) =>
+        <nav data-ui="asset-categories" className="flex w-48 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-glass/10 p-3">
+          {/* Pick mode collapses the nav to the one place a reference can come
+              from, so there's no branch that leads to an unselectable grid. */}
+          {categories
+            .filter((c) => !picking || c.id === "uploads")
+            .map((c) =>
             c.id === "uploads" ? (
               <div key={c.id} className="flex flex-col">
                 <CatButton
                   label={c.label}
                   icon={c.icon}
                   active={category === "uploads"}
-                  onClick={() => setCategory("uploads")}
+                  onClick={() => {
+                    goCategory("uploads");
+                    setUploadsOpen(true);
+                  }}
                   trailing={
                     <span
                       role="button"
@@ -178,115 +320,305 @@ export function AssetLibrary({ onClose, onPlace }: { onClose: () => void; onPlac
                 />
                 {uploadsOpen && (
                   <div className="ml-3.5 mt-0.5 flex flex-col gap-0.5 border-l border-glass/10 pl-2">
-                    <SubButton icon="upload" label="From device" onClick={() => handleUpload("device")} />
-                    <SubButton icon="link" label="From URL" onClick={() => handleUpload("url")} />
+                    {uploadViews
+                      .filter((v) => !picking || v.id === "assets")
+                      .map((v) => (
+                      <SubButton
+                        key={v.id}
+                        icon={v.icon}
+                        label={v.label}
+                        active={category === "uploads" && uploadView === v.id}
+                        onClick={() => goUploadView(v.id)}
+                      />
+                    ))}
                   </div>
                 )}
               </div>
             ) : (
-              <CatButton key={c.id} label={c.label} icon={c.icon} active={category === c.id} onClick={() => setCategory(c.id)} />
+              <CatButton
+                key={c.id}
+                label={c.label}
+                icon={c.icon}
+                active={category === c.id}
+                onClick={() => goCategory(c.id)}
+              />
             )
           )}
         </nav>
 
         {/* Content */}
         <div className="flex min-w-0 flex-1 flex-col">
-          {/* Header */}
+          {/* Header — search · tags · primary action · close */}
           <div className="flex items-center gap-2 border-b border-glass/10 p-3">
-            <div
-              className={cn(
-                "flex h-10 min-w-0 flex-1 items-center gap-2 rounded-full border bg-glass/8 px-3.5 transition-colors",
-                genMode ? "border-brand/60 ring-2 ring-brand/25" : "border-glass/12"
-              )}
-            >
-              <Icon name={genMode ? "generate" : "search"} size={16} className={cn("shrink-0", genMode ? "text-brand" : "text-content-subtle")} />
+            <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-full border border-glass/12 bg-glass/8 px-3.5">
+              <Icon name="search" size={16} className="shrink-0 text-content-subtle" />
               <input
-                ref={inputRef}
                 data-ui="asset-search"
-                value={genMode ? prompt : query}
-                onChange={(e) => (genMode ? setPrompt(e.target.value) : setQuery(e.target.value))}
-                onKeyDown={(e) => {
-                  if (genMode && e.key === "Enter") runGenerate();
-                  if (e.key === "Escape") disarm();
-                }}
-                placeholder={
-                  genMode === "image" ? "Describe the image to generate…" : genMode === "3d" ? "Describe the 3D model to generate…" : "Search assets"
-                }
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search"
                 className="type-body min-w-0 flex-1 bg-transparent text-content outline-none placeholder:text-content-subtle"
               />
-              {genMode ? (
-                <span className="type-caption hidden shrink-0 items-center gap-1 rounded-md border border-brand/35 px-1.5 py-0.5 text-brand sm:flex">↵ Generate</span>
-              ) : query ? (
-                <button type="button" aria-label="Clear search" onClick={() => setQuery("")} className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-content-muted hover:bg-glass/15 hover:text-content">
+              {query && (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() => setQuery("")}
+                  className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-content-muted hover:bg-glass/15 hover:text-content"
+                >
                   <Icon name="close" size={13} />
                 </button>
-              ) : null}
+              )}
             </div>
 
-            {showUpload ? (
-              <Button variant="brand" size="sm" data-ui="mesh-upload-open" onClick={() => setMeshPopover("upload")} className="!rounded-full">
-                <Icon name="upload" size={16} />
-                Upload
-              </Button>
-            ) : (
-              <div className="relative">
-                <Button variant="brand" size="sm" data-ui="asset-generate" onClick={() => (genMode ? disarm() : setGenMenuOpen((o) => !o))} className="!rounded-full">
-                  <Icon name="generate" size={16} />
-                  {genMode ? "Cancel" : "Generate"}
-                </Button>
-                {genMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setGenMenuOpen(false)} />
-                    <GlassPanel ui="generate-menu" thickness="overlay" className="absolute right-0 top-[calc(100%+8px)] z-50 w-40 !rounded-xl p-1.5">
-                      <GenItem icon="input-2d" label="Image" onClick={() => armGenerate("image")} />
-                      <GenItem icon="input-3d" label="3D" onClick={() => armGenerate("3d")} />
-                    </GlassPanel>
-                  </>
-                )}
-              </div>
+            {showTypeFilter && (
+              <TypeFilter
+                options={typeOptions}
+                value={types}
+                open={typesOpen}
+                onOpenChange={setTypesOpen}
+                onChange={setTypes}
+              />
             )}
 
-            <GlassGhostButton ui="asset-close" icon="close" label="Close asset library" onClick={onClose} />
+            {!showFolderGrid && (
+              <TagFilter
+                options={tagOptions}
+                value={tags}
+                open={tagsOpen}
+                onOpenChange={setTagsOpen}
+                onChange={setTags}
+              />
+            )}
+
+            {headerAction && (
+              <Button
+                variant="brand"
+                size="sm"
+                data-ui={`asset-action-${headerAction.label.toLowerCase().replace(/\s+/g, "-")}`}
+                onClick={headerAction.run}
+                className="!rounded-full"
+              >
+                <Icon name="create" size={16} />
+                {headerAction.label}
+              </Button>
+            )}
+
+            <GlassGhostButton
+              ui="asset-close"
+              icon="close"
+              label={picking ? "Cancel selection" : "Close asset library"}
+              onClick={picking ? pick!.onCancel : onClose}
+            />
           </div>
+
+          {/* Pick-mode prompt — says what's being collected and how many fit */}
+          {pick && (
+            <div
+              data-ui="asset-pick-prompt"
+              className="flex items-center gap-2 border-b border-glass/10 bg-brand/8 px-3 py-2"
+            >
+              <Icon name="select-check" size={15} className="shrink-0 text-brand" />
+              <span className="type-body text-content">
+                Choose {pick.purpose} from your uploads
+              </span>
+              <span className="type-caption ml-auto text-content-subtle">
+                {selected.size} of {pick.max}
+              </span>
+            </div>
+          )}
+
+          {/* Breadcrumb — only when drilled into a folder */}
+          {openFolder && (
+            <div data-ui="asset-breadcrumb" className="flex items-center gap-2 border-b border-glass/10 px-3 py-2">
+              <button
+                type="button"
+                onClick={() => setOpenFolderId(null)}
+                className="type-body flex items-center gap-1.5 text-content-muted transition-colors hover:text-content"
+              >
+                <Icon name="back" size={15} />
+                Folders
+              </button>
+              <Icon name="chevron-right" size={14} className="text-content-subtle" />
+              <span className="type-body-strong truncate text-content">{openFolder.name}</span>
+            </div>
+          )}
 
           {/* Grid */}
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
-            {visible.length > 0 ? (
+            {showFolderGrid ? (
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-3">
+                {creatingFolder && (
+                  <div
+                    data-ui="folder-new-tile"
+                    className="flex aspect-square flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-brand/50 bg-glass/8 p-3"
+                  >
+                    <Icon name="folder-add" size={22} className="text-brand" />
+                    <TextInput
+                      autoFocus
+                      ui="folder-name"
+                      value={folderName}
+                      onChange={(e) => setFolderName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") submitNewFolder();
+                        if (e.key === "Escape") {
+                          setCreatingFolder(false);
+                          setFolderName("");
+                        }
+                      }}
+                      onBlur={submitNewFolder}
+                      placeholder="Folder name"
+                      className="text-center"
+                    />
+                  </div>
+                )}
+                {visibleFolders.map((f) => (
+                  <FolderCard key={f.id} folder={f} onOpen={() => setOpenFolderId(f.id)} />
+                ))}
+                {visibleFolders.length === 0 && !creatingFolder && (
+                  <EmptyState
+                    icon="folder"
+                    message={query ? `No folders match “${query}”.` : "No folders yet. Group your uploads to find them fast."}
+                    actionLabel={query ? undefined : "Create Folder"}
+                    onAction={() => setCreatingFolder(true)}
+                  />
+                )}
+              </div>
+            ) : visible.length > 0 ? (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-3">
                 {visible.map((a) => (
-                  <AssetCard key={a.id} asset={a} selected={selected.has(a.id)} onToggle={toggleSelect} onMenu={openMenu} onReadyClick={openMultiview} />
+                  <AssetCard
+                    key={a.id}
+                    asset={a}
+                    selectMode={selectMode}
+                    selected={selected.has(a.id)}
+                    // At the cap, unselected cards stop inviting a click they'd refuse.
+                    disabled={atPickLimit && !selected.has(a.id)}
+                    showMenu={!picking}
+                    onToggle={toggleSelect}
+                    onOpen={(x) => setDetailsId(x.id)}
+                    onMenu={openMenu}
+                  />
                 ))}
               </div>
             ) : (
-              <EmptyState category={category} query={query} onUpload={() => (category === "meshes" ? setMeshPopover("upload") : handleUpload("device"))} />
+              <EmptyState
+                icon={category === "uploads" ? "upload" : category === "meshes" ? "input-3d" : "search"}
+                message={
+                  query || tags.length > 0 || types.length > 0
+                    ? "No assets match the current filters."
+                    : picking
+                      ? "No uploaded images yet. Upload one to use as a reference."
+                      : openFolder
+                      ? "This folder is empty. Use “Add to Folder” on any asset."
+                      : category === "uploads"
+                        ? "No uploads yet. Bring in your own images, HDRIs or meshes."
+                        : category === "meshes"
+                          ? "No meshes yet. Generate one from a prompt or reference image."
+                          : "Nothing here yet."
+                }
+                actionLabel={
+                  query || tags.length > 0 || types.length > 0
+                    ? "Clear filters"
+                    : picking
+                      ? "Upload image"
+                      : category === "uploads"
+                      ? "Upload asset"
+                      : category === "meshes"
+                        ? "Generate 3D"
+                        : undefined
+                }
+                onAction={() => {
+                  if (query || tags.length > 0 || types.length > 0) {
+                    setQuery("");
+                    setTags([]);
+                    setTypes([]);
+                  } else if (picking || category === "uploads") fileRef.current?.click();
+                  else onGenerate3D();
+                }}
+              />
             )}
           </div>
 
-          {/* Selection footer */}
-          {selected.size > 0 && (
+          {/* Pick footer — confirm/cancel back to whoever opened the chooser */}
+          {pick ? (
+            <div data-ui="asset-pick-bar" className="flex items-center gap-3 border-t border-glass/10 p-3">
+              <button
+                onClick={() => setSelected(new Set())}
+                disabled={selected.size === 0}
+                className="type-body text-content-muted transition-colors hover:text-content disabled:opacity-40"
+              >
+                Clear
+              </button>
+              <div className="ml-auto flex items-center gap-2">
+                <Button variant="secondary" size="sm" onClick={pick.onCancel} className="!rounded-full">
+                  Cancel
+                </Button>
+                <Button
+                  variant="brand"
+                  size="sm"
+                  data-ui="asset-pick-confirm"
+                  disabled={selected.size === 0}
+                  onClick={() =>
+                    pick.onConfirm(
+                      [...selected].map((id) => assets.find((a) => a.id === id)).filter(Boolean) as Asset[]
+                    )
+                  }
+                  className="!rounded-full"
+                >
+                  <Icon name="check" size={16} />
+                  Add {selected.size > 0 ? selected.size : ""}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            /* Selection footer */
+            selectMode && (
             <div data-ui="asset-selection-bar" className="flex items-center gap-3 border-t border-glass/10 p-3">
               <span className="type-body text-content-muted">
                 <b className="type-body-strong text-content">{selected.size}</b> selected
               </span>
-              <button onClick={() => setSelected(new Set())} className="type-body text-content-muted hover:text-content">
-                Clear
-              </button>
-              <Button
-                variant="brand"
-                size="sm"
-                onClick={() => {
-                  selected.forEach((sid) => {
-                    const a = assets.find((x) => x.id === sid);
-                    if (a) onPlace(a);
-                  });
-                  setSelected(new Set());
-                }}
-                className="ml-auto !rounded-full"
+              {/* Reads as an active control the moment there's something to clear —
+                  a plain muted "Clear" was too easy to miss beside a full grid. */}
+              <button
+                data-ui="selection-clear-all"
+                onClick={clearSelection}
+                disabled={selected.size === 0}
+                className={cn(
+                  "type-body-strong rounded-full border px-3 py-1 transition-colors",
+                  selected.size > 0
+                    ? "border-brand/45 bg-brand/12 text-brand hover:bg-brand/20"
+                    : "border-glass/12 text-content-subtle"
+                )}
               >
-                <Icon name="create" size={16} />
-                Add to scene
-              </Button>
+                Clear all
+              </button>
+              <div className="ml-auto flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  data-ui="selection-add-to-folder"
+                  disabled={selected.size === 0}
+                  onClick={() => setFiling([...selected])}
+                  className="!rounded-full"
+                >
+                  <Icon name="folder-add" size={16} />
+                  Add to folder
+                </Button>
+                <Button
+                  variant="brand"
+                  size="sm"
+                  data-ui="selection-add-to-scene"
+                  disabled={selected.size === 0}
+                  onClick={placeSelected}
+                  className="!rounded-full"
+                >
+                  <Icon name="place" size={16} />
+                  Add to scene
+                </Button>
+              </div>
             </div>
+            )
           )}
         </div>
       </GlassPanel>
@@ -295,29 +627,40 @@ export function AssetLibrary({ onClose, onPlace }: { onClose: () => void; onPlac
       {menu && (
         <AssetActionMenu
           anchor={menu}
+          canDelete={Boolean(menu.asset.uploaded)}
           onClose={() => setMenu(null)}
-          onViewDetails={(a) => setDetailsId(a.id)}
-          onSelect={(a) => toggleSelect(a.id)}
-          onDelete={(a) => remove(a)}
+          onViewInfo={(a) => setDetailsId(a.id)}
+          onSelect={armSelect}
+          onDelete={remove}
+          onAddToFolder={(a) => setFiling([a.id])}
           onPlace={(a) => {
             onPlace(a);
             setMenu(null);
           }}
-          onStub={(label) => flash(`${label} — coming soon`)}
         />
       )}
 
-      {meshPopover && (
-        <MeshUploadPopover
-          mode={meshPopover}
-          onClose={() => setMeshPopover(null)}
-          onGenerateMultiview={generateMultiview}
-          onGenerateModel={generateModel}
+      {filing && (
+        <FolderPicker
+          folders={folders}
+          count={filing.length}
+          onClose={() => setFiling(null)}
+          onPick={(id) => {
+            fileInto(id, filing);
+            setFiling(null);
+            clearSelection();
+          }}
+          onCreate={(name) => {
+            store.createFolder(name, filing);
+            flash(`Folder “${name}” created`);
+            setFiling(null);
+            clearSelection();
+          }}
         />
       )}
 
       {detailsAsset && (
-        <AssetDetailsPanel asset={detailsAsset} onClose={() => setDetailsId(null)} onUpdate={update} onDelete={(a) => remove(a)} />
+        <AssetDetailsPanel asset={detailsAsset} onClose={() => setDetailsId(null)} onUpdate={store.update} onDelete={remove} />
       )}
 
       {toast && (
@@ -329,16 +672,194 @@ export function AssetLibrary({ onClose, onPlace }: { onClose: () => void; onPlac
   );
 }
 
-function GenItem({ icon, label, onClick }: { icon: Parameters<typeof Icon>[0]["name"]; label: string; onClick: () => void }) {
+/* ------------------------------------------------------------------ parts */
+
+function TagFilter({
+  options,
+  value,
+  open,
+  onOpenChange,
+  onChange,
+}: {
+  options: string[];
+  value: string[];
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onChange: (v: string[]) => void;
+}) {
+  const toggle = (t: string) =>
+    onChange(value.includes(t) ? value.filter((x) => x !== t) : [...value, t]);
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        data-ui="asset-tags"
+        onClick={() => onOpenChange(!open)}
+        className={cn(
+          "type-body flex h-10 items-center gap-2 rounded-full border px-3.5 transition-colors",
+          value.length > 0
+            ? "border-brand/50 bg-brand/12 text-content"
+            : "border-glass/12 bg-glass/8 text-content-muted hover:text-content"
+        )}
+      >
+        <Icon name="tag" size={15} />
+        <span className="hidden sm:inline">Tags</span>
+        {value.length > 0 && (
+          <span className="type-caption-strong rounded-full bg-brand px-1.5 text-brand-foreground">{value.length}</span>
+        )}
+        <Icon name="chevron-down" size={14} className={cn("transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => onOpenChange(false)} />
+          <GlassPanel
+            ui="tag-menu"
+            thickness="overlay"
+            className="absolute right-0 top-[calc(100%+8px)] z-50 max-h-64 w-52 overflow-y-auto !rounded-2xl p-1.5"
+          >
+            {options.length === 0 ? (
+              <p className="type-body px-3 py-2 text-content-subtle">No tags here yet.</p>
+            ) : (
+              options.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  data-ui={`tag-option-${t.toLowerCase()}`}
+                  onClick={() => toggle(t)}
+                  className="type-body flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-content-muted transition-colors hover:bg-glass/12 hover:text-content"
+                >
+                  <span
+                    className={cn(
+                      "grid h-4 w-4 shrink-0 place-items-center rounded border",
+                      value.includes(t) ? "border-brand bg-brand text-brand-foreground" : "border-glass/25"
+                    )}
+                  >
+                    {value.includes(t) && <Icon name="check" size={11} strokeWidth={3} />}
+                  </span>
+                  <span className="truncate">{t}</span>
+                </button>
+              ))
+            )}
+            {value.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onChange([])}
+                className="type-body mt-1 flex w-full items-center gap-2.5 border-t border-glass/10 px-3 pb-1 pt-2.5 text-brand"
+              >
+                Clear tags
+              </button>
+            )}
+          </GlassPanel>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Type filter for the Uploads view. Mirrors TagFilter's shape, but its options
+ *  are asset kinds (with the same badge glyphs the cards carry) rather than tags. */
+function TypeFilter({
+  options,
+  value,
+  open,
+  onOpenChange,
+  onChange,
+}: {
+  options: AssetType[];
+  value: AssetType[];
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onChange: (v: AssetType[]) => void;
+}) {
+  const toggle = (t: AssetType) =>
+    onChange(value.includes(t) ? value.filter((x) => x !== t) : [...value, t]);
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        data-ui="asset-types"
+        onClick={() => onOpenChange(!open)}
+        className={cn(
+          "type-body flex h-10 items-center gap-2 rounded-full border px-3.5 transition-colors",
+          value.length > 0
+            ? "border-brand/50 bg-brand/12 text-content"
+            : "border-glass/12 bg-glass/8 text-content-muted hover:text-content"
+        )}
+      >
+        <Icon name="assets" size={15} />
+        <span className="hidden sm:inline">Types</span>
+        {value.length > 0 && (
+          <span className="type-caption-strong rounded-full bg-brand px-1.5 text-brand-foreground">
+            {value.length}
+          </span>
+        )}
+        <Icon name="chevron-down" size={14} className={cn("transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => onOpenChange(false)} />
+          <GlassPanel
+            ui="asset-type-menu"
+            thickness="overlay"
+            className="absolute right-0 top-[calc(100%+8px)] z-50 max-h-64 w-52 overflow-y-auto !rounded-2xl p-1.5"
+          >
+            {options.length === 0 ? (
+              <p className="type-body px-3 py-2 text-content-subtle">Nothing uploaded yet.</p>
+            ) : (
+              options.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  data-ui={`asset-type-${t}`}
+                  onClick={() => toggle(t)}
+                  className="type-body flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-content-muted transition-colors hover:bg-glass/12 hover:text-content"
+                >
+                  <span
+                    className={cn(
+                      "grid h-4 w-4 shrink-0 place-items-center rounded border",
+                      value.includes(t) ? "border-brand bg-brand text-brand-foreground" : "border-glass/25"
+                    )}
+                  >
+                    {value.includes(t) && <Icon name="check" size={11} strokeWidth={3} />}
+                  </span>
+                  <Icon name={typeIcon[t]} size={15} />
+                  <span className="truncate">{SOURCE_LABEL[t]}</span>
+                </button>
+              ))
+            )}
+            {value.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onChange([])}
+                className="type-body mt-1 flex w-full items-center gap-2.5 border-t border-glass/10 px-3 pb-1 pt-2.5 text-brand"
+              >
+                Clear types
+              </button>
+            )}
+          </GlassPanel>
+        </>
+      )}
+    </div>
+  );
+}
+
+function FolderCard({ folder, onOpen }: { folder: AssetFolder; onOpen: () => void }) {
   return (
     <button
       type="button"
-      onClick={onClick}
-      data-ui={`generate-${label.toLowerCase()}`}
-      className="type-body flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-content-muted transition-colors hover:bg-glass/12 hover:text-content"
+      data-ui={`folder-card-${folder.id}`}
+      onClick={onOpen}
+      className="group flex aspect-square flex-col items-center justify-center gap-2 rounded-2xl bg-glass/8 ring-1 ring-glass/10 transition-transform hover:-translate-y-0.5 hover:bg-glass/12"
     >
-      <Icon name={icon} size={16} />
-      {label}
+      <Icon name="folder" size={30} className="text-content-muted transition-colors group-hover:text-brand" />
+      <span className="type-label max-w-full truncate px-2 text-content">{folder.name}</span>
+      <span className="type-caption text-content-subtle">
+        {folder.assetIds.length} {folder.assetIds.length === 1 ? "item" : "items"}
+      </span>
     </button>
   );
 }
@@ -351,7 +872,7 @@ function CatButton({
   trailing,
 }: {
   label: string;
-  icon: Parameters<typeof Icon>[0]["name"];
+  icon: IconName;
   active: boolean;
   onClick: () => void;
   trailing?: React.ReactNode;
@@ -374,13 +895,26 @@ function CatButton({
   );
 }
 
-function SubButton({ icon, label, onClick }: { icon: Parameters<typeof Icon>[0]["name"]; label: string; onClick: () => void }) {
+function SubButton({
+  icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: IconName;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       data-ui={`asset-sub-${label.toLowerCase().replace(/\s+/g, "-")}`}
-      className="type-body flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-content-muted transition-colors hover:bg-glass/8 hover:text-content"
+      className={cn(
+        "type-body flex items-center gap-2.5 rounded-lg px-3 py-1.5 transition-colors",
+        active ? "bg-glass/12 text-content" : "text-content-muted hover:bg-glass/8 hover:text-content"
+      )}
     >
       <Icon name={icon} size={15} />
       {label}
@@ -388,27 +922,26 @@ function SubButton({ icon, label, onClick }: { icon: Parameters<typeof Icon>[0][
   );
 }
 
-function EmptyState({ category, query, onUpload }: { category: CategoryId; query: string; onUpload: () => void }) {
-  const isUploads = category === "uploads" && !query;
-  const isMeshes = category === "meshes" && !query;
+function EmptyState({
+  icon,
+  message,
+  actionLabel,
+  onAction,
+}: {
+  icon: IconName;
+  message: string;
+  actionLabel?: string;
+  onAction: () => void;
+}) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+    <div className="col-span-full flex h-full flex-col items-center justify-center gap-3 py-8 text-center">
       <span className="grid h-14 w-14 place-items-center rounded-2xl bg-glass/8 text-content-subtle">
-        <Icon name={isUploads || isMeshes ? "upload" : "search"} size={24} />
+        <Icon name={icon} size={24} />
       </span>
-      <p className="type-body max-w-xs text-content-muted">
-        {query
-          ? `No assets match “${query}”.`
-          : isMeshes
-          ? "No meshes yet. Upload an image to generate a 3D mesh."
-          : isUploads
-          ? "No uploads yet. Bring in your own images, videos, or meshes."
-          : "Nothing here yet."}
-      </p>
-      {(isUploads || isMeshes) && (
-        <Button variant="secondary" size="sm" onClick={onUpload} className="!rounded-full">
-          <Icon name="upload" size={15} />
-          {isMeshes ? "Upload to generate" : "Upload asset"}
+      <p className="type-body max-w-xs text-content-muted">{message}</p>
+      {actionLabel && (
+        <Button variant="secondary" size="sm" onClick={onAction} className="!rounded-full">
+          {actionLabel}
         </Button>
       )}
     </div>

@@ -1,43 +1,51 @@
 import { GlassBar, GlassDivider, GlassGhostButton } from "@/components/glass";
-import { Avatar, Button } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { CreditsMenu } from "./CreditsMenu";
+import { AccountMenu } from "./AccountMenu";
 
 interface EditorActionsProps {
   userName: string;
   onGenerate?: () => void;
+  onSave?: () => void;
+  /** opens the confirm — the cluster never leaves the editor on its own */
+  onExit?: () => void;
 }
 
 /** Top-right glass cluster: scene selector · account, then primary actions. */
-export function EditorActions({ userName, onGenerate }: EditorActionsProps) {
+export function EditorActions({
+  userName,
+  onGenerate,
+  onSave,
+  onExit,
+}: EditorActionsProps) {
   return (
-    <div className="pointer-events-auto flex items-center gap-2">
-      {/* Selector + account */}
-      <GlassBar ui="editor-account-cluster" className="h-12 gap-1 px-1.5">
-        <button
-          type="button"
-          aria-label="Switch scene"
-          data-ui="editor-scene-selector"
-          className="flex items-center gap-1.5 rounded-full py-1 pl-1.5 pr-2 text-content-muted transition-colors hover:bg-glass/15 hover:text-content"
-        >
-          <span className="grid h-6 w-6 place-items-center rounded-full border-2 border-brand text-brand">
-            <Icon name="world" size={13} strokeWidth={2.4} />
-          </span>
-          <Icon name="chevron-down" size={15} />
-        </button>
-
-        <button
-          type="button"
-          aria-label={`Account: ${userName}`}
-          data-ui="editor-account"
-          className="flex items-center gap-1 rounded-full py-0.5 pl-0.5 pr-1.5 transition-colors hover:bg-glass/15"
-        >
-          <Avatar name={userName} size={30} />
-          <Icon name="chevron-down" size={15} className="text-content-muted" />
-        </button>
-      </GlassBar>
-
-      {/* Primary actions */}
+    <div className="pointer-events-auto flex items-center">
+      {/* One unified glass pill: account/credits · action icons · Generate. */}
       <GlassBar ui="editor-action-cluster" className="h-12 gap-1 px-1.5">
+        <CreditsMenu />
+        <AccountMenu userName={userName} />
+
+        <GlassDivider className="mx-0.5" />
+
+        <GlassGhostButton ui="download" icon="download" label="Download" />
+
+        <GlassGhostButton ui="save" icon="save" label="Save" onClick={onSave} />
+
+        {/* The only control in the bar that throws the viewport away, so it is
+            the only one that isn't grey: `export` (an upload arrow) read as
+            another way to get files out, sitting one icon from Download. A
+            sign-out glyph in danger ink says which door this is. */}
+        <GlassGhostButton
+          ui="exit"
+          icon="sign-out"
+          label="Exit project"
+          onClick={onExit}
+          className="text-danger hover:bg-danger/15 hover:text-danger"
+        />
+
+        <GlassDivider className="mx-0.5" />
+
         <Button
           variant="brand"
           size="sm"
@@ -48,10 +56,6 @@ export function EditorActions({ userName, onGenerate }: EditorActionsProps) {
           <Icon name="generate" size={16} />
           Generate
         </Button>
-        <GlassDivider className="mx-0.5" />
-        <GlassGhostButton ui="download" icon="download" label="Download" />
-        <GlassGhostButton ui="save" icon="save" label="Save" />
-        <GlassGhostButton ui="exit" icon="export" label="Exit project" />
       </GlassBar>
     </div>
   );

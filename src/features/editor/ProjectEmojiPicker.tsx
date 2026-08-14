@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { Tooltip } from "@/components/ui";
 import { Panel, PanelHeader, PanelEyebrow, PanelBody, PanelSection } from "./ui";
 
 /** Picker palette, grouped so the list stays scannable rather than a wall of glyphs. */
@@ -76,19 +77,21 @@ export function ProjectEmojiPicker({
 
   return (
     <div ref={wrap} className="relative">
-      <button
-        type="button"
-        data-ui="editor-brand-mark"
-        aria-label={`Project emoji: ${value}. Click to change`}
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className={cn(
-          "grid h-9 w-9 place-items-center rounded-lg border-2 border-brand type-glyph transition-colors hover:bg-glass/15",
-          open && "bg-glass/15"
-        )}
-      >
-        <span aria-hidden>{value}</span>
-      </button>
+      <Tooltip label="Change project emoji" side="bottom" tone="glass" hidden={open}>
+        <button
+          type="button"
+          data-ui="editor-brand-mark"
+          aria-label={`Project emoji: ${value}. Click to change`}
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          className={cn(
+            "grid h-9 w-9 place-items-center rounded-lg border-2 border-brand type-glyph transition-colors hover:bg-glass/15",
+            open && "bg-glass/15"
+          )}
+        >
+          <span aria-hidden>{value}</span>
+        </button>
+      </Tooltip>
 
       {open && (
         <Panel
