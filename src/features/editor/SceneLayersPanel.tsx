@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { GlassPanel, GlassGhostButton } from "@/components/glass";
 import { DockPanel } from "./panel-dock";
@@ -74,7 +75,8 @@ export function SceneLayersPanel({
   const [typesOpen, setTypesOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  /** `id: null` is the panel's own menu — right-clicked empty space. */
+  const [menu, setMenu] = useState<{ id: string | null; x: number; y: number } | null>(null);
   /** header-only mode — the panel folded up out of the way */
   const [folded, setFolded] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -296,7 +298,16 @@ export function SceneLayersPanel({
       }
     >
       {/* -------------------------------------------------------------- tree */}
-      <div className="p-1.5">
+      {/* `min-h-full` so the empty space under the last row is still part of the
+          tree: right-clicking down there is how you reach Paste when the thing
+          you want to paste next to isn't in the scene yet. */}
+      <div
+        className="min-h-full p-1.5"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenu({ id: null, x: e.clientX, y: e.clientY });
+        }}
+      >
         {rows.length > 0 ? (
           <div role="tree" aria-label="Scene layers">
             {rows.map((node) => (
@@ -312,6 +323,7 @@ export function SceneLayersPanel({
                 onToggleCollapsed={() => toggleCollapsed(node.object.id)}
                 onToggleHidden={() => actions.toggleHidden(node.object.id)}
                 onToggleLocked={() => actions.toggleLocked(node.object.id)}
+                onDelete={() => actions.remove(node.object.id)}
                 onRename={(name) => {
                   const trimmed = name.trim();
                   if (trimmed) scene.update(node.object.id, { name: trimmed });
@@ -347,12 +359,13 @@ export function SceneLayersPanel({
         )}
       </div>
 
-      {menu && object(menu.id) && (
+      {menu && (menu.id === null || object(menu.id)) && (
         <LayerContextMenu
-          object={object(menu.id)!}
+          object={menu.id === null ? null : object(menu.id)}
           x={menu.x}
           y={menu.y}
           canPaste={scene.canPaste}
+          onBrowseAssets={onBrowseAssets}
           onClose={() => setMenu(null)}
           actions={actions}
         />
@@ -379,6 +392,7 @@ function LayerRow({
   onToggleCollapsed,
   onToggleHidden,
   onToggleLocked,
+  onDelete,
   onRename,
   onCancelRename,
   onContextMenu,
@@ -394,6 +408,7 @@ function LayerRow({
   onToggleCollapsed: () => void;
   onToggleHidden: () => void;
   onToggleLocked: () => void;
+  onDelete: () => void;
   onRename: (name: string) => void;
   onCancelRename: () => void;
   onContextMenu: (x: number, y: number) => void;
@@ -416,6 +431,7 @@ function LayerRow({
       }}
       onContextMenu={(e) => {
         e.preventDefault();
+        e.stopPropagation();
         onContextMenu(e.clientX, e.clientY);
       }}
       style={{ paddingLeft: 6 + node.depth * INDENT }}
@@ -488,6 +504,18 @@ function LayerRow({
             active={!!o.hidden}
             onClick={onToggleHidden}
           />
+          {/* Last in the row, and never pinned open the way lock and eye are
+              when they're ON. The two toggles are states you want to keep
+              seeing; this one only ever needs to be reachable, and a delete
+              button sitting permanently a few pixels from a lock button is a
+              mis-click waiting to happen. */}
+          <RowToggle
+            icon="trash"
+            label={`Delete ${o.name}`}
+            active={false}
+            danger
+            onClick={onDelete}
+          />
         </>
       )}
     </div>
@@ -499,11 +527,14 @@ function RowToggle({
   icon,
   label,
   active,
+  danger,
   onClick,
 }: {
   icon: IconName;
   label: string;
   active: boolean;
+  /** destructive — reads red on hover so it can't be mistaken for a toggle */
+  danger?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -518,7 +549,8 @@ function RowToggle({
         onClick();
       }}
       className={cn(
-        "grid h-5 w-5 shrink-0 place-items-center rounded text-content-subtle transition-colors hover:bg-glass/20 hover:text-content",
+        "grid h-5 w-5 shrink-0 place-items-center rounded text-content-subtle transition-colors",
+        danger ? "hover:bg-danger/20 hover:text-danger" : "hover:bg-glass/20 hover:text-content",
         active
           ? "opacity-100"
           : "opacity-0 focus-visible:opacity-100 group-hover/row:opacity-100"
@@ -570,7 +602,8 @@ function RenameField({
 interface MenuItem {
   icon: IconName;
   label: string;
-  shortcut: string;
+  /** the key that does the same thing, when there is one */
+  shortcut?: string;
   run: () => void;
   disabled?: boolean;
   danger?: boolean;
@@ -586,13 +619,16 @@ function LayerContextMenu({
   x,
   y,
   canPaste,
+  onBrowseAssets,
   onClose,
   actions,
 }: {
-  object: SceneObject;
+  /** null when the empty space below the tree was right-clicked */
+  object: SceneObject | null;
   x: number;
   y: number;
   canPaste: boolean;
+  onBrowseAssets: () => void;
   onClose: () => void;
   actions: {
     rename: (id: string) => void;
@@ -601,12 +637,34 @@ function LayerContextMenu({
     paste: () => void;
     duplicate: (id: string) => void;
     toggleHidden: (id: string) => void;
+    toggleLocked: (id: string) => void;
     setRole: (id: string, role: ObjectRole) => void;
     remove: (id: string) => void;
   };
 }) {
+  /**
+   * Right-clicking the empty tree offers only what makes sense with nothing
+   * under the cursor. Showing the full list scoped to whatever happened to be
+   * selected would be a menu that acts on something you can't see from where
+   * you clicked.
+   */
+  const items: MenuItem[] = object === null
+    ? ([
+        {
+          icon: "paste",
+          label: "Paste Object",
+          shortcut: `${MOD}V`,
+          run: () => actions.paste(),
+          disabled: !canPaste,
+        },
+        { icon: "assets", label: "Browse Assets", run: onBrowseAssets },
+      ] as MenuItem[])
+    : buildItems(object);
+
+  function buildItems(o: SceneObject): MenuItem[] {
+  const object = o;
   const id = object.id;
-  const items: MenuItem[] = [
+  return [
     { icon: "edit", label: "Rename", shortcut: "F2", run: () => actions.rename(id) },
     { icon: "info", label: "View Info", shortcut: "I", run: () => actions.viewInfo(id) },
     { icon: "copy", label: "Copy Object", shortcut: `${MOD}C`, run: () => actions.copy(id) },
@@ -629,10 +687,15 @@ function LayerContextMenu({
       shortcut: "⇧H",
       run: () => actions.toggleHidden(id),
     },
-    // One row per content role. They read as three items rather than a
-    // submenu because the menu has no submenu machinery, and because picking a
-    // role is a single decision — burying three mutually exclusive options one
-    // level down would cost a hover to answer "what is this object?".
+    {
+      icon: object.locked ? "unlock" : "lock",
+      label: object.locked ? "Unlock Object" : "Lock Object",
+      run: () => actions.toggleLocked(id),
+    },
+    // Master only. Distractor and Background are set where they're reasoned
+    // about — the role step in the Work Order, where you're deciding what the
+    // dataset contains — and three role rows made this menu long enough that
+    // the operations people actually right-click for were below the fold.
     // Cameras and HDRIs are skipped entirely: neither can take a role.
     ...(canTakeRole(object.source)
       ? ([
@@ -641,16 +704,6 @@ function LayerContextMenu({
             label: `${object.role === "master" ? "Unmark" : "Mark"} as Master Object`,
             shortcut: `${MOD}M`,
             run: () => actions.setRole(id, "master"),
-          },
-          {
-            icon: "input-3d",
-            label: `${object.role === "distractor" ? "Unmark" : "Mark"} as Distractor`,
-            run: () => actions.setRole(id, "distractor"),
-          },
-          {
-            icon: "input-3d",
-            label: `${object.role === "background" ? "Unmark" : "Mark"} as Background Object`,
-            run: () => actions.setRole(id, "background"),
           },
         ] as MenuItem[])
       : []),
@@ -662,6 +715,7 @@ function LayerContextMenu({
       danger: true,
     },
   ];
+  }
 
   // Height tracks the row count so the clamp doesn't reserve space that isn't
   // used — the same approach as the asset card's ⋮ menu.
@@ -669,7 +723,17 @@ function LayerContextMenu({
   const left = Math.min(Math.max(x, 8), window.innerWidth - 248);
   const top = Math.min(Math.max(y, 8), window.innerHeight - height - 8);
 
-  return (
+  /**
+   * PORTALLED TO THE BODY, and it has to be.
+   *
+   * The menu is `position: fixed`, but the panel it was rendered inside carries
+   * `backdrop-filter` — which makes that panel the CONTAINING BLOCK for fixed
+   * descendants. So `left: 639px` was measured from the panel's left edge, not
+   * the viewport's, and the menu landed at x≈1207 on a 903px screen; the dock's
+   * two `overflow: auto` ancestors then clipped whatever was left. It opened
+   * every time and was never once visible.
+   */
+  return createPortal(
     <>
       <div className="pointer-events-auto fixed inset-0 z-40" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
       <GlassPanel
@@ -704,7 +768,8 @@ function LayerContextMenu({
           </button>
         ))}
       </GlassPanel>
-    </>
+    </>,
+    document.body
   );
 }
 

@@ -6,17 +6,40 @@ All four panels are 320px wide, stack in the order they were opened, and can be 
 
 **How the AI menu behaves:** clicking **AI Tools** opens a dropdown listing SAB, 3D Generate and MAT, each with a one-line description and a **tick when it's already open**. Clicking a dark row opens that panel; clicking a lit row closes it. The menu stays open either way, so two or three panels can be arranged in one visit.
 
+**Badges.** A tool can carry unread results. When it does, a red count appears on the **AI Tools button itself** (top right of the glyph, ringed in the canvas colour so it stays a separate object rather than a smudge on the icon), and the tool's row inside the menu grows a matching count with its description line replaced by what's waiting — e.g. *"2 preview images ready to view"* in red. Counts cap at **9+**.
+
+Today only MAT uses this. The reason it exists: a finished generation used to announce itself once in a toast and then be gone, so anything produced while the user was looking elsewhere sat silently in a panel they had no reason to open. The badge is what survives being missed.
+
 ---
 
 ## MAT Preview
+
+**Source:** `MatPreviewPanel.tsx` · `MatPreviewView.tsx` · MAT state lives in `EditorView.tsx`
 
 ### How to access it
 
 Click **AI Tools** → **MAT**. The panel appears in the right-hand dock. Clicking **MAT** again in the menu closes it.
 
+**One special case:** if the MAT row is carrying a badge (finished previews nobody has looked at yet) and the panel is closed, clicking it opens the panel **straight into its History list** rather than the form. The badge said there was something to see, so the click that answers it shouldn't land on an empty form with the results still one more control away. Opening it that way also clears the badge.
+
 ### What it does
 
-One image in, one preview image out. It's deliberately the smaller of the two generate tools — a single input and a single switch.
+One image in, one preview image out. It's deliberately the smaller of the two generate tools — a single input and a single switch — but it now **keeps everything it has produced**, so the panel is both the form and the gallery.
+
+### The panel has two modes
+
+| Mode | Body | Footer button |
+|---|---|---|
+| **Form** (default) | Source image + post-processing switch | **Generate Preview** |
+| **History** | A grid of every preview this project has produced | **Back to Preview** |
+
+They're modes, not two sections stacked in one scroll. Both at once meant the thing you came to look at opened above a form you weren't using, and the panel got long enough to scroll for neither job well.
+
+**Swapping between them:** the **History** chip in the panel header (a library glyph, the word History, and a count) or the footer button. There are two exits on purpose — a mode entered from a chip in the header is one people look for an exit from where they're *looking*, which is the list, not the chip.
+
+---
+
+### Form mode
 
 **Step 1 — give it an image.** Two ways:
 
@@ -41,13 +64,36 @@ Closing the panel mid-run cancels the job.
 
 ### When it's done
 
-Three things happen at once:
+Three things happen, and **the panel stays open** — it's now the only route back to the result, so it holds onto it:
 
-1. **The panel closes itself.** It has done its one job.
-2. **A corner card appears bottom-left:** *"MAT preview generation completed. Click to view"*, with an × to dismiss.
-3. **The play button in the top-right panel lights up**, with a one-time orange bubble under it: *"Click here to view your preview image"*.
+1. **The preview is prepended to the History list** (newest first).
+2. **The unread count goes up by one**, which lights the red badge on the AI Tools button and on the MAT row in the menu.
+3. **A corner card appears bottom-left:** *"MAT preview generation completed. Click to view"*, with an × to dismiss. Clicking it opens the panel's History.
 
-Clicking the card, the bubble or the play button opens the **preview screen**.
+> **This changed.** The panel used to close itself on completion and hand the single result to a play button in the top-right action cluster, with a one-time orange bubble pointing at it. **That button and its hint are gone.** A MAT pass used to leave nothing behind — the result opened full-screen and the only way back was a toast you had one chance to click, and generating a second preview made the first unreachable. The panel that produced them is the obvious place to keep them.
+
+---
+
+### History mode
+
+A two-column grid, newest first. Each tile:
+
+- A 4:3 thumbnail of the preview
+- The **source filename**
+- **"Post-processed"** or **"Material only"**
+- A hover title with both: *"From dunes-04.png · post-processed"*
+
+Clicking a tile opens that preview **full-screen**.
+
+The header chip shows the total (`History 3`), and its tooltip reads *"3 previews in this project"* — or *"No previews yet"* at zero.
+
+**Empty state:** *"Nothing generated yet. A finished preview lands here and stays."*
+
+### How the badge clears
+
+**Opening the list is reading it.** The unread count drops to zero when History is opened — via the chip, the footer, the toast, or the menu's badge shortcut.
+
+Opening a *single* preview does **not** clear it. If it did, the other results would stay counted as new forever.
 
 ### The preview screen
 
@@ -55,7 +101,14 @@ A full takeover. The viewport, the toolbars and the panels all go — a material
 
 What's left: the project bar (emoji and name, static here) with a **Back to Editor** button, and the image itself, sized to the window and capped by aspect ratio. Under it, a caption with the source filename, and "· Post-processed" if that switch was on.
 
-The editor is still mounted behind this screen, so going back is instant and the camera hasn't moved.
+The editor is still mounted behind this screen, so going back is instant and the camera hasn't moved. **Back** returns to exactly what was underneath — including the MAT panel, still on History — so stepping through several previews is open, back, open, back.
+
+### Two cleanup items for whoever picks this up
+
+Neither breaks anything; both will mislead the next person to read the file.
+
+1. **`MatPreviewPanel.tsx` still exports `MatPreviewToast`.** It's dead — the editor uses the shared `EditorToast` for all four corner cards now. Safe to delete.
+2. **The panel's own docstring is out of date.** It still says *"On completion the panel closes and hands the preview to the editor. That is the whole reason the top bar grows a play button"* — the panel stays open now, and there is no play button. Same for the opening line, which calls it "the AI rail flyout"; the rail and the fan were both replaced by the top-centre bar and its dropdown.
 
 ---
 

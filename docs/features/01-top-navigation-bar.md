@@ -51,6 +51,8 @@ The three don't close each other. The user can have the layer tree, the AI chat 
 | Assets | The Asset Library, as a bottom sheet |
 | AI Tools | A dropdown menu of the three AI tools |
 
+A tool button can also carry a **red count badge** for results waiting to be looked at — today that's finished MAT previews on the AI Tools button. See [02 — AI Tools](02-ai-tools-sab-mat-layers-3d.md).
+
 **Assets is the one exception:** opening the library drops whatever object is selected. The library is a full-width sheet for choosing what to bring in next, which is a different job from inspecting the thing already selected. Scene and AI leave the selection alone, because reading the tree or asking the AI about the selected object is exactly why you'd open them mid-focus.
 
 ### The AI Tools menu
@@ -88,7 +90,7 @@ The orientation cube and the camera POV inset ease to the left when a panel open
 
 ## Panel 3 — Actions (top right)
 
-**What's in it:** credits · account · download · view preview · save · exit · Generate
+**What's in it:** credits · account · download · save · exit · Generate
 
 ### Credits
 
@@ -109,12 +111,6 @@ The avatar opens a people popover, also 248px:
 ### Download
 
 An icon button with a tooltip. No behaviour wired to it yet.
-
-### View preview (play icon)
-
-Opens the finished MAT preview image. It stays **disabled** until a MAT run has produced one — disabled rather than hidden, because a control that appears out of nowhere is harder to find again than one that was always there waiting to light up.
-
-The moment a MAT preview lands, an orange bubble appears under this button: *"Click here to view your preview image"*. It shows once. Clicking the bubble or the button opens the preview screen.
 
 ### Save
 
@@ -178,7 +174,7 @@ Every "a background job finished" message uses one shape, in the bottom-left cor
 
 | What finished | Message | Clicking it |
 |---|---|---|
-| MAT preview | "MAT preview generation completed. **Click to view**" | Opens the preview screen |
+| MAT preview | "MAT preview generation completed. **Click to view**" | Opens the MAT panel on its History list |
 | 3D mesh | "3D mesh generation completed. **Click to view**" | Opens the library on 3D Meshes |
 | Multi-view images | "Multi-view images generated — front, left, right and back." | Nothing to open — the four angles are in the generate panel |
 | Save | "*Project* saved." | Nothing to open — clears itself after 4s |

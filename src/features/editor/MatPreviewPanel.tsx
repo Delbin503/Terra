@@ -211,61 +211,84 @@ export function MatPreviewPanel({
         }
         footer={
           <div className="flex shrink-0 gap-2.5 border-t border-glass/10 p-3">
-            <Button
-              variant="brand"
-              size="md"
-              data-ui="mat-generate-preview"
-              disabled={!hasImage || busy}
-              onClick={() => setBusy(true)}
-              className="w-full !rounded-xl"
-            >
-              <Icon
-                name={busy ? "spinner" : "generate"}
-                size={17}
-                className={cn(busy && "animate-spin")}
-              />
-              {busy ? "Generating Preview…" : "Generate Preview"}
-            </Button>
+            {historyOpen ? (
+              /* The way back, stated as a button as well as the header toggle.
+                 A mode you entered from a chip in the header is a mode people
+                 look for an exit from where they are LOOKING — which is the
+                 list, not the chip. */
+              <Button
+                variant="secondary"
+                size="md"
+                data-ui="mat-history-back"
+                onClick={onToggleHistory}
+                className="w-full !rounded-xl"
+              >
+                <Icon name="back" size={17} />
+                Back to Preview
+              </Button>
+            ) : (
+              <Button
+                variant="brand"
+                size="md"
+                data-ui="mat-generate-preview"
+                disabled={!hasImage || busy}
+                onClick={() => setBusy(true)}
+                className="w-full !rounded-xl"
+              >
+                <Icon
+                  name={busy ? "spinner" : "generate"}
+                  size={17}
+                  className={cn(busy && "animate-spin")}
+                />
+                {busy ? "Generating Preview…" : "Generate Preview"}
+              </Button>
+            )}
           </div>
         }
       >
-        <div className="flex flex-col gap-4 p-4">
-          {historyOpen && (
-            <section data-ui="mat-history" className="flex flex-col gap-2.5">
-              <span className="type-eyebrow text-content-muted">
-                Previews in this project ({history.length})
-              </span>
+        {/* HISTORY IS A MODE, not a section stacked above the form.
+            Both at once meant the thing you came to look at opened above a form
+            you weren't using, and the panel got long enough to scroll for
+            neither job well. One panel, two states, one control to swap them. */}
+        {historyOpen ? (
+          <div data-ui="mat-history" className="flex flex-col gap-3 p-4">
+            <span className="type-eyebrow text-content-muted">
+              Previews in this project ({history.length})
+            </span>
 
-              {history.length === 0 ? (
-                <p className="type-caption rounded-lg border border-glass/10 bg-glass/5 px-2.5 py-2 text-content-subtle">
-                  Nothing generated yet. A finished preview lands here and stays.
-                </p>
-              ) : (
-                <div className="grid grid-cols-3 gap-2">
-                  {history.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      data-ui={`mat-history-${p.id}`}
-                      onClick={() => onOpenPreview(p)}
-                      title={`From ${p.sourceName}${p.postProcessed ? " · post-processed" : ""}`}
-                      className="group overflow-hidden rounded-lg border border-glass/12 bg-glass/6 text-left transition-colors hover:border-brand/50"
-                    >
-                      <span className="relative block aspect-[4/3] w-full overflow-hidden">
-                        <AssetThumb type="image" seed={p.seed} />
-                      </span>
-                      <span className="type-caption-strong block truncate px-1.5 py-1 text-content">
+            {history.length === 0 ? (
+              <p className="type-caption rounded-lg border border-glass/10 bg-glass/5 px-2.5 py-2 text-content-subtle">
+                Nothing generated yet. A finished preview lands here and stays.
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                {history.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    data-ui={`mat-history-${p.id}`}
+                    onClick={() => onOpenPreview(p)}
+                    title={`From ${p.sourceName}${p.postProcessed ? " · post-processed" : ""}`}
+                    className="group overflow-hidden rounded-xl border border-glass/12 bg-glass/6 text-left transition-colors hover:border-brand/50"
+                  >
+                    <span className="relative block aspect-[4/3] w-full overflow-hidden">
+                      <AssetThumb type="image" seed={p.seed} />
+                    </span>
+                    <span className="block px-2 py-1.5">
+                      <span className="type-caption-strong block truncate text-content">
                         {p.sourceName}
                       </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <div className="h-px bg-glass/10" />
-            </section>
-          )}
-
+                      <span className="type-caption block truncate text-content-subtle">
+                        {p.postProcessed ? "Post-processed" : "Material only"}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+        <div className="flex flex-col gap-4 p-4">
           <section className="flex flex-col gap-2.5">
             <div className="flex items-center justify-between gap-3">
               <span className="type-body shrink-0 text-content-subtle">
@@ -338,6 +361,7 @@ export function MatPreviewPanel({
             label="Enable Post-processing"
           />
         </div>
+        )}
       </DockPanel>
 
       {previewOpen && image && (

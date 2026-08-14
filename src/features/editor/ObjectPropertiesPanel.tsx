@@ -47,6 +47,15 @@ const SETTINGS: { key: SettingKey; icon: IconName; label: string; group: Setting
  */
 const CAMERA_TRANSFORM: SettingKey[] = ["position", "rotation", "distance", "height"];
 
+/**
+ * Rig properties, not object ones. Distance is how far the pair reaches from
+ * the master and Height is the climb between its two ends — neither means
+ * anything for a mesh, where they only ever read "—". They sit in the Transform
+ * group because on a camera that is where they belong, so the group alone can't
+ * decide who sees them.
+ */
+const CAMERA_ONLY: SettingKey[] = ["distance", "height"];
+
 function summarize(
   o: SceneObject,
   rig: CameraRig | null,
@@ -129,10 +138,8 @@ export function ObjectPropertiesPanel({
   const items = SETTINGS.filter(
     (s) =>
       s.group === group &&
-      // Distance is a camera-rig property — how far the rig reaches from the
-      // master. On an ordinary object it has no meaning (it only ever read "—"),
-      // so it lives on the camera alone.
-      (s.key !== "distance" || isCamera) &&
+      // Rig-only rows never reach an ordinary object.
+      (!CAMERA_ONLY.includes(s.key) || isCamera) &&
       // Scale is meaningless on a camera; the rig's reach is set by moving it.
       (!isCamera || group !== "Transform" || CAMERA_TRANSFORM.includes(s.key))
   );
