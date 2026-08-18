@@ -102,8 +102,17 @@ import {
   CircleAlert,
   TriangleAlert,
   RotateCcw,
+  LayoutGrid,
   LayoutTemplate,
   FileText,
+  Sun,
+  Cloud,
+  CloudRain,
+  CloudLightning,
+  CloudSnow,
+  CloudFog,
+  Wind,
+  Compass as CompassRose,
   type LucideIcon,
 } from "lucide-react";
 
@@ -193,6 +202,8 @@ export const iconRegistry = {
   nodes: Layers,
   /** the agent's work categories, on its work cards */
   layout: LayoutTemplate,
+  /** everything, as a grid — the catalogue rather than one thing in it */
+  grid: LayoutGrid,
   /** technical output — a query, a log, a script */
   code: Braces,
   /** re-run the thing that failed */
@@ -218,6 +229,18 @@ export const iconRegistry = {
   panorama: Layers,
   camera: Camera,
   spline: Spline,
+
+  // Weather — the five conditions a scene can be rendered in, plus the two
+  // atmosphere controls that aren't tied to one condition.
+  sunny: Sun,
+  cloudy: Cloud,
+  rain: CloudRain,
+  storm: CloudLightning,
+  snow: CloudSnow,
+  fog: CloudFog,
+  wind: Wind,
+  /** wind BEARING — the dial, as opposed to `wind` the phenomenon */
+  bearing: CompassRose,
 
   // Chrome / layout
   "sidebar-collapse": PanelLeftClose,

@@ -88,7 +88,7 @@ export function AddObjectFlow({
           <p className="type-caption mb-1.5 text-content-subtle">
             {exact
               ? `${matches.length} ${matches.length === 1 ? "match" : "matches"} for “${query}” — click to add`
-              : `No exact match for “${query}”. Here’s everything in 3D Meshes:`}
+              : `No exact match for “${query}”. Here’s every 3D model in your library:`}
           </p>
           <div
             data-ui="ai-add-library-strip"

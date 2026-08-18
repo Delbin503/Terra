@@ -16,6 +16,17 @@ import {
   nearLimit,
   type CameraRig,
 } from "./camera-rig";
+import {
+  DEFAULT_WEATHER,
+  applyPreset,
+  makeSavedWeather,
+  nextPresetName,
+  patchWeather,
+  type SavedWeather,
+  type SceneWeather,
+  type WeatherPatch,
+  type WeatherPresetId,
+} from "./weather";
 
 /** Scene lighting (chatbot-controllable). brightness 0.3–2, warmth -1..1. */
 export interface SceneEnv {
@@ -123,6 +134,22 @@ export function useScene() {
   const [rigs, setRigs] = useState<CameraRig[]>(seed.rigs);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [env, setEnvState] = useState<SceneEnv>({ brightness: 1, warmth: 0 });
+  /**
+   * The atmosphere the scene stands in — one configuration, not a set to
+   * permute. It is SCENE state rather than Work Order state for the same reason
+   * the camera rig is: the panel edits it, the scene renders it, and there is
+   * therefore only one description of it to keep true. See weather.ts.
+   */
+  const [weather, setWeatherState] = useState<SceneWeather>(DEFAULT_WEATHER);
+  /** Named states someone kept this session — §7 of the weather spec. */
+  const [savedWeather, setSavedWeather] = useState<SavedWeather[]>([]);
+  // Mirrors of the two above, so save/load can read the live values without
+  // nesting one setState inside another's updater — which StrictMode
+  // double-invokes, and which saved two identically-named presets per click.
+  const weatherRef = useRef(weather);
+  weatherRef.current = weather;
+  const savedWeatherRef = useRef(savedWeather);
+  savedWeatherRef.current = savedWeather;
   /** Scene clipboard for the layers panel's Copy / Paste. Snapshot by value. */
   const [clipboard, setClipboard] = useState<{ rootId: string; objects: SceneObject[] } | null>(
     null
@@ -220,6 +247,56 @@ export function useScene() {
         brightness: Math.max(0.3, Math.min(2, patch.brightness ?? prev.brightness)),
         warmth: Math.max(-1, Math.min(1, patch.warmth ?? prev.warmth)),
       })),
+    []
+  );
+
+  /* --------------------------------------------------------------- weather */
+
+  /**
+   * Nudge one or more weather values. Clamping lives in `patchWeather` rather
+   * than here, so the ranges are stated once and testable without React.
+   */
+  const setWeather = useCallback(
+    (patch: WeatherPatch) => setWeatherState((prev) => patchWeather(prev, patch)),
+    []
+  );
+
+  /**
+   * Switch condition — a whole-state replacement, not a patch.
+   *
+   * Presets are complete (see weather.ts) precisely so this can't leave the rain
+   * amount from the last condition sitting under a clear sky, where the panel
+   * hides the control that would show it.
+   */
+  const setWeatherPreset = useCallback((id: WeatherPresetId) => setWeatherState(applyPreset(id)), []);
+
+  /** Back to the stock values of whichever condition is selected. */
+  const resetWeather = useCallback(
+    () => setWeatherState((prev) => applyPreset(prev.preset)),
+    []
+  );
+
+  /**
+   * Keep the current weather under a name. The name is computed INSIDE the
+   * updater, against the fresh `prev` list — so two quick saves become "Rain"
+   * then "Rain 2" rather than two "Rain"s racing the same stale snapshot.
+   */
+  const saveWeather = useCallback(() => {
+    setSavedWeather((prev) => {
+      const state = weatherRef.current;
+      return [...prev, makeSavedWeather(nextPresetName(state, prev), state)];
+    });
+  }, []);
+
+  const loadWeather = useCallback((id: string) => {
+    const hit = savedWeatherRef.current.find((s) => s.id === id);
+    // Copied on the way in: loading a preset twice and editing between must not
+    // mutate the stored one.
+    if (hit) setWeatherState(patchWeather(hit.state, {}));
+  }, []);
+
+  const deleteWeather = useCallback(
+    (id: string) => setSavedWeather((prev) => prev.filter((s) => s.id !== id)),
     []
   );
 
@@ -621,6 +698,17 @@ export function useScene() {
     canRedo: future.current.length > 0,
     env,
     setEnv,
+    // Weather is deliberately NOT in `tracked`: undo covers the scene graph, and
+    // a history full of slider drags would bury the object edits you actually
+    // want back. Same call the selection makes, for the same reason.
+    weather,
+    setWeather,
+    setWeatherPreset,
+    resetWeather,
+    savedWeather,
+    saveWeather,
+    loadWeather,
+    deleteWeather,
   };
 }
 

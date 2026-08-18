@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
 import { Meter } from "@/components/ui";
 import { AssetThumb } from "./AssetThumb";
-import { typeIcon } from "./assets-data";
+import { typeIcon, type AssetType } from "./assets-data";
 import type { NodeRef, Part, PermissionCard, RunStep, RunTurn, TaskCard } from "./ai-agent-script";
 
 /**
@@ -217,7 +217,7 @@ export function NodeGroupChip({
 /* ----------------------------------------------------------------- pieces */
 
 /** An image the agent made. Capped narrow inline; click to fill the column. */
-function ImagePart({ seed, type, caption }: { seed: number; type: "mesh" | "image" | "environment" | "video" | "camera"; caption?: string }) {
+function ImagePart({ seed, type, caption }: { seed: number; type: AssetType; caption?: string }) {
   const [big, setBig] = useState(false);
   return (
     <figure className={cn("my-2", big ? "w-full" : "w-[200px] max-w-full")}>

@@ -57,14 +57,20 @@ type Vec3 = [number, number, number];
  * the only things worth counting. The camera sweep is not here: it happens
  * INSIDE one session, and it is authored by the rig rather than by this file.
  */
-export type AxisId = "weather" | "time" | "background" | "layouts";
+export type AxisId = "background" | "layouts";
 
 /**
- * Dock sections. Camera and Roles are not axes — they edit the scene rather
- * than the order — and Output gates what TerraGen computes rather than how many
- * times it runs. All four read as rows in the same stack.
+ * Dock sections. Master, Camera and Weather are not axes — they edit the scene
+ * rather than the order, and none of them multiplies anything — and Output
+ * gates what TerraGen computes rather than how many times it runs. They all read
+ * as rows in the same stack.
+ *
+ * Weather used to be an axis (a multi-select of five conditions) and Time of Day
+ * another (a set of clock times). Both became one scene-owned Weather & Lighting
+ * configuration — see weather.ts — so neither is an `AxisId` any more, and the
+ * subset math no longer multiplies by either.
  */
-export type SectionId = "camera" | "roles" | AxisId | "output";
+export type SectionId = "master" | "camera" | "weather" | AxisId | "output";
 
 export interface AxisMeta {
   id: AxisId;
@@ -76,20 +82,8 @@ export interface AxisMeta {
 
 export const AXES: AxisMeta[] = [
   {
-    id: "weather",
-    label: "Weather",
-    icon: "world",
-    blurb: "Five fixed states. Each one you add re-renders the whole sweep.",
-  },
-  {
-    id: "time",
-    label: "Time of Day",
-    icon: "render-time",
-    blurb: "Named points in the day. Each one you add re-renders the whole sweep.",
-  },
-  {
     id: "background",
-    label: "Background",
+    label: "Scene Environment",
     icon: "panorama",
     blurb: "Swap the environment. The HDRI already in your scene is always the first value.",
   },
@@ -107,49 +101,23 @@ export const AXIS_BY_ID: Record<AxisId, AxisMeta> = AXES.reduce(
   {} as Record<AxisId, AxisMeta>
 );
 
+/**
+ * The axes the panel actually shows.
+ *
+ * AI Layouts is modelled, counted and billed like any other axis, but it has no
+ * section: TerraArrange doesn't exist yet, so its editor could only ever author
+ * a request nothing can answer. It stays in `AXES` so the dispatch review keeps
+ * counting it if it is ever switched on programmatically, and comes back here
+ * the day the service ships.
+ */
+export const PANEL_AXES = AXES.filter((a) => a.id !== "layouts");
+
 /* ----------------------------------------------------------------- state -- */
 
 /** Every axis carries `on`. Off means "whatever the scene already shows". */
 interface AxisBase {
   on: boolean;
 }
-
-/**
- * An axis whose values are a fixed list of named states.
- *
- * Weather and Time of Day are the same control wearing two vocabularies: pick
- * which named states to render, where the scene's own state is value #1 and
- * cannot be removed. They were once two bespoke editors — ten weather dials and
- * a brushed 24-hour band with an interval picker — and both were authoring
- * detail the Work Order has no field for. What the orchestrator permutes is a
- * LIST OF STATES, so that is what the panel collects.
- */
-export interface StateAxis extends AxisBase {
-  /** the scene's own state, always present and not removable */
-  base: string;
-  /** every state that will be rendered, `base` included */
-  values: string[];
-}
-
-export const WEATHER_STATES = ["Sunny", "Cloudy", "Rainy", "Snowstorm", "Thunder"] as const;
-
-/**
- * Named points in the day rather than a clock.
- *
- * A 30-minute grid across 24 hours is 48 checkboxes and, at one subset each, a
- * bill nobody meant to author. These are the six the lighting actually differs
- * between, and each carries its clock time so the label isn't vague.
- */
-export const TIME_STATES = ["Dawn", "Morning", "Midday", "Afternoon", "Sunset", "Night"] as const;
-
-export const TIME_CLOCK: Record<string, string> = {
-  Dawn: "05:30",
-  Morning: "09:00",
-  Midday: "12:00",
-  Afternoon: "15:00",
-  Sunset: "18:30",
-  Night: "22:00",
-};
 
 export interface BackgroundAxis extends AxisBase {
   /** library asset id of the HDRI in the scene, if we could match one */
@@ -228,8 +196,6 @@ export interface OutputSpec {
 }
 
 export interface WorkOrder {
-  weather: StateAxis;
-  time: StateAxis;
   background: BackgroundAxis;
   layouts: LayoutAxis;
   output: OutputSpec;
@@ -340,8 +306,6 @@ export function deriveWorkOrder(scene: SceneApi, assets: Asset[]): WorkOrder {
       : null;
 
   return {
-    weather: { on: false, base: "Sunny", values: ["Sunny"] },
-    time: { on: false, base: "Midday", values: ["Midday"] },
     background: {
       on: false,
       baseAssetId: baseAsset?.id ?? null,
@@ -379,9 +343,6 @@ export function axisValues(o: WorkOrder, id: AxisId, assets: Asset[]): string[] 
   const assetName = (assetId: string) => assets.find((a) => a.id === assetId)?.name ?? "Asset";
 
   switch (id) {
-    case "weather":
-    case "time":
-      return o[id].on ? o[id].values : [o[id].base];
     case "background": {
       const base = o.background.baseLabel;
       const extras = o.background.assetIds.map(assetName);

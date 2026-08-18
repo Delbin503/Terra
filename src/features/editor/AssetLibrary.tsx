@@ -14,12 +14,16 @@ import {
   categories,
   collectTags,
   filterByCategory,
+  sortAssets,
+  sortOptions,
   typeIcon,
   uploadViews,
+  CONTENT_TYPES,
   type Asset,
   type AssetFolder,
   type AssetType,
   type CategoryId,
+  type SortOrder,
   type UploadView,
 } from "./assets-data";
 import { SOURCE_LABEL } from "./scene-types";
@@ -56,10 +60,15 @@ function typeForFile(file: File): AssetType {
 /**
  * AssetLibrary — the editor's asset browser (bottom dock). Terra glass idiom.
  *
- * Categories: Assets (the whole GLTS library) · Images · HDRI Map · Uploads
- * (My Assets / Folders) · 3D Meshes. Each view keeps the same header shape —
- * search, tag filter, one primary action — so moving between them doesn't move
- * the controls; only the action changes (Generate 3D / Upload / Create Folder).
+ * Categories: All Assets (the whole catalogue, with a type filter over it) ·
+ * Environments (HDRI maps) · Skyboxes · Uploads (My Assets / Folders) ·
+ * 3D Models · Utilities. Each view keeps the same header shape — search, tag
+ * filter, one primary action — so moving between them doesn't move the
+ * controls; only the action changes (Generate 3D / Upload / Create Folder).
+ *
+ * ALL ASSETS IS THE ONLY TAB THAT MIXES KINDS, so it and Uploads are the only
+ * two that carry a type filter. Everywhere else the tab IS the type, and a
+ * filter offering the one type already selected would be a no-op control.
  *
  * Floating pieces (menu, folder picker, details) render fixed so they escape
  * the panel's clipping; the panel shrinks its right edge when details is open.
@@ -96,6 +105,13 @@ export function AssetLibrary({
   // that earns a type filter on top of the tag filter.
   const [types, setTypes] = useState<AssetType[]>([]);
   const [typesOpen, setTypesOpen] = useState(false);
+  /**
+   * Newest first, because that is the order the grid was already in — the store
+   * inserts new assets at the head, so a run you just generated is at the top
+   * where you left it. The control makes that a choice rather than a habit.
+   */
+  const [sort, setSort] = useState<SortOrder>("descending");
+  const [sortOpen, setSortOpen] = useState(false);
 
   // Multi-select is armed from the ⋮ menu ("Select Items") rather than being
   // always-on: a plain click on a card otherwise has two meanings at once.
@@ -128,21 +144,31 @@ export function AssetLibrary({
 
   const visible = useMemo(() => {
     const base = applyFilters(scope, query, tags);
-    return types.length ? base.filter((a) => types.includes(a.type)) : base;
-  }, [scope, query, tags, types]);
+    const filtered = types.length ? base.filter((a) => types.includes(a.type)) : base;
+    // Sort last, so it orders what survived the filters rather than deciding
+    // which ones did.
+    return sortAssets(filtered, sort);
+  }, [scope, query, tags, types, sort]);
   const tagOptions = useMemo(() => collectTags(scope), [scope]);
-  // Only the types the uploads actually contain, so the menu never offers a
-  // filter that would empty the grid.
+  // Only the types this view actually contains, so the menu never offers a
+  // filter that would empty the grid. Sorted by CONTENT_TYPES rather than by
+  // first appearance, so All Assets always reads 3D Asset · Skybox · HDRI Map
+  // regardless of what order the catalogue happens to be in.
   const typeOptions = useMemo(() => {
     const seen: AssetType[] = [];
     scope.forEach((a) => {
       if (!seen.includes(a.type)) seen.push(a.type);
     });
-    return seen;
+    const rank = (t: AssetType) => {
+      const i = CONTENT_TYPES.indexOf(t);
+      return i === -1 ? CONTENT_TYPES.length : i;
+    };
+    return seen.sort((a, b) => rank(a) - rank(b));
   }, [scope]);
-  // Uploads is the only category that mixes types; everywhere else the category
-  // itself already is the type filter.
-  const showTypeFilter = category === "uploads" && !showFolderGrid && !picking;
+  // All Assets and Uploads are the two categories that mix types; everywhere
+  // else the category itself already is the type filter.
+  const showTypeFilter =
+    (category === "all" || category === "uploads") && !showFolderGrid && !picking;
   const visibleFolders = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? folders.filter((f) => f.name.toLowerCase().includes(q)) : folders;
@@ -391,6 +417,21 @@ export function AssetLibrary({
               />
             )}
 
+            {/* Sort sits on EVERY tab, unlike the two filters beside it. A
+                filter is about which of these do I want; a sort is about how
+                do I read them, and that question survives into the tabs that
+                hold one kind of thing. It's icon-only for the same reason —
+                three controls with labels crowd the search field off a 40vh
+                dock, and the chosen order is already visible in the grid. */}
+            {!showFolderGrid && (
+              <SortMenu
+                value={sort}
+                open={sortOpen}
+                onOpenChange={setSortOpen}
+                onChange={setSort}
+              />
+            )}
+
             {headerAction && (
               <Button
                 variant="brand"
@@ -512,10 +553,14 @@ export function AssetLibrary({
                       : openFolder
                       ? "This folder is empty. Use “Add to Folder” on any asset."
                       : category === "uploads"
-                        ? "No uploads yet. Bring in your own images, HDRIs or meshes."
+                        ? "No uploads yet. Bring in your own images, skyboxes, environments or 3D models."
                         : category === "meshes"
-                          ? "No meshes yet. Generate one from a prompt or reference image."
-                          : "Nothing here yet."
+                          ? "No 3D models yet. Generate one from a prompt or reference image."
+                          : category === "skyboxes"
+                            ? "No skyboxes yet. Upload a panorama to sit behind your scene."
+                            : category === "environments"
+                              ? "No environments yet. Upload an HDRI to light the scene."
+                              : "Nothing here yet."
                 }
                 actionLabel={
                   query || tags.length > 0 || types.length > 0
@@ -840,6 +885,111 @@ function TypeFilter({
                 Clear types
               </button>
             )}
+          </GlassPanel>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * SORT — icon only.
+ *
+ * The two controls beside it wear labels because a filter is invisible once
+ * applied: nothing in a grid of twelve says "and forty more are hidden". A sort
+ * is the opposite — its whole effect is the order you're looking at — so the
+ * trigger only has to be findable, not self-explaining. That buys back the
+ * width that a third labelled pill would have taken from the search field.
+ *
+ * A radio list, not checkboxes: the grid has exactly one order at a time.
+ */
+function SortMenu({
+  value,
+  open,
+  onOpenChange,
+  onChange,
+}: {
+  value: SortOrder;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onChange: (v: SortOrder) => void;
+}) {
+  const current = sortOptions.find((o) => o.id === value) ?? sortOptions[0];
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        aria-label={`Sort — ${current.label}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={`Sort — ${current.label}`}
+        data-ui="asset-sort"
+        onClick={() => onOpenChange(!open)}
+        className={cn(
+          "grid h-10 w-10 place-items-center rounded-full border transition-colors",
+          open
+            ? "border-brand/50 bg-brand/12 text-content"
+            : "border-glass/12 bg-glass/8 text-content-muted hover:text-content"
+        )}
+      >
+        <Icon name="filter" size={16} />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => onOpenChange(false)} />
+          <GlassPanel
+            ui="asset-sort-menu"
+            thickness="overlay"
+            className="absolute right-0 top-[calc(100%+8px)] z-50 w-52 !rounded-2xl p-1.5"
+          >
+            <p className="type-eyebrow px-3 pb-1 pt-1.5 text-content-muted">Sort by</p>
+            {sortOptions.map((o) => {
+              const on = o.id === value;
+              return (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={on}
+                  data-ui={`asset-sort-${o.id}`}
+                  onClick={() => {
+                    onChange(o.id);
+                    // One order at a time, so the choice is the whole errand —
+                    // unlike the filters, where you usually tick several.
+                    onOpenChange(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors",
+                    on ? "bg-brand/12" : "hover:bg-glass/12"
+                  )}
+                >
+                  <Icon
+                    name={o.icon}
+                    size={15}
+                    className={cn(
+                      "shrink-0",
+                      // The same chevron, flipped — the direction IS the label.
+                      o.id === "ascending" && "rotate-180",
+                      on ? "text-brand" : "text-content-subtle"
+                    )}
+                  />
+                  <span className="min-w-0 grow">
+                    <span
+                      className={cn(
+                        "type-body block truncate",
+                        on ? "text-brand-on-glass" : "text-content"
+                      )}
+                    >
+                      {o.label}
+                    </span>
+                    <span className="type-caption block text-content-subtle">{o.hint}</span>
+                  </span>
+                  {on && <Icon name="check" size={14} className="shrink-0 text-brand" />}
+                </button>
+              );
+            })}
           </GlassPanel>
         </>
       )}

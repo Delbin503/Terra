@@ -1,17 +1,13 @@
 import { useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui";
-import { PillButton, NumberInput } from "./ui";
+import { NumberInput } from "./ui";
 import { FactorCard } from "./controls-ui";
 import type { Asset } from "./assets-data";
 import {
   ANNOTATIONS,
-  TIME_CLOCK,
-  TIME_STATES,
-  WEATHER_STATES,
   axisValues,
   type AxisId,
-  type StateAxis,
   type WorkOrder,
 } from "./work-order";
 import type { WorkOrderStore } from "./useWorkOrder";
@@ -46,10 +42,6 @@ export interface EditorProps {
 
 export function AxisEditor(props: EditorProps) {
   switch (props.section) {
-    case "weather":
-      return <StateEditor {...props} id="weather" />;
-    case "time":
-      return <StateEditor {...props} id="time" />;
     case "background":
       return <BackgroundEditor {...props} />;
     case "layouts":
@@ -57,70 +49,6 @@ export function AxisEditor(props: EditorProps) {
     case "output":
       return <OutputEditor {...props} />;
   }
-}
-
-/* --- weather · time of day ------------------------------------------------ */
-
-/**
- * ONE EDITOR FOR WEATHER AND TIME OF DAY.
- *
- * Both were bespoke before, and both were authoring detail the Work Order has
- * no field for: ten atmosphere dials per weather state, and a brushed 24-hour
- * band with an interval picker that could quietly author 48 subsets. What the
- * orchestrator permutes is a list of named states, so a list of named states is
- * what the panel collects — and once that is true for both, they are one
- * control with two vocabularies.
- */
-function StateEditor({ order, store, id }: EditorProps & { id: "weather" | "time" }) {
-  const axis: StateAxis = order[id];
-  const states: readonly string[] = id === "weather" ? WEATHER_STATES : TIME_STATES;
-
-  const toggle = (s: string) => {
-    if (s === axis.base) return; // the scene's own state is value #1
-    store.patch(id, {
-      values: axis.values.includes(s)
-        ? axis.values.filter((v) => v !== s)
-        : [...axis.values, s],
-    });
-  };
-
-  return (
-    <div data-ui={`terragen-editor-${id}`}>
-      <Cost>
-        {axis.on
-          ? `Each state renders the whole sweep again — ${axis.base} is your scene's own and always included.`
-          : `Off — every frame renders as ${axis.base}.`}
-      </Cost>
-
-      <Group title={id === "weather" ? "States" : "Times"}>
-        <div className="flex flex-wrap gap-2">
-          {states.map((s) => {
-            const isBase = s === axis.base;
-            const inSweep = axis.values.includes(s);
-            return (
-              <PillButton
-                key={s}
-                ui={`${id}-${s}`}
-                size="md"
-                active={inSweep}
-                onClick={() => toggle(s)}
-              >
-                {s}
-                {id === "time" && TIME_CLOCK[s] && ` · ${TIME_CLOCK[s]}`}
-                {isBase && " · in scene"}
-              </PillButton>
-            );
-          })}
-        </div>
-      </Group>
-
-      <Note>
-        {id === "weather"
-          ? "Five fixed states, as TerraGen renders them. Tuning what a state looks like isn't something a Work Order carries."
-          : "Named points in the day, not a clock — the lighting is what changes, and these are where it differs."}
-      </Note>
-    </div>
-  );
 }
 
 /* --- background ----------------------------------------------------------- */

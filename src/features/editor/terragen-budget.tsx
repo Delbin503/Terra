@@ -17,12 +17,12 @@ import {
 /**
  * THE BUDGET RAIL — the right column.
  *
- * This exists because the arithmetic is genuinely unintuitive: on a 24-subset
- * order, one more weather value costs 2,880 frames, and halving the yaw
- * increment costs the same again. Nobody can hold that in their head from a
- * list of toggles, so the number has to move while the control is being
- * touched. It is treated the way CaptureRunPanel treats plan.totalFrames — as
- * the thing the dataset is billed and judged on.
+ * This exists because the arithmetic is genuinely unintuitive: on a 12-subset
+ * order, one more environment value costs a full sweep again, and halving the
+ * yaw increment costs the same. Nobody can hold that in their head from a list
+ * of toggles, so the number has to move while the control is being touched. It
+ * is treated the way CaptureRunPanel treats plan.totalFrames — as the thing the
+ * dataset is billed and judged on.
  *
  * The permutation preview under it is the honesty check: the multiplication is
  * shown as the actual table TerraOrchestrator will walk, not as a number the

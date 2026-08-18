@@ -28,7 +28,7 @@ import {
 } from "./scene-types";
 import { defaultManualTags, defaultSmartTags, type AssetType } from "./assets-data";
 
-const TYPES: AssetType[] = ["image", "environment", "video", "mesh"];
+const TYPES: AssetType[] = ["mesh", "skybox", "environment", "image", "video"];
 
 /** A stable number from an object id, so its default tags don't reshuffle. */
 function seedOf(id: string): number {

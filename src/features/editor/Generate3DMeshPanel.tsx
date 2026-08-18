@@ -124,7 +124,9 @@ export function Generate3DMeshPanel({
         setSlots((prev) => prev.map((s) => ({ ...s, generating: false })));
       } else {
         const name = prompt.trim() ? prompt.trim().slice(0, 48) : "Generated mesh";
-        const asset = store.add({ name, type: "mesh" });
+        // `generated` is what earns the Gen3D badge in the library — the tile is
+        // where "did I make this or did it ship with Terra?" gets answered.
+        const asset = store.add({ name, type: "mesh", generated: true });
         if (placeAfter.current) onResolvePlaceholder(asset);
         placeAfter.current = false;
       }

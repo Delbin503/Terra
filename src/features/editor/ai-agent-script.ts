@@ -710,7 +710,7 @@ function generateScript(ctx: AgentContext): Script {
         { kind: "image", seed: 512, type: "mesh", caption: "Concrete barrier · 4.8k tris" },
         {
           kind: "md",
-          text: `It's in **3D Meshes** in your library. Place it from there, or say *place it* and I'll drop it beside the ${ctx.sceneName.toLowerCase()} deck.`,
+          text: `It's in **3D Models** in your library. Place it from there, or say *place it* and I'll drop it beside the ${ctx.sceneName.toLowerCase()} deck.`,
         },
       ],
       suggestions: ["Place it in the scene", "Make it more weathered", "Generate a variant"],

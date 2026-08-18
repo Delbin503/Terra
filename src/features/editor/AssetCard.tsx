@@ -1,7 +1,8 @@
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
 import { AssetThumb } from "./AssetThumb";
-import { typeIcon, deriveDetails, type Asset } from "./assets-data";
+import { badgeIcon, badgeLabel, deriveDetails, type Asset } from "./assets-data";
+import { SOURCE_LABEL } from "./scene-types";
 
 /**
  * AssetCard — a library tile. Normal state shows a placeholder thumbnail with a
@@ -87,9 +88,21 @@ export function AssetCard({
         <AssetThumb type={asset.type} seed={asset.seed} />
       </div>
 
-      {/* Type badge (top-right) */}
-      <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-md bg-black/40 text-white/90 backdrop-blur-sm">
-        <Icon name={typeIcon[asset.type]} size={13} strokeWidth={2} />
+      {/* TYPE BADGE (top-right) — icon AND word.
+          It used to be the glyph alone, which is fine while the tab you are on
+          already tells you what everything is. On All Assets it doesn't: a
+          skybox and an HDRI map both render as scenery, and two similar icons
+          at 13px is not a distinction anyone can make at a glance. */}
+      <span
+        title={
+          asset.generated
+            ? `${SOURCE_LABEL[asset.type]} · generated`
+            : SOURCE_LABEL[asset.type]
+        }
+        className="absolute right-2 top-2 flex h-6 items-center gap-1 rounded-md bg-black/45 px-1.5 text-white/90 backdrop-blur-sm"
+      >
+        <Icon name={badgeIcon(asset)} size={12} strokeWidth={2} />
+        <span className="type-caption-strong leading-none">{badgeLabel(asset)}</span>
       </span>
 
       {/* Select mode owns the top-left slot entirely: a persistent checkbox

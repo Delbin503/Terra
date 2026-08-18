@@ -13,14 +13,22 @@ import type { Asset } from "./assets-data";
  * keeps a 456px column reading as one panel rather than as three.
  */
 
-/** The on/off control. Off is not "disabled" — it means the axis contributes
- *  the scene's current value, which the editor keeps showing either way. */
-export function AxisSwitch({
+/**
+ * The on/off control, as a shape.
+ *
+ * Split out from `AxisSwitch` when the weather panel needed a fog toggle: same
+ * control, but "Fog axis" is not what it switches, and an aria-label that lies
+ * about what a switch does is worse than a duplicated twenty lines of styling.
+ * The stopPropagation stays here rather than at the call site — every switch
+ * this app draws sits on top of something clickable.
+ */
+export function Switch({
   label,
   on,
   onToggle,
   ui,
 }: {
+  /** read verbatim by screen readers — pass the full phrase */
   label: string;
   on: boolean;
   onToggle: () => void;
@@ -31,7 +39,7 @@ export function AxisSwitch({
       role="switch"
       tabIndex={0}
       aria-checked={on}
-      aria-label={`${label} axis`}
+      aria-label={label}
       data-ui={ui}
       onClick={(e) => {
         // The row behind this opens the section; the switch must not.
@@ -60,9 +68,69 @@ export function AxisSwitch({
   );
 }
 
+/** The axis on/off. Off is not "disabled" — it means the axis contributes the
+ *  scene's current value, which the editor keeps showing either way. */
+export function AxisSwitch(props: { label: string; on: boolean; onToggle: () => void; ui: string }) {
+  return <Switch {...props} label={`${props.label} axis`} />;
+}
+
 /** What this section does, in one sentence, at the top of its body. */
 export function Cost({ children }: { children: React.ReactNode }) {
   return <p className="type-caption mb-4 text-content-subtle">{children}</p>;
+}
+
+/**
+ * A labelled slider on one line, with the same boxed readout the rest of Terra
+ * Web's parameters use (FactorCard, the camera sliders): a `field-well` value
+ * chip so a weather dial reads as the same kind of control as a material factor
+ * or a shot count, not a bespoke one.
+ *
+ * `FactorCard` stacks its label ABOVE the track, which is right for three
+ * material factors and too tall for a stack of weather dials in a 456px column;
+ * this keeps the boxed value but puts label and track on one line.
+ */
+export function Dial({
+  label,
+  value,
+  min = 0,
+  max = 100,
+  step = 1,
+  suffix,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  /** unit shown after the number — "%" for an intensity, "°" for an angle */
+  suffix?: string;
+  disabled?: boolean;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className={cn("flex items-center gap-2.5", disabled && "opacity-45")}>
+      <span className="type-caption w-[104px] shrink-0 truncate text-content-muted" title={label}>
+        {label}
+      </span>
+      <input
+        type="range"
+        aria-label={label}
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="h-1 grow cursor-pointer accent-brand disabled:cursor-not-allowed"
+      />
+      <span className="field-well type-numeric-sm w-12 shrink-0 rounded-md border px-1.5 py-0.5 text-center tabular-nums text-content">
+        {Math.round(value)}
+        {suffix}
+      </span>
+    </div>
+  );
 }
 
 /** A block inside a section. */

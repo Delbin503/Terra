@@ -20,6 +20,8 @@ export interface AssetInit {
   name: string;
   type: AssetType;
   uploaded?: boolean;
+  /** came out of a Generate 3D run — drives the Gen3D badge */
+  generated?: boolean;
   modelUrl?: string;
 }
 

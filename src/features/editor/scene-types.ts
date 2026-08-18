@@ -103,8 +103,15 @@ export const ROLE_CHIP: Record<ObjectRole, string> = {
  *  "is this the master?" didn't all have to learn the enum. */
 export const isMaster = (o: { role: ObjectRole }) => o.role === "master";
 
-/** Roles a given object is allowed to take — cameras and HDRIs take none. */
-export const canTakeRole = (source: AssetType) => source !== "camera" && source !== "environment";
+/**
+ * Roles a given object is allowed to take — cameras and backdrops take none.
+ *
+ * A camera is the thing pointed AT the subject. An HDRI lights the scene and a
+ * skybox sits behind it; neither is a subject a dataset axis can vary, so
+ * offering them a role would be offering a setting that changes nothing.
+ */
+export const canTakeRole = (source: AssetType) =>
+  source !== "camera" && source !== "environment" && source !== "skybox";
 
 /** A 3D object placed in the viewport. Transform is stored UI-friendly:
  *  position in metres, rotation in degrees, scale as multipliers. */
@@ -170,8 +177,9 @@ export interface SceneObject {
 
 /** Human-readable label for an object's source type (title badge, info panel). */
 export const SOURCE_LABEL: Record<AssetType, string> = {
-  mesh: "3D Mesh",
+  mesh: "3D Model",
   image: "Image",
+  skybox: "Skybox",
   environment: "Environment",
   video: "Video",
   camera: "Camera",

@@ -77,9 +77,18 @@ function SceneMotif({
       <path d="M0 78 Q 34 60 66 74 T 120 70 V120 H0 Z" fill={hillFar} opacity="0.85" />
       {/* near hills */}
       <path d="M0 96 Q 40 78 78 92 T 120 88 V120 H0 Z" fill={hillNear} />
-      {/* environments read as panoramas: add a bright horizon seam */}
+      {/* An HDRI is a light source: a bright horizon seam, the giveaway of a
+          latlong map opened flat. */}
       {type === "environment" && (
         <rect x="0" y="70" width="120" height="1.5" fill="#fff" opacity={THUMB.horizonSeam} />
+      )}
+      {/* A skybox is a backdrop, so it reads as one: the two vertical seams
+          where the panorama wraps, rather than a horizon that emits light. */}
+      {type === "skybox" && (
+        <>
+          <rect x="30" y="0" width="1" height="120" fill="#fff" opacity={THUMB.horizonSeam} />
+          <rect x="90" y="0" width="1" height="120" fill="#fff" opacity={THUMB.horizonSeam} />
+        </>
       )}
       {/* videos get a play affordance */}
       {type === "video" && (
