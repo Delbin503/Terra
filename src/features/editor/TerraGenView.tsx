@@ -10,12 +10,14 @@ import { SceneWorld } from "./SceneCanvas";
 import { AxisEditor } from "./terragen-axes";
 import { AxisSwitch } from "./terragen-parts";
 import { WeatherSection } from "./terragen-weather";
-import { describeWeather } from "./weather";
+import { describeLayers } from "./weather";
 import { CameraSection } from "./terragen-camera";
 import { MasterSection, type GizmoMode } from "./terragen-master";
 import { SceneCanvas, type CameraHandle } from "./SceneCanvas";
 import { DispatchReview } from "./terragen-budget";
+import { AssetLibrary } from "./AssetLibrary";
 import type { Asset } from "./assets-data";
+import type { AssetStore } from "./useAssets";
 import type { SceneApi } from "./useScene";
 import type { WorkOrderStore } from "./useWorkOrder";
 import {
@@ -43,6 +45,32 @@ type Vec3 = [number, number, number];
  * still telling the truth.
  */
 const LOAD_TIMEOUT_MS = 15_000;
+
+/**
+ * The dock's width, and what the stage owes it.
+ *
+ * ITS OWN NUMBER, not the editor dock's. It used to read `DOCK_WIDTH`, on the
+ * reasoning that TerraGen's panel should be exactly as wide as Layers and MAT
+ * Preview — same glass, same place, same size. That held until the editor dock
+ * was narrowed to 320 for its own reasons and took this panel with it: the
+ * weather dials are a 104px label, a track and a boxed value on ONE line, and
+ * below ~380 the value box ran out past the section's border.
+ *
+ * The two columns answer to different content. A tool panel holds a form; this
+ * holds a spreadsheet of a render's worth of parameters, and it is the only
+ * thing on screen while it's open — it can afford the width and needs it.
+ *
+ * Everything that has to keep clear of the panel derives from this rather than
+ * repeating a number: these were four separate literals once, and changing the
+ * panel meant finding all of them.
+ */
+const TERRAGEN_WIDTH = 400;
+const DOCK_GUTTER = 12;
+const STAGE_INSET = TERRAGEN_WIDTH + DOCK_GUTTER;
+
+/** Collapsed, the dock is a header-height bar — the stage owes it nothing but
+ *  the corner it sits in, so every overlay reclaims the full width. */
+const COLLAPSED_INSET = 0;
 
 /**
  * TERRAGEN — the Work Order author, as a mode.
@@ -75,17 +103,19 @@ export function TerraGenView({
   scene,
   store,
   assets,
+  assetStore,
   projectName,
   credits,
   onClose,
   onDispatch,
   reframeRig,
   onUploadHdri,
-  onAutoAssignRoles,
 }: {
   scene: SceneApi;
   store: WorkOrderStore;
   assets: Asset[];
+  /** the library itself, for the bottom sheet the Objects section opens */
+  assetStore: AssetStore;
   projectName: string;
   /** workspace balance, for the affordability gate */
   credits: number;
@@ -94,20 +124,37 @@ export function TerraGenView({
   /** rebuild the rig's framing around the current master */
   reframeRig: () => void;
   onUploadHdri: (file: File) => void;
-  onAutoAssignRoles: () => void;
 }) {
   const [dispatched, setDispatched] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   /**
-   * Which stage is in front.
+   * Which stage is in front. THE CAMERA'S VIEW IS THE DEFAULT.
    *
-   * Editing is the default because that is what the mode now mostly is: the
-   * sections author a scene, and the preview answers one question about it —
-   * "what will the camera actually shoot" — which is a thing you check, not a
-   * thing you sit in.
+   * It used to open on the editable scene, on the reasoning that the mode is
+   * mostly authoring and the preview is a thing you check. That had it backwards:
+   * this mode exists to produce frames, and the only picture that tells you what
+   * the frames will contain is the one the capture camera sees. Opening on the
+   * orbit view meant every session began by looking at something the dataset will
+   * never include, and you had to know to press a button to see the actual
+   * subject. Edit mode is one click away and still has the gizmos.
    */
-  const [preview, setPreview] = useState(false);
+  const [stage, setStage] = useState<StageId>("camera");
+  const preview = stage === "camera";
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
+  /**
+   * The dock, folded away.
+   *
+   * The mode's whole argument is that the picture is the thing being authored,
+   * and a 400px panel covers a third of it. Collapsing is how you actually look
+   * at the frame you just changed without leaving the mode and losing the
+   * sweep position — so it folds to its own header rather than closing, and
+   * every overlay that was keeping clear of it reclaims the width.
+   */
+  const [collapsed, setCollapsed] = useState(false);
+  /** The asset library, as a bottom sheet over the stage. */
+  const [libraryOpen, setLibraryOpen] = useState(false);
+
+  const stageInset = collapsed ? COLLAPSED_INSET : STAGE_INSET;
   /**
    * The mode assembles before it shows anything.
    *
@@ -133,9 +180,39 @@ export function TerraGenView({
   const rig = rigState(scene);
   const roles = sceneRoles(scene);
 
+  /**
+   * THE RIG ALWAYS FRAMES THE MASTER. There is no Framing button any more.
+   *
+   * It was a control that could only ever be pressed for one reason — the rig
+   * no longer frames the thing the run is about — which makes it a chore rather
+   * than a choice, and a sweep aimed at nothing is not a state worth being able
+   * to author. So TerraGen re-frames it itself.
+   *
+   * KEYED ON IDENTITY AND SIZE, not on position: `scene` already carries the
+   * rig along when the master is dragged, so re-framing on every move would
+   * only throw away a distance or a climb the user had set on purpose. A
+   * different master, a first camera, or a resize of the master are the three
+   * cases where the old framing genuinely no longer fits.
+   *
+   * The callback comes from the editor and is a fresh closure every render, so
+   * it is held in a ref — in the deps it would re-frame on its own output,
+   * forever.
+   */
+  const reframe = useRef(reframeRig);
+  reframe.current = reframeRig;
+  const masterId = roles.master?.id ?? null;
+  const rigId = rig.rig?.id ?? null;
+  const masterSize = roles.master?.scale.join("×") ?? "";
+  useEffect(() => {
+    if (masterId && rigId) reframe.current();
+  }, [masterId, rigId, masterSize]);
+
   if (!order) return null;
 
-  const totals = computeTotals(order, assets, rig.frames);
+  // Weather sets multiply the sweep — the count comes off the scene, since that
+  // is where weather lives (see weather.ts).
+  const weatherSets = scene.savedWeather.filter((s) => s.inRun).length;
+  const totals = computeTotals(order, assets, rig.frames, weatherSets);
   const gates = preflight(
     order,
     {
@@ -163,7 +240,7 @@ export function TerraGenView({
       {/* ------------------------------------------------------------ stage */}
       {/* Both are mounted; only one is visible. Toggling must not cost a
           WebGL context and a 4K environment reload each way. */}
-      <EditStage scene={scene} gizmoMode={gizmoMode} hidden={preview} />
+      <EditStage scene={scene} gizmoMode={gizmoMode} hidden={preview} inset={stageInset} />
       <SweepRender
         scene={scene}
         rig={rig}
@@ -171,22 +248,39 @@ export function TerraGenView({
         onReady={() => setLoading(false)}
         projectName={projectName}
         hidden={!preview}
+        inset={stageInset}
       />
 
       {/* The mode switch. Top-left, where the editor keeps its project bar, so
           the corner that says "where am I" keeps saying it. */}
       <div className="absolute left-4 top-4 z-20">
-        <Button
-          variant={preview ? "brand" : "secondary"}
-          size="sm"
-          data-ui="terragen-preview-toggle"
-          className="!rounded-full"
-          onClick={() => setPreview((p) => !p)}
-        >
-          <Icon name={preview ? "input-3d" : "preview"} size={15} />
-          {preview ? "Edit scene" : "Preview"}
-        </Button>
+        <StageTabs value={stage} onChange={setStage} />
       </div>
+
+      {/* The library, as the bottom sheet it is everywhere else in Terra Web.
+          Same component as the editor's, so folders, tags, search and upload
+          all behave here exactly as they do out there. */}
+      {libraryOpen && (
+        <AssetLibrary
+          store={assetStore}
+          /* All Assets, NOT 3D Models. "3D Models" is the AI-output folder —
+             `filterByCategory` narrows it to meshes with `generated` set — so
+             opening there showed an empty grid and a Generate 3D button to
+             someone who only wanted to place a chair. The catalogue is in All
+             Assets, which is what "add from library" means. */
+          initialCategory="all"
+          rightInset={stageInset}
+          onClose={() => setLibraryOpen(false)}
+          onPlace={(a) => {
+            // `scene.add` selects what it adds, so the object arrives with the
+            // gizmo already on it — and the sheet closes, because the next
+            // thing you want is the viewport it just landed in.
+            scene.add(a.name, a.type, undefined, a.modelUrl);
+            setLibraryOpen(false);
+          }}
+          onGenerate3D={() => setLibraryOpen(false)}
+        />
+      )}
 
       {/* --------------------------------------------------------------- dock */}
       <TerraGenDock
@@ -203,12 +297,19 @@ export function TerraGenView({
         subsets={totals.subsets}
         gizmoMode={gizmoMode}
         onGizmoMode={setGizmoMode}
-        onAutoAssignRoles={onAutoAssignRoles}
-        onReframeRig={reframeRig}
         onUploadHdri={onUploadHdri}
         onReseed={() => store.reseed(scene, assets)}
         onDispatch={() => setReviewing(true)}
         onClose={onClose}
+        collapsed={collapsed}
+        onToggleCollapsed={() => setCollapsed((c) => !c)}
+        onBrowseLibrary={() => {
+          // The sheet covers the bottom of the stage, and the Objects section
+          // it was opened from is what you check the result against — so the
+          // dock stays up rather than being folded away for it.
+          setCollapsed(false);
+          setLibraryOpen(true);
+        }}
       />
 
       {reviewing && (
@@ -226,6 +327,62 @@ export function TerraGenView({
           }}
         />
       )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------- the tabs -- */
+
+type StageId = "camera" | "edit";
+
+const STAGES: { id: StageId; label: string; icon: IconName }[] = [
+  { id: "camera", label: "Scene preview", icon: "camera" },
+  { id: "edit", label: "Edit scene", icon: "input-3d" },
+];
+
+/**
+ * Which stage is in front — as two tabs rather than one toggle.
+ *
+ * A single button had to be labelled for where it TOOK you, so the control
+ * showing "Edit scene" meant you were in the preview. That reads backwards
+ * every time: the one word on screen names the thing you are NOT looking at.
+ * Two tabs name both stages and mark the current one, so the control answers
+ * "where am I" and "where else can I go" at once.
+ *
+ * Its own dark ground rather than plain glass, matching the frame caption and
+ * the scrubber: all three float over a live render that can be any brightness,
+ * and glass tint alone loses the label over sunlit rock.
+ */
+function StageTabs({ value, onChange }: { value: StageId; onChange: (id: StageId) => void }) {
+  return (
+    <div
+      role="tablist"
+      aria-label="TerraGen stage"
+      data-ui="terragen-stage-tabs"
+      className="flex items-center gap-1 rounded-full border border-glass/15 bg-canvas/75 p-1 backdrop-blur-md"
+    >
+      {STAGES.map((s) => {
+        const on = s.id === value;
+        return (
+          <button
+            key={s.id}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            data-ui={`terragen-stage-${s.id}`}
+            onClick={() => onChange(s.id)}
+            className={cn(
+              "type-button-sm flex h-8 items-center gap-1.5 rounded-full px-3.5 transition-colors",
+              on
+                ? "bg-brand text-brand-foreground"
+                : "text-content-muted hover:bg-glass/15 hover:text-content"
+            )}
+          >
+            <Icon name={s.icon} size={15} />
+            {s.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -249,6 +406,7 @@ function SweepRender({
   onReady,
   projectName,
   hidden,
+  inset,
 }: {
   scene: SceneApi;
   rig: ReturnType<typeof rigState>;
@@ -256,6 +414,8 @@ function SweepRender({
   /** the render's assets have resolved — clears the loader */
   onReady: () => void;
   projectName: string;
+  /** width the dock is occupying — the overlays hold to the band left of it */
+  inset: number;
   /**
    * The edit viewport is in front. The sweep render stays MOUNTED underneath
    * rather than unmounting, because tearing it down would drop its WebGL
@@ -343,7 +503,10 @@ function SweepRender({
 
       {/* ------------------------------------------------------ frame caption */}
       {!loading && rig.hasMaster && (
-        <div className="pointer-events-none absolute left-0 right-[468px] top-4 flex justify-center">
+        <div
+          className="pointer-events-none absolute left-0 top-4 flex justify-center"
+          style={{ right: inset }}
+        >
           <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-glass/15 bg-canvas/75 px-3 py-1.5 backdrop-blur-md">
             <Icon name="camera" size={13} className="shrink-0 text-brand" />
             <span className="type-caption-strong text-content">Scene preview</span>
@@ -359,7 +522,7 @@ function SweepRender({
           render that can be any brightness, and over sunlit rock the glass tint
           alone left the readout barely legible. */}
       {!loading && rig.hasMaster && rig.hasRig && (
-        <div className="absolute bottom-0 left-0 right-[468px] p-4">
+        <div className="absolute bottom-0 left-0 p-4" style={{ right: inset }}>
           <div className="mx-auto flex max-w-[560px] items-center gap-2.5 rounded-2xl border border-glass/15 bg-canvas/75 px-3 py-2.5 backdrop-blur-md">
             <button
               type="button"
@@ -414,10 +577,13 @@ function EditStage({
   scene,
   gizmoMode,
   hidden,
+  inset,
 }: {
   scene: SceneApi;
   gizmoMode: GizmoMode;
   hidden?: boolean;
+  /** width the dock is occupying — keeps the cube and handles clear of it */
+  inset: number;
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
@@ -443,7 +609,7 @@ function EditStage({
         controlsRef={controlsRef}
         cameraRef={cameraRef}
         // Clear of the dock, the same way the editor clears its own.
-        gizmoInset={468}
+        gizmoInset={inset}
       />
     </div>
   );
@@ -559,17 +725,21 @@ function TerraGenDock({
   subsets,
   gizmoMode,
   onGizmoMode,
-  onAutoAssignRoles,
-  onReframeRig,
   onUploadHdri,
   onReseed,
   onDispatch,
   onClose,
+  collapsed,
+  onToggleCollapsed,
+  onBrowseLibrary,
 }: {
   scene: SceneApi;
   order: WorkOrder;
   store: WorkOrderStore;
   assets: Asset[];
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  onBrowseLibrary: () => void;
   roles: ReturnType<typeof sceneRoles>;
   rig: ReturnType<typeof rigState>;
   gates: ReturnType<typeof preflight>;
@@ -580,8 +750,6 @@ function TerraGenDock({
   subsets: number;
   gizmoMode: GizmoMode;
   onGizmoMode: (m: GizmoMode) => void;
-  onAutoAssignRoles: () => void;
-  onReframeRig: () => void;
   onUploadHdri: (file: File) => void;
   onReseed: () => void;
   onDispatch: () => void;
@@ -594,11 +762,42 @@ function TerraGenDock({
 
   const toggleOpen = (id: SectionId) => setOpen((o) => (o === id ? null : id));
 
+  /**
+   * Folded: the header alone, in the corner the panel came from.
+   *
+   * It keeps its identity — same mark, same word — so the way back is the thing
+   * you just collapsed rather than a new button somewhere else. Section state,
+   * the open accordion and the draft are all untouched, because the panel is
+   * still mounted; only its body is gone.
+   */
+  if (collapsed) {
+    return (
+      <Panel
+        ui="terragen"
+        thickness="thick"
+        className="absolute right-3 top-3 flex-row items-center gap-2 overflow-hidden py-2 pl-3 pr-2"
+      >
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-soft text-brand">
+          <Icon name="generate" size={15} />
+        </span>
+        <span className="type-body-strong text-content">Generate</span>
+        <GlassGhostButton
+          ui="terragen-expand"
+          size="sm"
+          icon="sidebar-expand"
+          label="Expand the Work Order panel"
+          onClick={onToggleCollapsed}
+        />
+      </Panel>
+    );
+  }
+
   return (
     <Panel
       ui="terragen"
       thickness="thick"
-      className="absolute inset-y-3 right-3 w-[456px] overflow-hidden"
+      className="absolute inset-y-3 right-3 overflow-hidden"
+      style={{ width: TERRAGEN_WIDTH }}
     >
       <header
         data-ui="terragen-header"
@@ -608,7 +807,7 @@ function TerraGenDock({
           <Icon name="generate" size={17} />
         </span>
         <div className="min-w-0 grow">
-          <h2 className="type-heading text-content">TerraGen</h2>
+          <h2 className="type-heading text-content">Generate</h2>
           <p className="type-caption text-content-muted">Work Order</p>
         </div>
         <GlassGhostButton
@@ -616,6 +815,14 @@ function TerraGenDock({
           icon="retry"
           label="Re-read the scene into every axis"
           onClick={onReseed}
+        />
+        {/* Fold, don't close: the panel gets out of the way of the render it is
+            describing without discarding the Work Order in it. */}
+        <GlassGhostButton
+          ui="terragen-collapse"
+          icon="sidebar-collapse"
+          label="Collapse the Work Order panel"
+          onClick={onToggleCollapsed}
         />
         <GlassGhostButton ui="terragen-close" icon="close" label="Back to editor" onClick={onClose} />
       </header>
@@ -630,8 +837,12 @@ function TerraGenDock({
                 switch: they decide what a single subset even looks like. */}
             <Section
               id="master"
-              label="Master Object"
-              icon="master"
+              /* "Objects", not "Master Object": the section holds the whole
+                 cast — the master, everything sharing the frame with it, and the
+                 way in from the library. Naming it after one of its rows made
+                 the other two look like they were in the wrong place. */
+              label="Objects"
+              icon="scene"
               summary={masterSummary(roles)}
               open={open === "master"}
               onOpen={() => toggleOpen("master")}
@@ -642,7 +853,7 @@ function TerraGenDock({
                 assets={assets}
                 gizmoMode={gizmoMode}
                 onGizmoMode={onGizmoMode}
-                onAutoAssignRoles={onAutoAssignRoles}
+                onBrowseLibrary={onBrowseLibrary}
               />
             </Section>
 
@@ -654,12 +865,7 @@ function TerraGenDock({
               open={open === "camera"}
               onOpen={() => toggleOpen("camera")}
             >
-              <CameraSection
-                scene={scene}
-                rig={rig}
-                roles={roles}
-                onReframeRig={onReframeRig}
-              />
+              <CameraSection scene={scene} rig={rig} roles={roles} />
             </Section>
 
             {/* Weather is the third scene section: it edits the scene, not the
@@ -670,7 +876,10 @@ function TerraGenDock({
               id="weather"
               label="Weather & Lighting"
               icon="sunny"
-              summary={describeWeather(scene.weather)}
+              /* Conditions only. The row used to append the wind bearing and
+                 the sun clock, and neither is editable in the section any more —
+                 a summary of controls that aren't there is a dead end. */
+              summary={describeLayers(scene.weather)}
               open={open === "weather"}
               onOpen={() => toggleOpen("weather")}
             >
@@ -713,7 +922,11 @@ function TerraGenDock({
         // Capped and scrollable: open, the annotation list is taller than the
         // room below the axes, and without this it would push Dispatch off the
         // bottom of the panel.
-        <div className="max-h-[48vh] shrink-0 overflow-y-auto px-3 pb-1">
+        /* The top border and the ink under it are what make this read as PINNED.
+           Without them the axis list simply stopped mid-row at the scroll edge —
+           a half-cut "Fog" with a card starting under it, which reads as content
+           the panel has covered up rather than content you can scroll to. */
+        <div className="max-h-[48vh] shrink-0 overflow-y-auto border-t border-glass/12 bg-glass/8 px-3 pb-1 pt-2">
           <Section
             id="output"
             label="Output"

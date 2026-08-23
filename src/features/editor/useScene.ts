@@ -18,14 +18,15 @@ import {
 } from "./camera-rig";
 import {
   DEFAULT_WEATHER,
-  applyPreset,
   makeSavedWeather,
   nextPresetName,
   patchWeather,
+  resetLayers,
+  toggleLayer,
   type SavedWeather,
   type SceneWeather,
+  type WeatherLayerId,
   type WeatherPatch,
-  type WeatherPresetId,
 } from "./weather";
 
 /** Scene lighting (chatbot-controllable). brightness 0.3–2, warmth -1..1. */
@@ -262,19 +263,16 @@ export function useScene() {
   );
 
   /**
-   * Switch condition — a whole-state replacement, not a patch.
-   *
-   * Presets are complete (see weather.ts) precisely so this can't leave the rain
-   * amount from the last condition sitting under a clear sky, where the panel
-   * hides the control that would show it.
+   * Switch one condition on or off. Conditions COMBINE, so this adds to the mix
+   * rather than replacing it — see weather.ts for why.
    */
-  const setWeatherPreset = useCallback((id: WeatherPresetId) => setWeatherState(applyPreset(id)), []);
-
-  /** Back to the stock values of whichever condition is selected. */
-  const resetWeather = useCallback(
-    () => setWeatherState((prev) => applyPreset(prev.preset)),
+  const toggleWeatherLayer = useCallback(
+    (id: WeatherLayerId) => setWeatherState((prev) => toggleLayer(prev, id)),
     []
   );
+
+  /** Back to the stock dial values of whichever conditions are on. */
+  const resetWeather = useCallback(() => setWeatherState((prev) => resetLayers(prev)), []);
 
   /**
    * Keep the current weather under a name. The name is computed INSIDE the
@@ -297,6 +295,15 @@ export function useScene() {
 
   const deleteWeather = useCallback(
     (id: string) => setSavedWeather((prev) => prev.filter((s) => s.id !== id)),
+    []
+  );
+
+  /** Check a saved set into the run, or out of it — see `SavedWeather.inRun`. */
+  const toggleWeatherInRun = useCallback(
+    (id: string) =>
+      setSavedWeather((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, inRun: !s.inRun } : s))
+      ),
     []
   );
 
@@ -703,12 +710,13 @@ export function useScene() {
     // want back. Same call the selection makes, for the same reason.
     weather,
     setWeather,
-    setWeatherPreset,
+    toggleWeatherLayer,
     resetWeather,
     savedWeather,
     saveWeather,
     loadWeather,
     deleteWeather,
+    toggleWeatherInRun,
   };
 }
 

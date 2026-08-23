@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
-import { Button } from "@/components/ui";
 import { Pill, SearchInput } from "./ui";
 import { FactorCard } from "./controls-ui";
 import { canTakeRole, ROLE_BADGE, ROLE_DOT } from "./scene-types";
@@ -26,40 +25,19 @@ import { Group, Note, Segmented } from "./terragen-parts";
  * was dragged, plus a "Match rig" button to paper over the drift. There is now
  * one description, and it is the rig.
  */
-export function CameraSection({
-  scene,
-  rig,
-  roles,
-  onReframeRig,
-}: {
-  scene: SceneApi;
-  rig: RigState;
-  roles: SceneRoles;
-  onReframeRig: () => void;
-}) {
+export function CameraSection({ scene, rig, roles }: { scene: SceneApi; rig: RigState; roles: SceneRoles }) {
   return (
     <div data-ui="terragen-editor-camera">
       <MasterPicker scene={scene} roles={roles} />
 
-      {rig.hasMaster && (
-        <Group title="Framing">
-          {rig.hasRig ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              data-ui="terragen-reframe-rig"
-              onClick={onReframeRig}
-            >
-              <Icon name="gizmo-focus" size={15} />
-              Frame rig around {rig.masterName}
-            </Button>
-          ) : (
-            <Note tone="warn">
-              No camera in the scene. Place a Camera in the viewport — its two positions are the
-              sweep, and these controls edit it.
-            </Note>
-          )}
-        </Group>
+      {/* Framing is no longer a button. TerraGen re-frames the rig on the master
+          itself (see TerraGenView), so the only thing left to say here is when
+          there is no rig to frame. */}
+      {rig.hasMaster && !rig.hasRig && (
+        <Note tone="warn">
+          No camera in the scene. Place a Camera in the viewport — its two positions are the sweep,
+          and these controls edit it.
+        </Note>
       )}
 
       {rig.hasRig && rig.rig && <RigControls scene={scene} rig={rig} />}
@@ -70,94 +48,155 @@ export function CameraSection({
 /* --------------------------------------------------------------- master --- */
 
 /**
- * Exactly one master, chosen from what is already in the scene.
+ * The master, as a FIELD that opens — not a list that is always open.
  *
- * It is a RADIO, not a checkbox list and not a mesh library: the master is one
- * of the objects standing in the viewport, and the Work Order needs exactly one
- * of them. `scene.setRole` demotes the previous holder, so the exclusivity is
- * enforced by the model rather than by this list remembering to.
+ * It used to render the whole candidate list inline, search box and all, which
+ * meant the section's first ~180px were spent on a decision that is made once
+ * per scene and then left alone. Worse, on a scene of same-named objects the
+ * one fact you actually wanted — WHICH of them is currently the master — was a
+ * checkmark somewhere in a scrolling list rather than the thing at the top.
+ *
+ * So the resting state is one row naming the current master, and choosing a
+ * different one is a click that opens the list and a second that closes it.
+ * Same control, and the answer is legible without opening anything.
  */
 function MasterPicker({ scene, roles }: { scene: SceneApi; roles: SceneRoles }) {
+  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+
+  const eligible = useMemo(
+    () => scene.objects.filter((o) => canTakeRole(o.source)),
+    [scene.objects]
+  );
 
   const candidates = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return scene.objects.filter((o) => canTakeRole(o.source) && o.name.toLowerCase().includes(q));
-  }, [scene.objects, query]);
+    return eligible.filter((o) => o.name.toLowerCase().includes(q));
+  }, [eligible, query]);
+
+  const master = roles.master;
 
   return (
-    <Group
-      title="Master object"
-      hint={roles.master ? undefined : "none marked"}
-    >
-      {scene.objects.filter((o) => canTakeRole(o.source)).length === 0 ? (
+    <Group title="Master object" hint={master ? undefined : "none marked"}>
+      {eligible.length === 0 ? (
         <Note tone="warn">
           Nothing in the scene can be the master yet. Place an object from the library first.
         </Note>
       ) : (
         <>
-          <SearchInput
-            value={query}
-            onValueChange={setQuery}
-            ui="terragen-master-search"
-            className="mb-2 w-full"
-            placeholder="Search objects in the scene"
-          />
-
-          <div
-            data-ui="terragen-master-list"
-            className="max-h-[184px] space-y-1 overflow-y-auto pr-0.5"
-          >
-            {candidates.length === 0 ? (
-              <Note>No object matches "{query}".</Note>
-            ) : (
-              candidates.map((o) => {
-                const isMasterObj = o.role === "master";
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={isMasterObj}
-                    data-ui={`terragen-master-${o.id}`}
-                    onClick={() => scene.setRole(o.id, "master")}
-                    className={cn(
-                      "flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors",
-                      isMasterObj
-                        ? "border-master/55 bg-master/12"
-                        : "border-glass/10 bg-glass/5 hover:border-glass/25"
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "grid h-4 w-4 shrink-0 place-items-center rounded-full border",
-                        isMasterObj ? "border-master bg-master text-canvas" : "border-glass/25"
-                      )}
-                    >
-                      {isMasterObj && <Icon name="check" size={11} />}
-                    </span>
-                    <span className="type-body grow truncate text-content">{o.name}</span>
-                    {!isMasterObj && o.role !== "none" && (
-                      <span
-                        aria-hidden
-                        className={cn("h-2.5 w-2.5 shrink-0 rounded-full border", ROLE_DOT[o.role])}
-                        title={ROLE_BADGE[o.role]}
-                      />
-                    )}
-                    {isMasterObj && (
-                      <Pill ui="master-current" tone="master">
-                        Master
-                      </Pill>
-                    )}
-                  </button>
-                );
-              })
+          <button
+            type="button"
+            aria-expanded={open}
+            data-ui="terragen-master-field"
+            onClick={() => {
+              setOpen((o) => !o);
+              setQuery("");
+            }}
+            className={cn(
+              "flex w-full items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left transition-colors",
+              master
+                ? "border-master/45 bg-master/10"
+                : "border-glass/12 bg-glass/6 hover:border-glass/25"
             )}
-          </div>
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "h-2.5 w-2.5 shrink-0 rounded-full border",
+                master ? "border-master bg-master" : "border-glass/25"
+              )}
+            />
+            <span className="min-w-0 grow">
+              <span className="type-body-strong block truncate text-content">
+                {master ? master.name : "Choose a master object"}
+              </span>
+              <span className="type-caption block truncate text-content-subtle">
+                {master ? "Every camera orbits this" : `${eligible.length} eligible in scene`}
+              </span>
+            </span>
+            <Icon
+              name="chevron-down"
+              size={14}
+              className={cn("shrink-0 text-content-subtle transition-transform", open && "rotate-180")}
+            />
+          </button>
 
-          <p className="type-caption mt-2 text-content-subtle">
-            One master per Work Order — picking another releases the current one.
-          </p>
+          {open && (
+            <div className="mt-2">
+              {/* Search only earns its line once the list is long enough to need
+                  it — under a handful of objects it's a control between you and
+                  four buttons. */}
+              {eligible.length > 5 && (
+                <SearchInput
+                  value={query}
+                  onValueChange={setQuery}
+                  ui="terragen-master-search"
+                  className="mb-2 w-full"
+                  placeholder="Search objects in the scene"
+                />
+              )}
+
+              <div
+                data-ui="terragen-master-list"
+                className="max-h-[184px] space-y-1 overflow-y-auto pr-0.5"
+              >
+                {candidates.length === 0 ? (
+                  <Note>No object matches "{query}".</Note>
+                ) : (
+                  candidates.map((o) => {
+                    const isMasterObj = o.role === "master";
+                    return (
+                      <button
+                        key={o.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={isMasterObj}
+                        data-ui={`terragen-master-${o.id}`}
+                        onClick={() => {
+                          scene.setRole(o.id, "master");
+                          // The field now says what you just chose, so the list
+                          // has nothing left to tell you.
+                          setOpen(false);
+                        }}
+                        className={cn(
+                          "flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors",
+                          isMasterObj
+                            ? "border-master/55 bg-master/12"
+                            : "border-glass/10 bg-glass/5 hover:border-glass/25"
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "grid h-4 w-4 shrink-0 place-items-center rounded-full border",
+                            isMasterObj ? "border-master bg-master text-canvas" : "border-glass/25"
+                          )}
+                        >
+                          {isMasterObj && <Icon name="check" size={11} />}
+                        </span>
+                        <span className="type-body grow truncate text-content">{o.name}</span>
+                        {!isMasterObj && o.role !== "none" && (
+                          <span
+                            aria-hidden
+                            className={cn("h-2.5 w-2.5 shrink-0 rounded-full border", ROLE_DOT[o.role])}
+                            title={ROLE_BADGE[o.role]}
+                          />
+                        )}
+                        {isMasterObj && (
+                          <Pill ui="master-current" tone="master">
+                            Master
+                          </Pill>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              <p className="type-caption mt-2 text-content-subtle">
+                One master per Work Order — picking another releases the current one.
+              </p>
+            </div>
+          )}
         </>
       )}
     </Group>

@@ -111,8 +111,29 @@ import {
   CloudLightning,
   CloudSnow,
   CloudFog,
+  Haze,
   Wind,
   Compass as CompassRose,
+  MessageSquare,
+  CreditCard,
+  ChevronUp,
+  Type,
+  List,
+  Heart,
+  ThumbsUp,
+  FolderInput,
+  Building2,
+  User,
+  Mail,
+  Monitor,
+  ScrollText,
+  CircleDollarSign,
+  ArrowUpDown,
+  Calendar,
+  ChevronLeft,
+  Eraser,
+  MousePointerClick,
+  Minus,
   type LucideIcon,
 } from "lucide-react";
 
@@ -127,7 +148,13 @@ export const iconRegistry = {
   shared: Users,
   trash: Trash2,
   starred: Star,
+  /** kept by the user — the Favourites shelf, as opposed to `starred` the verb */
+  favourite: Heart,
   community: UsersRound,
+  /** one person — the account itself, as opposed to `shared` for many */
+  person: User,
+  /** an appreciation on someone else's world — the community's own currency */
+  like: ThumbsUp,
 
   // Primary actions
   create: Plus,
@@ -161,6 +188,16 @@ export const iconRegistry = {
   tag: Tag,
   /** open the asset library as a chooser */
   "library-picker": Database,
+  /** send this somewhere else — a folder, an organization */
+  "move-to": FolderInput,
+  /** a workspace's parent org, as a destination */
+  organization: Building2,
+
+  // Image studio — the eraser + segmentation pass over a reference photo
+  /** wipe part of the photo away */
+  "magic-eraser": Eraser,
+  /** click a segmented thing to select it */
+  "pick-region": MousePointerClick,
 
   // Object editing (gizmo / toolbar / panels)
   back: ArrowLeft,
@@ -189,6 +226,9 @@ export const iconRegistry = {
   /** narrow a list down to chosen types */
   filter: ListFilter,
 
+  /** freshly published — the badge on a community banner */
+  news: Sparkles,
+
   // AI flyout + chat
   "ai-chat": Sparkles,
   asa: ScanSearch,
@@ -204,6 +244,8 @@ export const iconRegistry = {
   layout: LayoutTemplate,
   /** everything, as a grid — the catalogue rather than one thing in it */
   grid: LayoutGrid,
+  /** the same catalogue as rows, one per line */
+  list: List,
   /** technical output — a query, a log, a script */
   code: Braces,
   /** re-run the thing that failed */
@@ -225,6 +267,8 @@ export const iconRegistry = {
   // World / scene inputs
   "input-2d": Image,
   "input-3d": Box,
+  /** a world described in words alone */
+  "input-text": Type,
   video: Video,
   panorama: Layers,
   camera: Camera,
@@ -236,6 +280,9 @@ export const iconRegistry = {
   cloudy: Cloud,
   rain: CloudRain,
   storm: CloudLightning,
+  /** Airborne dust — Haze is lucide's low-visibility sky, which is what dust
+   *  reads as in a render; CloudDust doesn't exist in the set. */
+  dusty: Haze,
   snow: CloudSnow,
   fog: CloudFog,
   wind: Wind,
@@ -265,7 +312,34 @@ export const iconRegistry = {
   "render-time": Clock,
   check: Check,
 
+  // Settings
+  /** email preferences */
+  mail: Mail,
+  /** an admin overview screen */
+  dashboard: Monitor,
+  /** the audit trail */
+  "activity-log": ScrollText,
+  /** money on the account — balance, credits, billing */
+  balance: CircleDollarSign,
+  /** a sortable column heading */
+  sort: ArrowUpDown,
+  /** pick a date or a range */
+  calendar: Calendar,
+
+  // Account / billing chrome
+  /** open the feedback thread */
+  feedback: MessageSquare,
+  /** buy more credits */
+  payment: CreditCard,
+
+  // Steppers — a paired +/- on a count. `create` is Plus in its own right,
+  // so the pair gets its own names to keep call sites reading as a stepper.
+  "step-up": Plus,
+  "step-down": Minus,
+
   // Directional
+  "chevron-up": ChevronUp,
+  "chevron-left": ChevronLeft,
   "chevron-right": ChevronRight,
   "chevron-down": ChevronDown,
   "arrow-right": ArrowRight,

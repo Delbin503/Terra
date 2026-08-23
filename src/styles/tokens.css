@@ -207,8 +207,13 @@
 
 /* ---------- TYPE / RADIUS / ELEVATION / LAYOUT ---------- */
 :root {
-  --font-display: "Sora Variable", ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
-  --font-sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* One family across both roles. Manrope carries the display weights (700/800
+     read as the geometric, slightly rounded headline in the reference) and still
+     sets clean UI text at 13–15px, so the two roles differ by WEIGHT and
+     TRACKING rather than by typeface. Keeping both variables means every
+     `font-display` call site keeps working. */
+  --font-display: "Manrope Variable", ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+  --font-sans: "Manrope Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
 
   --radius-sm: 0.375rem;
@@ -224,8 +229,8 @@
   --shadow-lg: 0 12px 32px hsl(0 0% 0% / 0.4);
   --shadow-pop: 0 8px 24px hsl(0 0% 0% / 0.35), 0 2px 6px hsl(0 0% 0% / 0.28);
 
-  --rail-w: 16rem;
-  --rail-w-collapsed: 4.5rem;
+  --rail-w: 13rem;
+  --rail-w-collapsed: 3.75rem;
 }
 
 /* ---------- GRADIENTS ----------

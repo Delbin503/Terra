@@ -1,114 +1,139 @@
 /**
  * SCENE WEATHER — the atmosphere the scene is standing in.
  * ------------------------------------------------------------------
- * One weather, live, owned by the scene. Not a list of conditions to permute.
+ * CONDITIONS COMBINE, AND EACH ONE OWNS ONE OR TWO DIALS.
  *
- * WHY THIS ISN'T AN AXIS ANY MORE. Weather and Time of Day used to be Work
- * Order axes: a multi-select of five condition names and a set of clock times,
- * each chosen value costing a full re-render of the sweep. That model could say
- * "render this scene rainy AND snowy" but it could not say what rainy MEANT —
- * how hard it came down, from which direction, through how much fog. The
- * controls a weather system actually needs (§3–§6 of the UI spec) describe ONE
- * configuration in detail, and detail was the thing the axis had no field for.
+ * The first cut of this was five mutually-exclusive presets, each swapping in a
+ * COMPLETE state: eleven sliders across Precipitation, Wind, Atmosphere and
+ * Lighting, most of which said nothing about the condition you had picked.
+ * Choosing Rain set a cloud density. Choosing Sunny left a rain amount in state,
+ * hidden by the panel and live in the render.
  *
- * So weather follows the camera sweep's path exactly. The sweep used to be
- * authored in the order as pitch/yaw/distance ranges, in parallel with a rig
- * sitting in the scene — two descriptions of one thing that drifted apart the
- * moment a camera was dragged. The fix was to delete the order's copy and read
- * the rig live (see work-order.ts, "the sweep is NOT an axis"). Weather is now
- * in the same position: the panel edits the scene's weather, and the scene's
- * weather is what renders. There is nothing to seed and nothing to re-sync.
+ * Two things were wrong with that, and both are the same thing:
  *
- * WHAT THAT COSTS. Subsets no longer multiply by weather or by time — an order
- * is billed for `background × layouts` alone. A weather change costs nothing,
- * because it changes the scene rather than the number of times the scene is
- * rebuilt.
+ *   · A CONDITION IS NOT A WHOLE SKY. "Rain" is a statement about water falling
+ *     and ground staying wet. It has no opinion on cloud density, and pretending
+ *     it did meant every preset had to answer questions it wasn't asked.
+ *   · REAL WEATHER IS ADDITIVE. A dataset wants rain under heavy cloud, or snow
+ *     in low sun. One-of-five could not say that, so the thing you'd actually
+ *     want to render was the thing the model couldn't express.
+ *
+ * So: conditions are LAYERS you switch on independently, each carrying only the
+ * dials it genuinely owns (see `WEATHER_LAYERS`). Wind and Lighting stay as
+ * their own groups because they apply whatever is falling.
+ *
+ * WEATHER IS AN AXIS AGAIN — but not the one it used to be. The old axis
+ * permuted CONDITION NAMES, which is why it was removed: it could say "render
+ * this rainy AND snowy" but not what rainy meant. What multiplies now is a SET —
+ * a named, fully-authored combination — so a run can sweep "Overcast Drizzle"
+ * against "Bright Noon" with every dial in both of them pinned down. See
+ * `SavedWeather.inRun`, and `computeTotals` in work-order.ts.
  *
  * Kept out of React for the same reason `camera-rig.ts` is: presets, clamps and
- * the "has this drifted from its preset" comparison are decisions about values,
- * testable without mounting anything.
+ * the "has this drifted" comparison are decisions about values, testable without
+ * mounting anything.
  */
 
 import type { IconName } from "@/components/icons";
 
-/* --------------------------------------------------------------- presets -- */
+/* ---------------------------------------------------------------- layers -- */
 
-export type WeatherPresetId = "sunny" | "cloudy" | "rain" | "storm" | "snow";
+export type WeatherLayerId = "sunny" | "cloudy" | "rain" | "dusty" | "snow";
 
-export interface WeatherPresetMeta {
-  id: WeatherPresetId;
+/** One slider a condition owns. */
+export interface WeatherDial {
+  /** unique within its layer — the state key is `${layer}.${key}` */
+  key: string;
+  label: string;
+  /** where the dial sits when the layer is first switched on */
+  def: number;
+}
+
+export interface WeatherLayerMeta {
+  id: WeatherLayerId;
   label: string;
   icon: IconName;
-  /** what this condition is, on the preset tile */
+  /** what this condition is, on the tile */
   blurb: string;
+  /**
+   * The one or two dials this condition owns — and NOTHING else.
+   *
+   * Two is the cap on purpose. A condition that needs three is a condition
+   * doing two jobs, and the panel it produced last time was the one this
+   * rewrite exists to delete.
+   */
+  dials: WeatherDial[];
 }
 
 /**
- * The five conditions, in the order the spec lists them — clearest sky first,
- * so the row reads as a ramp rather than as an unordered set.
+ * The five conditions, clearest sky first so the row reads as a ramp.
+ *
+ * `dusty` replaced `storm`. Storm was Rain with the dials turned up — the same
+ * two statements, louder — which is exactly the redundancy combining removes:
+ * you get a storm now by switching Rain on and pushing it. Dust is a condition
+ * nothing else in the set can express.
  */
-export const WEATHER_PRESETS: WeatherPresetMeta[] = [
-  { id: "sunny", label: "Sunny", icon: "sunny", blurb: "Clear sky, hard light" },
-  { id: "cloudy", label: "Cloudy", icon: "cloudy", blurb: "Overcast, soft light" },
-  { id: "rain", label: "Rain", icon: "rain", blurb: "Falling rain, wet ground" },
-  { id: "storm", label: "Storm", icon: "storm", blurb: "Heavy rain, strong wind" },
-  { id: "snow", label: "Snow", icon: "snow", blurb: "Falling snow, accumulation" },
+export const WEATHER_LAYERS: WeatherLayerMeta[] = [
+  {
+    id: "sunny",
+    label: "Sunny",
+    icon: "sunny",
+    blurb: "Clear sky, hard light",
+    dials: [{ key: "brightness", label: "Sky brightness", def: 90 }],
+  },
+  {
+    id: "cloudy",
+    label: "Cloudy",
+    icon: "cloudy",
+    blurb: "Overcast, soft light",
+    dials: [{ key: "coverage", label: "Cloud coverage", def: 75 }],
+  },
+  {
+    id: "rain",
+    label: "Rain",
+    icon: "rain",
+    blurb: "Falling rain, wet ground",
+    dials: [
+      { key: "amount", label: "Rain amount", def: 60 },
+      { key: "wetness", label: "Wetness level", def: 55 },
+    ],
+  },
+  {
+    id: "dusty",
+    label: "Dusty",
+    icon: "dusty",
+    blurb: "Airborne dust, hazy light",
+    dials: [{ key: "amount", label: "Dust amount", def: 50 }],
+  },
+  {
+    id: "snow",
+    label: "Snow",
+    icon: "snow",
+    blurb: "Falling snow, settling",
+    dials: [
+      { key: "amount", label: "Snow amount", def: 55 },
+      { key: "coverage", label: "Snow coverage", def: 70 },
+    ],
+  },
 ];
 
-export const PRESET_BY_ID: Record<WeatherPresetId, WeatherPresetMeta> = WEATHER_PRESETS.reduce(
-  (acc, p) => ({ ...acc, [p.id]: p }),
-  {} as Record<WeatherPresetId, WeatherPresetMeta>
+export const LAYER_BY_ID: Record<WeatherLayerId, WeatherLayerMeta> = WEATHER_LAYERS.reduce(
+  (acc, l) => ({ ...acc, [l.id]: l }),
+  {} as Record<WeatherLayerId, WeatherLayerMeta>
 );
 
-/* ----------------------------------------------------------------- shape -- */
+/** The state key for one dial. Flat, so a value survives its layer being
+ *  switched off and comes back where you left it. */
+export const dialId = (layer: WeatherLayerId, key: string) => `${layer}.${key}`;
 
-/**
- * Falling particles.
- *
- * `direction` is the fall angle as a pair of leans rather than a single number,
- * because rain coming at you and rain crossing the frame are different pictures
- * and a scalar can only express one of them. Both are −100…100 with 0 straight
- * down.
- */
-export interface Precipitation {
-  /** how much comes down — 0 is none, whatever the condition */
-  amount: number;
-  /** how fast it falls */
-  speed: number;
-  /** droplet / flake size, small → large */
-  size: number;
-  /** [horizontal, vertical] lean, −100…100, 0 = straight down */
-  direction: [number, number];
-  /**
-   * Ground wetness (rain, storm) and settled snow (snow).
-   *
-   * One field, two names, because they are the same statement — how much of what
-   * fell is still on the surfaces — and a scene is never raining and snowing at
-   * once. `surfaceLabel` picks the word for the condition being shown.
-   */
-  surface: number;
-}
+/* ----------------------------------------------------------------- shape -- */
 
 export interface Wind {
   speed: number;
   /** bearing in degrees, 0 = North, clockwise */
   directionDeg: number;
-  /** how far wind bends the fall — 0% vertical, 100% near-horizontal */
+  /** how far wind bends what's falling — 0% vertical, 100% near-horizontal */
   rainInfluence: number;
-}
-
-export interface Fog {
-  on: boolean;
-  density: number;
-  /** how far you can see before it closes in — near → far */
-  distance: number;
-}
-
-export interface Sky {
-  cloudCoverage: number;
-  cloudDensity: number;
-  brightness: number;
-  fog: Fog;
 }
 
 export interface Sun {
@@ -119,111 +144,52 @@ export interface Sun {
   shadow: number;
 }
 
+/** Every dial in the panel, keyed `${layer}.${dial}`. */
+export type WeatherValues = Record<string, number>;
+
 export interface SceneWeather {
-  /** the condition this state started as — the row's headline */
-  preset: WeatherPresetId;
-  precip: Precipitation;
+  /**
+   * Which conditions are on. An ARRAY rather than a set of flags, in tile
+   * order, because the order they're listed in is the order the summary reads
+   * them and the order their dial groups stack.
+   */
+  layers: WeatherLayerId[];
+  /**
+   * Dial values for EVERY layer, not just the active ones. A layer switched off
+   * and back on comes back as you left it — losing a tuned rain amount because
+   * you toggled cloud off for a look is the kind of thing that makes people
+   * stop toggling.
+   */
+  values: WeatherValues;
   wind: Wind;
-  sky: Sky;
   sun: Sun;
 }
 
-/* ----------------------------------------------------------- the presets -- */
+/* --------------------------------------------------------------- defaults -- */
 
-/**
- * What each condition means, as values.
- *
- * Every preset is COMPLETE rather than a patch over a shared default. A partial
- * preset means switching Rain → Sunny leaves the rain amount from before
- * sitting under a clear sky, invisible in the panel (Sunny hides the
- * precipitation group) and live in the render — a value nobody can see and
- * nobody set.
- */
-const PRESET_STATE: Record<WeatherPresetId, Omit<SceneWeather, "preset">> = {
-  sunny: {
-    precip: { amount: 0, speed: 0, size: 30, direction: [0, 0], surface: 0 },
-    wind: { speed: 10, directionDeg: 90, rainInfluence: 0 },
-    sky: {
-      cloudCoverage: 10,
-      cloudDensity: 15,
-      brightness: 90,
-      fog: { on: false, density: 10, distance: 80 },
-    },
-    sun: { minutes: 12 * 60, intensity: 95, shadow: 80 },
-  },
-  cloudy: {
-    precip: { amount: 0, speed: 0, size: 30, direction: [0, 0], surface: 0 },
-    wind: { speed: 25, directionDeg: 90, rainInfluence: 0 },
-    sky: {
-      cloudCoverage: 75,
-      cloudDensity: 60,
-      brightness: 55,
-      fog: { on: false, density: 20, distance: 70 },
-    },
-    sun: { minutes: 12 * 60, intensity: 45, shadow: 35 },
-  },
-  rain: {
-    precip: { amount: 60, speed: 65, size: 35, direction: [15, 0], surface: 55 },
-    wind: { speed: 35, directionDeg: 225, rainInfluence: 35 },
-    sky: {
-      cloudCoverage: 90,
-      cloudDensity: 75,
-      brightness: 40,
-      fog: { on: true, density: 30, distance: 55 },
-    },
-    sun: { minutes: 12 * 60, intensity: 30, shadow: 20 },
-  },
-  storm: {
-    precip: { amount: 90, speed: 90, size: 45, direction: [40, 0], surface: 85 },
-    wind: { speed: 85, directionDeg: 250, rainInfluence: 80 },
-    sky: {
-      cloudCoverage: 100,
-      cloudDensity: 95,
-      brightness: 20,
-      fog: { on: true, density: 45, distance: 35 },
-    },
-    sun: { minutes: 12 * 60, intensity: 15, shadow: 10 },
-  },
-  snow: {
-    precip: { amount: 55, speed: 25, size: 60, direction: [10, 0], surface: 70 },
-    wind: { speed: 30, directionDeg: 315, rainInfluence: 45 },
-    sky: {
-      cloudCoverage: 85,
-      cloudDensity: 65,
-      brightness: 70,
-      fog: { on: true, density: 25, distance: 50 },
-    },
-    sun: { minutes: 12 * 60, intensity: 40, shadow: 25 },
-  },
-};
-
-/** A condition, as a complete weather state. */
-export function applyPreset(id: WeatherPresetId): SceneWeather {
-  const s = PRESET_STATE[id];
-  return {
-    preset: id,
-    // Deep-copied: the preset table is module state, and handing a caller a
-    // reference into it would let the next slider drag edit the preset itself.
-    precip: { ...s.precip, direction: [...s.precip.direction] as [number, number] },
-    wind: { ...s.wind },
-    sky: { ...s.sky, fog: { ...s.sky.fog } },
-    sun: { ...s.sun },
-  };
+export function defaultValues(): WeatherValues {
+  const out: WeatherValues = {};
+  for (const layer of WEATHER_LAYERS) {
+    for (const d of layer.dials) out[dialId(layer.id, d.key)] = d.def;
+  }
+  return out;
 }
 
 /** Where a scene starts. Sunny at midday — the neutral read of a new scene. */
-export const DEFAULT_WEATHER: SceneWeather = applyPreset("sunny");
+export const DEFAULT_WEATHER: SceneWeather = {
+  layers: ["sunny"],
+  values: defaultValues(),
+  wind: { speed: 10, directionDeg: 90, rainInfluence: 0 },
+  sun: { minutes: 12 * 60, intensity: 95, shadow: 80 },
+};
 
 /* ---------------------------------------------------------------- clamps -- */
 
 const clamp = (v: number, lo: number, hi: number) =>
   Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : lo;
 
-/** 0–100, the range almost every control in the panel runs on. */
+/** 0–100, the range every dial in the panel runs on. */
 const pct = (v: number) => clamp(Math.round(v), 0, 100);
-
-/** −100…100, for the two fall-angle leans. */
-const lean = (v: number) => clamp(Math.round(v), -100, 100);
 
 /** Bearings wrap rather than clamp — dragging the compass past North must come
  *  round to 1°, not stick at 360°. */
@@ -233,54 +199,39 @@ const bearing = (v: number) => (Number.isFinite(v) ? ((Math.round(v) % 360) + 36
 export const wrapMinutes = (v: number) =>
   Number.isFinite(v) ? ((Math.round(v) % 1440) + 1440) % 1440 : 0;
 
-/**
- * A patch, clamped into a whole valid state.
- *
- * Written group-by-group rather than as a deep merge: the four groups are the
- * four sections of the panel, they each have their own legal ranges, and a
- * generic merge would happily write a 4,000-minute sun or a −20% fog.
- */
 export interface WeatherPatch {
-  preset?: WeatherPresetId;
-  precip?: Partial<Precipitation>;
+  layers?: WeatherLayerId[];
+  values?: WeatherValues;
   wind?: Partial<Wind>;
-  sky?: Partial<Omit<Sky, "fog">> & { fog?: Partial<Fog> };
   sun?: Partial<Sun>;
 }
 
+/**
+ * A patch, clamped into a whole valid state.
+ *
+ * Written group-by-group rather than as a deep merge: each group has its own
+ * legal range, and a generic merge would happily write a 4,000-minute sun.
+ */
 export function patchWeather(prev: SceneWeather, patch: WeatherPatch): SceneWeather {
-  const p = patch.precip;
   const w = patch.wind;
-  const s = patch.sky;
-  const f = patch.sky?.fog;
   const u = patch.sun;
 
+  // Unknown keys are dropped rather than clamped in: `values` is addressed by
+  // string, so a typo would otherwise become a permanent invisible entry.
+  const values: WeatherValues = { ...prev.values };
+  if (patch.values) {
+    for (const [k, v] of Object.entries(patch.values)) {
+      if (k in values) values[k] = pct(v);
+    }
+  }
+
   return {
-    preset: patch.preset ?? prev.preset,
-    precip: {
-      amount: pct(p?.amount ?? prev.precip.amount),
-      speed: pct(p?.speed ?? prev.precip.speed),
-      size: pct(p?.size ?? prev.precip.size),
-      direction: [
-        lean(p?.direction?.[0] ?? prev.precip.direction[0]),
-        lean(p?.direction?.[1] ?? prev.precip.direction[1]),
-      ],
-      surface: pct(p?.surface ?? prev.precip.surface),
-    },
+    layers: patch.layers ? WEATHER_LAYERS.filter((l) => patch.layers!.includes(l.id)).map((l) => l.id) : prev.layers,
+    values,
     wind: {
       speed: pct(w?.speed ?? prev.wind.speed),
       directionDeg: bearing(w?.directionDeg ?? prev.wind.directionDeg),
       rainInfluence: pct(w?.rainInfluence ?? prev.wind.rainInfluence),
-    },
-    sky: {
-      cloudCoverage: pct(s?.cloudCoverage ?? prev.sky.cloudCoverage),
-      cloudDensity: pct(s?.cloudDensity ?? prev.sky.cloudDensity),
-      brightness: pct(s?.brightness ?? prev.sky.brightness),
-      fog: {
-        on: f?.on ?? prev.sky.fog.on,
-        density: pct(f?.density ?? prev.sky.fog.density),
-        distance: pct(f?.distance ?? prev.sky.fog.distance),
-      },
     },
     sun: {
       minutes: wrapMinutes(u?.minutes ?? prev.sun.minutes),
@@ -290,28 +241,28 @@ export function patchWeather(prev: SceneWeather, patch: WeatherPatch): SceneWeat
   };
 }
 
-/* ------------------------------------------------------- what applies where */
-
 /**
- * Whether this condition has anything falling out of it.
+ * Switch one condition on or off.
  *
- * Sunny and Cloudy don't, so their precipitation group is not shown at all. The
- * same reasoning the old axis used for its intensity dial: a slider that does
- * nothing is worse than no slider. The VALUES stay in state (a preset is always
- * complete) — they are simply not authorable under a condition that has no
- * precipitation to author.
+ * The last one on can't be switched off: a scene with no condition at all has
+ * no sky to render, and an empty tile row is a state nobody chose and can't
+ * read anything out of.
  */
-export const HAS_PRECIPITATION = (id: WeatherPresetId) =>
-  id === "rain" || id === "storm" || id === "snow";
+export function toggleLayer(w: SceneWeather, id: WeatherLayerId): SceneWeather {
+  const on = w.layers.includes(id);
+  if (on && w.layers.length === 1) return w;
+  const next = on ? w.layers.filter((l) => l !== id) : [...w.layers, id];
+  return patchWeather(w, { layers: next });
+}
 
-/** Rain and snow leave different marks, so the surface dial changes its word. */
-export const surfaceLabel = (id: WeatherPresetId) =>
-  id === "snow" ? "Accumulation" : "Ground wetness";
-
-/** Storm is the only condition with lightning, and lightning isn't built yet —
- *  the spec files it under future support, so the panel says so there and only
- *  there. */
-export const HAS_LIGHTNING = (id: WeatherPresetId) => id === "storm";
+/** Put every dial of the active conditions back where its condition starts. */
+export function resetLayers(w: SceneWeather): SceneWeather {
+  const values = { ...w.values };
+  for (const id of w.layers) {
+    for (const d of LAYER_BY_ID[id].dials) values[dialId(id, d.key)] = d.def;
+  }
+  return { ...w, values };
+}
 
 /* --------------------------------------------------------------- readouts -- */
 
@@ -326,54 +277,46 @@ const POINTS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
 
 export const compassPoint = (deg: number) => POINTS[Math.round(bearing(deg) / 45) % 8];
 
-/**
- * Has this state been tuned away from the condition it started as?
- *
- * The preset row shows which condition is selected; this is what lets the
- * summary say "Rain · edited" rather than claiming the scene is stock Rain when
- * eleven sliders have moved since.
- */
-export function matchesPreset(w: SceneWeather): boolean {
-  const base = applyPreset(w.preset);
-  return JSON.stringify(base) === JSON.stringify(w);
-}
+/** "Sunny + Rain" — the conditions in tile order. */
+export const describeLayers = (w: SceneWeather): string =>
+  w.layers.map((l) => LAYER_BY_ID[l].label).join(" + ") || "No condition";
 
 /**
- * The closed row's one line: the condition, then the two or three facts that
- * most change what a frame looks like.
+ * The closed row's one line: what's on, then the two facts that most change
+ * what a frame looks like.
  *
  * Sun time is always in it — it is the one control here that moves every render
  * whether anything is falling or not.
  */
 export function describeWeather(w: SceneWeather): string {
-  const parts: string[] = [PRESET_BY_ID[w.preset].label];
-
-  if (HAS_PRECIPITATION(w.preset) && w.precip.amount > 0) {
-    parts.push(`${w.precip.amount}%`);
-  }
-  if (w.wind.speed > 0) {
-    parts.push(`${compassPoint(w.wind.directionDeg)} ${w.wind.speed}`);
-  }
-  if (w.sky.fog.on) parts.push("fog");
+  const parts: string[] = [describeLayers(w)];
+  if (w.wind.speed > 0) parts.push(`${compassPoint(w.wind.directionDeg)} ${w.wind.speed}`);
   parts.push(formatClock(w.sun.minutes));
-
-  return `${parts.join(" · ")}${matchesPreset(w) ? "" : " · edited"}`;
+  return parts.join(" · ");
 }
 
-/* ---------------------------------------------------------- saved presets -- */
+/* -------------------------------------------------------------- saved sets */
 
 /**
- * A weather state someone named and kept (§7 of the spec).
+ * A weather combination someone named and kept.
  *
- * IN MEMORY FOR NOW. There is no backend to persist to, and a preset library
- * that silently emptied itself on reload would be worse than one the panel
- * admits is session-scoped — so the panel says so rather than implying storage
- * it doesn't have.
+ * `inRun` is what makes this more than a bookmark. A set with it on is a value
+ * on the weather axis: the run renders every subset once per checked set, so
+ * three sets is three passes over the whole sweep. That is expensive on purpose
+ * and priced where everything else is — the budget panel — rather than being a
+ * silent property of a saved item.
+ *
+ * IN MEMORY FOR NOW. There is no backend to persist to, and a set library that
+ * silently emptied itself on reload would be worse than one the panel admits is
+ * session-scoped — so the panel says so rather than implying storage it hasn't
+ * got.
  */
 export interface SavedWeather {
   id: string;
   name: string;
   state: SceneWeather;
+  /** this set is one of the values the run sweeps */
+  inRun: boolean;
 }
 
 let savedCounter = 0;
@@ -383,15 +326,18 @@ export function makeSavedWeather(name: string, state: SceneWeather): SavedWeathe
   return {
     id: `weather-${savedCounter}`,
     name,
-    // Snapshot by value: a saved preset must not keep changing as the scene does.
+    // Snapshot by value: a saved set must not keep changing as the scene does.
     state: patchWeather(state, {}),
+    // Saving is how you build the sweep, so a new set joins it. Un-checking is
+    // one click; noticing a set you saved did nothing is not.
+    inRun: true,
   };
 }
 
-/** "Rain 2" — the next free name in a series, so saving twice doesn't produce
- *  two entries with one name. */
+/** "Sunny + Rain 2" — the next free name in a series, so saving twice doesn't
+ *  produce two entries with one name. */
 export function nextPresetName(state: SceneWeather, saved: SavedWeather[]): string {
-  const stem = PRESET_BY_ID[state.preset].label;
+  const stem = describeLayers(state);
   const taken = new Set(saved.map((s) => s.name));
   if (!taken.has(stem)) return stem;
   let n = 2;

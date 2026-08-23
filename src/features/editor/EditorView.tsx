@@ -28,6 +28,8 @@ import { TerraGenView } from "./TerraGenView";
 import { useScene } from "./useScene";
 import { useAssets } from "./useAssets";
 import { useWorkOrder } from "./useWorkOrder";
+import { useWorkOrderRuns } from "./work-order-runs";
+import { WorkOrdersDialog } from "./WorkOrdersDialog";
 import { CameraPlaceDialog } from "./CameraPlaceDialog";
 import { CaptureRunPanel } from "./CaptureRunPanel";
 import {
@@ -44,6 +46,7 @@ import {
   withVerticalSpan,
   type CapturePlan,
 } from "./camera-rig";
+import { computeTotals, rigState } from "./work-order";
 import { terraCredits } from "./account-data";
 import type { Asset, AssetType, CategoryId } from "./assets-data";
 
@@ -130,6 +133,10 @@ export function EditorView({
   // The draft lives out here, not in the sheet: closing the panel to go nudge
   // the master object must not throw away an authored Work Order.
   const workOrder = useWorkOrder();
+  /** Dispatched runs — the list behind the Download button. Owned here so a run
+   *  outlives the TerraGen mode that queued it. */
+  const runs = useWorkOrderRuns(projectName);
+  const [ordersOpen, setOrdersOpen] = useState(false);
   const [libraryCategory, setLibraryCategory] = useState<CategoryId>("all");
   // Two panels borrow the library as an image chooser, and only one library is
   // ever mounted — so the request says who asked and how many slots are free,
@@ -935,6 +942,8 @@ export function EditorView({
             onGenerate={openTerraGen}
             onSave={handleSave}
             onExit={() => setExitAsking(true)}
+            onDownload={() => setOrdersOpen(true)}
+            activeRuns={runs.active}
           />
         </div>
 
@@ -1202,6 +1211,7 @@ export function EditorView({
           scene={scene}
           store={workOrder}
           assets={assets.assets}
+          assetStore={assets}
           projectName={projectName}
           credits={terraCredits}
           reframeRig={() => {
@@ -1224,21 +1234,23 @@ export function EditorView({
               assetIds: [...(workOrder.order?.background.assetIds ?? []), asset.id],
             });
           }}
-          onAutoAssignRoles={() => {
-            // Deliberately inert. Role assignment by AI needs a service that
-            // can look at the scene and reason about what a detector should
-            // ignore; guessing from bounding boxes here would produce confident
-            // wrong answers that are harder to correct than no answer.
-            console.info("[terra] AI role assignment is not wired yet");
-          }}
           onDispatch={(order) => {
-            // Until the Work Order goes over the wire, the artifact IS the
-            // thing worth inspecting — the mode's own confirmation covers the
-            // user-facing side.
-            console.info("[terra] Work Order dispatched", order);
+            // The dispatch now lands somewhere the user can find it again. The
+            // total comes from the order itself so the row's denominator is the
+            // number the review screen just charged for.
+            const weatherSets = scene.savedWeather.filter((s) => s.inRun).length;
+            const totals = computeTotals(order, assets.assets, rigState(scene).frames, weatherSets);
+            runs.add({
+              project: projectName,
+              dataType: order.output.images ? "Image" : "Video",
+              total: totals.frames,
+              unit: order.output.images ? "Images" : "Seconds",
+            });
           }}
         />
       )}
+
+      {ordersOpen && <WorkOrdersDialog store={runs} onClose={() => setOrdersOpen(false)} />}
 
       {previewTab && (
         <MatPreviewView

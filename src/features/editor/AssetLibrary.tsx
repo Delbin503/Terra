@@ -77,6 +77,7 @@ export function AssetLibrary({
   store,
   initialCategory = "all",
   pick,
+  rightInset = 0,
   onClose,
   onPlace,
   onGenerate3D,
@@ -86,6 +87,12 @@ export function AssetLibrary({
   initialCategory?: CategoryId;
   /** when set, the library acts as a chooser instead of a browser */
   pick?: PickRequest;
+  /**
+   * Extra px to keep clear on the right. The dock is a bottom sheet spanning
+   * the viewport, and in TerraGen a 400px panel is pinned to that edge — without
+   * this the library would run underneath the controls it was opened from.
+   */
+  rightInset?: number;
   onClose: () => void;
   onPlace: (asset: Asset) => void;
   onGenerate3D: () => void;
@@ -307,11 +314,12 @@ export function AssetLibrary({
       <GlassPanel
         ui="asset-library"
         thickness="thick"
-        className={cn(
-          "pointer-events-auto absolute bottom-6 left-6 flex h-[40vh] max-h-[392px] min-h-[260px] overflow-hidden !rounded-3xl transition-[right] duration-300",
-          // details card: 16px right margin + 320px panel + a 16px gutter
-          detailsId ? "right-[352px]" : "right-6"
-        )}
+        className="pointer-events-auto absolute bottom-6 left-6 flex h-[40vh] max-h-[392px] min-h-[260px] overflow-hidden !rounded-3xl transition-[right] duration-300"
+        // Driven by style rather than a class pair so the caller's inset can be
+        // added to it — two variants became four the moment TerraGen also
+        // needed to push the panel in.
+        // details card: 16px right margin + 320px panel + a 16px gutter
+        style={{ right: (detailsId ? 352 : 24) + rightInset }}
       >
         {/* Category nav */}
         <nav data-ui="asset-categories" className="flex w-48 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-glass/10 p-3">

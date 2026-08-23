@@ -46,15 +46,23 @@ export function MasterSection({
   assets,
   gizmoMode,
   onGizmoMode,
-  onAutoAssignRoles,
+  onBrowseLibrary,
 }: {
   scene: SceneApi;
   roles: SceneRoles;
   assets: Asset[];
   gizmoMode: GizmoMode;
   onGizmoMode: (m: GizmoMode) => void;
-  /** ask the AI to sort unroled objects into the three groups */
-  onAutoAssignRoles: () => void;
+  /**
+   * Open the real asset library as a bottom sheet.
+   *
+   * Adding an object is a browse — categories, folders, tags, search, upload —
+   * and the inline list here could only ever be a worse copy of the library
+   * that already does all of that. Swap stays inline, because that one IS a
+   * narrow question ("which mesh instead of this one") and pulling up a
+   * full-width sheet to answer it would lose the row you are replacing.
+   */
+  onBrowseLibrary: () => void;
 }) {
   const master = roles.master;
   const selected = scene.selected;
@@ -68,7 +76,9 @@ export function MasterSection({
    * clipping to escape, gets the full column width, and makes "add" and "swap"
    * visibly the same act of choosing a mesh.
    */
-  const [picker, setPicker] = useState<{ mode: "add" } | { mode: "swap"; id: string } | null>(null);
+  const [picker, setPicker] = useState<
+    { mode: "swap"; id: string } | { mode: "master" } | null
+  >(null);
 
   /** Content objects only — a camera can't be a master and has no role. */
   const contents = useMemo(
@@ -77,15 +87,6 @@ export function MasterSection({
   );
 
   const meshes = useMemo(() => assets.filter((a) => a.type === "mesh"), [assets]);
-
-  /**
-   * Place a library asset into the scene and select it.
-   *
-   * `scene.add` already selects what it adds, which is the whole point of doing
-   * this from here: the object appears in the viewport with the gizmo on it, so
-   * "add" and "now place it" are one gesture rather than two.
-   */
-  const place = (asset: Asset) => scene.add(asset.name, asset.type);
 
   /**
    * Swap an object's mesh for another, in place.
@@ -121,7 +122,7 @@ export function MasterSection({
               variant="ghost"
               size="sm"
               data-ui="terragen-master-swap"
-              onClick={() => setPicker({ mode: "swap", id: master.id })}
+              onClick={() => setPicker((p) => (p?.mode === "master" ? null : { mode: "master" }))}
             >
               <Icon name="retry" size={14} />
               Swap
@@ -133,6 +134,25 @@ export function MasterSection({
             sweep has nothing to aim at until you do.
           </Note>
         )}
+
+        {picker?.mode === "master" && master && (
+          <MasterSwapPicker
+            others={contents.filter((o) => o.id !== master.id)}
+            meshes={meshes}
+            onCancel={() => setPicker(null)}
+            onPromote={(id) => {
+              // Hand the role over. The old master keeps its place in the scene —
+              // swapping who the cameras orbit is not the same as removing
+              // anything, and `setRole` demotes the previous holder for us.
+              scene.setRole(id, "master");
+              setPicker(null);
+            }}
+            onReplace={(a) => {
+              swap(master.id, a);
+              setPicker(null);
+            }}
+          />
+        )}
       </Group>
 
       <Group title="Scene objects" hint={`${contents.length} in scene`}>
@@ -141,25 +161,25 @@ export function MasterSection({
           size="sm"
           data-ui="terragen-add-object"
           className="mb-2 w-full"
-          onClick={() => setPicker((p) => (p?.mode === "add" ? null : { mode: "add" }))}
+          onClick={() => {
+            // Close any inline swap first: the sheet covers the bottom half of
+            // the mode, and leaving a picker open behind it means dismissing
+            // two things to get back to the list.
+            setPicker(null);
+            onBrowseLibrary();
+          }}
         >
           <Icon name="place" size={14} />
           Add from library
-          <Icon
-            name="chevron-down"
-            size={13}
-            className={cn("transition-transform", picker?.mode === "add" && "rotate-180")}
-          />
         </Button>
 
-        {picker && (
+        {picker?.mode === "swap" && (
           <AssetPicker
             assets={meshes}
-            title={picker.mode === "add" ? "Place a mesh into the scene" : "Replace with"}
+            title="Replace with"
             onCancel={() => setPicker(null)}
             onPick={(a) => {
-              if (picker.mode === "add") place(a);
-              else swap(picker.id, a);
+              swap(picker.id, a);
               setPicker(null);
             }}
           />
@@ -168,28 +188,26 @@ export function MasterSection({
         {contents.length === 0 ? (
           <Note>Nothing placed yet. Add an object from the library to start the scene.</Note>
         ) : (
-          <>
-            <ul className="space-y-1">
-              {contents.map((o) => (
-                <ObjectRow
-                  key={o.id}
-                  name={o.name}
-                  role={o.role}
-                  selected={selected?.id === o.id}
-                  onSelect={() => scene.select(o.id)}
-                  onSetRole={(r) => scene.setRole(o.id, r === o.role ? "none" : r)}
-                  onSwap={() => setPicker({ mode: "swap", id: o.id })}
-                />
-              ))}
-            </ul>
-
-            {/* Tagging a busy scene by hand is the tedious part, so the offer to
-                do it for you sits under the list it would act on. */}
-            <Button variant="outline" size="sm" className="mt-2" onClick={onAutoAssignRoles}>
-              <Icon name="ai" size={15} />
-              Let AI assign roles
-            </Button>
-          </>
+          <ul className="space-y-1">
+            {contents.map((o) => (
+              <ObjectRow
+                key={o.id}
+                name={o.name}
+                role={o.role}
+                selected={selected?.id === o.id}
+                onSelect={() => scene.select(o.id)}
+                onSetRole={(r) => scene.setRole(o.id, r === o.role ? "none" : r)}
+                onSwap={() => setPicker({ mode: "swap", id: o.id })}
+                onRemove={() => {
+                  // Cancel a picker that was aimed at the row being deleted —
+                  // "Replace with" over an object that no longer exists would
+                  // swap a mesh onto nothing.
+                  setPicker((pk) => (pk?.mode === "swap" && pk.id === o.id ? null : pk));
+                  scene.remove(o.id);
+                }}
+              />
+            ))}
+          </ul>
         )}
       </Group>
 
@@ -243,6 +261,7 @@ function ObjectRow({
   onSelect,
   onSetRole,
   onSwap,
+  onRemove,
 }: {
   name: string;
   role: ObjectRole;
@@ -250,6 +269,8 @@ function ObjectRow({
   onSelect: () => void;
   onSetRole: (r: ObjectRole) => void;
   onSwap: () => void;
+  /** take it out of the scene entirely */
+  onRemove: () => void;
 }) {
   return (
     <li
@@ -273,6 +294,18 @@ function ObjectRow({
         <Icon name="retry" size={14} />
         Swap
       </Button>
+      {/* Icon-only, and the only red thing on the row: deleting is the one
+          action here you can't take back by clicking the same button again. */}
+      <button
+        type="button"
+        aria-label={`Remove ${name} from the scene`}
+        title={`Remove ${name} from the scene`}
+        data-ui={`terragen-remove-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+        onClick={onRemove}
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-content-muted transition-colors hover:bg-danger-soft/40 hover:text-danger"
+      >
+        <Icon name="trash" size={14} />
+      </button>
     </li>
   );
 }
@@ -333,6 +366,143 @@ function RoleMenu({ role, onSetRole }: { role: ObjectRole; onSetRole: (r: Object
           </PanelBody>
         </Panel>
       )}
+    </div>
+  );
+}
+
+/**
+ * Swapping the master, from either of the two places a replacement can come from.
+ *
+ * These are DIFFERENT ACTS wearing one button, which is why they're one picker
+ * with two labelled groups rather than two buttons:
+ *
+ *   · IN THIS SCENE hands the role over. Both objects stay exactly where they
+ *     are; only the thing the cameras orbit changes. Nothing is destroyed, so
+ *     this is the reversible one.
+ *   · FROM THE LIBRARY replaces the master's MESH in place. The transform, the
+ *     role and the id all survive — swapping is "same thing in the scene,
+ *     different model", not delete-and-re-add, which would drop it to the origin
+ *     and lose whatever the rig was framed around.
+ *
+ * The scene group comes first because it's the cheaper answer: if the object you
+ * want is already standing there, you don't want to place a second copy of it.
+ */
+function MasterSwapPicker({
+  others,
+  meshes,
+  onPromote,
+  onReplace,
+  onCancel,
+}: {
+  /** everything else in the scene that could hold the role */
+  others: { id: string; name: string; role: ObjectRole }[];
+  meshes: Asset[];
+  onPromote: (id: string) => void;
+  onReplace: (a: Asset) => void;
+  onCancel: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+
+  const scenePicks = useMemo(
+    () => others.filter((o) => o.name.toLowerCase().includes(q)),
+    [others, q]
+  );
+  const libraryPicks = useMemo(
+    () => meshes.filter((a) => a.name.toLowerCase().includes(q)),
+    [meshes, q]
+  );
+
+  return (
+    <div
+      data-ui="terragen-master-swap-picker"
+      className="mt-2 rounded-xl border border-glass/15 bg-glass/8 p-2"
+    >
+      <div className="mb-2 flex items-center gap-2">
+        <span className="type-eyebrow grow text-content-muted">Swap master with</span>
+        <button
+          type="button"
+          aria-label="Cancel"
+          data-ui="terragen-master-swap-cancel"
+          onClick={onCancel}
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-content-muted transition-colors hover:bg-glass/20 hover:text-content"
+        >
+          <Icon name="close" size={12} />
+        </button>
+      </div>
+
+      <SearchInput
+        value={query}
+        onValueChange={setQuery}
+        ui="terragen-master-swap-search"
+        placeholder="Search the scene and the library"
+        className="mb-2"
+      />
+
+      <div className="max-h-[260px] space-y-3 overflow-y-auto pr-0.5">
+        <section>
+          <span className="type-caption mb-1.5 block text-content-subtle">
+            In this scene{others.length > 0 ? ` · ${others.length}` : ""}
+          </span>
+          {scenePicks.length === 0 ? (
+            <Note>
+              {others.length === 0
+                ? "Nothing else in the scene can take the role."
+                : `No object here matches "${query}".`}
+            </Note>
+          ) : (
+            <ul className="space-y-1">
+              {scenePicks.map((o) => (
+                <li key={o.id}>
+                  <button
+                    type="button"
+                    data-ui={`terragen-master-swap-scene-${o.id}`}
+                    onClick={() => onPromote(o.id)}
+                    className="flex w-full items-center gap-2.5 rounded-lg border border-glass/10 bg-glass/5 px-2.5 py-2 text-left transition-colors hover:border-master/45 hover:bg-master/10"
+                  >
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "h-2.5 w-2.5 shrink-0 rounded-full border",
+                        o.role === "none" ? "border-glass/25" : ROLE_DOT[o.role]
+                      )}
+                    />
+                    <span className="type-body grow truncate text-content">{o.name}</span>
+                    <span className="type-caption shrink-0 text-content-subtle">Make master</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section>
+          <span className="type-caption mb-1.5 block text-content-subtle">From the library</span>
+          {libraryPicks.length === 0 ? (
+            <Note>No mesh matches "{query}".</Note>
+          ) : (
+            <div className="grid grid-cols-3 gap-1.5">
+              {libraryPicks.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  title={`Replace the master's mesh with ${a.name}`}
+                  data-ui={`terragen-master-swap-asset-${a.id}`}
+                  onClick={() => onReplace(a)}
+                  className="overflow-hidden rounded-lg border border-glass/10 bg-glass/5 text-left transition-colors hover:border-brand/40"
+                >
+                  <span className="block aspect-[4/3] overflow-hidden">
+                    <AssetThumb type={a.type} seed={a.seed} />
+                  </span>
+                  <span className="type-caption block truncate px-1.5 py-1 text-content">
+                    {a.name}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

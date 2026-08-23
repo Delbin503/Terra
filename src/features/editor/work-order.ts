@@ -375,7 +375,8 @@ export function axisSummary(o: WorkOrder, id: AxisId, assets: Asset[]): string {
 }
 
 export interface Multiplier {
-  id: AxisId;
+  /** an axis, or "weather" — the scene-owned set sweep that multiplies like one */
+  id: AxisId | "weather";
   label: string;
   count: number;
 }
@@ -406,8 +407,21 @@ const BYTES_PER_FRAME = 0.5 * 1024 * 1024;
 const SECONDS_PER_FRAME = 0.22;
 const SECONDS_PER_SUBSET = 15;
 
-/** `framesPerSubset` comes from the rig — see `rigState`. */
-export function computeTotals(o: WorkOrder, assets: Asset[], framesPerSubset: number): Totals {
+/**
+ * `framesPerSubset` comes from the rig — see `rigState`.
+ *
+ * `weatherSets` is how many saved weather combinations are checked into the run
+ * (`SavedWeather.inRun`). It multiplies like an axis because it IS one: the
+ * sweep is rendered once per set. It's passed in rather than read off the order
+ * because weather lives on the scene, not in the order — the same reason the
+ * camera sweep is read live from the rig.
+ */
+export function computeTotals(
+  o: WorkOrder,
+  assets: Asset[],
+  framesPerSubset: number,
+  weatherSets = 0
+): Totals {
   const perSubset = Math.max(1, Math.round(framesPerSubset));
 
   const multipliers: Multiplier[] = AXES.filter((a) => o[a.id].on).map((a) => ({
@@ -415,6 +429,12 @@ export function computeTotals(o: WorkOrder, assets: Asset[], framesPerSubset: nu
     label: a.label,
     count: axisValues(o, a.id, assets).length,
   }));
+
+  // One set is the scene as it stands — no multiplication to show. Two or more
+  // is a sweep, and then it earns a row beside the axes that also multiply.
+  if (weatherSets > 1) {
+    multipliers.push({ id: "weather", label: "Weather sets", count: weatherSets });
+  }
 
   const subsets = multipliers.reduce((n, m) => n * Math.max(1, m.count), 1);
   const frames = subsets * perSubset;

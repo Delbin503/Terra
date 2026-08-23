@@ -141,7 +141,7 @@ function faceTexture(label: string, state: FaceState): CanvasTexture {
   // face with air around it, the way a CAD cube labels itself; the old 44px
   // ran to the chamfer and made the label, not the cube, the object.
   const tracking = 3;
-  ctx.font = "500 34px 'Inter Variable', Inter, system-ui, sans-serif";
+  ctx.font = "500 34px 'Manrope Variable', Manrope, system-ui, sans-serif";
   if ("letterSpacing" in ctx) ctx.letterSpacing = `${tracking}px`;
   if (!lit) {
     ctx.shadowColor = VIEWCUBE.textShadow;
