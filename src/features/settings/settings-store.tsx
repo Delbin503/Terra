@@ -114,6 +114,11 @@ interface SettingsStore {
   setProjectRoster: (projectId: string, roster: AccessMember[]) => void;
   removeMember: (id: string) => void;
   resendInvite: (id: string) => void;
+  grantAdmin: (id: string) => void;
+  /** hand the org over: they become Owner, you keep a Full Access seat */
+  transferOwnership: (id: string) => void;
+  /** buy n more Full Access seats — what a seat upgrade does when none are free */
+  buySeats: (n: number) => void;
   subscription: Subscription;
   /** what the org has been billed — written by a purchase, read by Billing */
   invoices: Invoice[];
@@ -281,6 +286,30 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setMembers((list) => list.filter((m) => !(m.id === id && m.seat !== "owner")));
   }, []);
 
+  const grantAdmin = useCallback<SettingsStore["grantAdmin"]>((id) => {
+    setMembers((list) => list.map((m) => (m.id === id ? { ...m, role: "Admin" } : m)));
+  }, []);
+
+  /**
+   * Ownership is a swap, not a grant. There is exactly one Owner seat, so
+   * handing it over has to demote the person handing it over in the same write
+   * — otherwise the roster briefly has two owners and the seat ledger counts
+   * one of them twice.
+   */
+  const transferOwnership = useCallback<SettingsStore["transferOwnership"]>((id) => {
+    setMembers((list) =>
+      list.map((m) => {
+        if (m.id === id) return { ...m, seat: "owner", role: "Owner", status: "active" };
+        if (m.seat === "owner") return { ...m, seat: "full", role: "Admin" };
+        return m;
+      })
+    );
+  }, []);
+
+  const buySeats = useCallback<SettingsStore["buySeats"]>((n) => {
+    setSubscription((s) => ({ ...s, extraSeats: s.extraSeats + n }));
+  }, []);
+
   const setProjectRoster = useCallback<SettingsStore["setProjectRoster"]>(
     (projectId, roster) => setProjectAccessState((all) => ({ ...all, [projectId]: roster })),
     []
@@ -312,6 +341,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setMemberSeat,
       removeMember,
       resendInvite,
+      grantAdmin,
+      transferOwnership,
+      buySeats,
       projectAccess,
       setProjectRoster,
       subscription,
@@ -334,6 +366,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setMemberSeat,
       removeMember,
       resendInvite,
+      grantAdmin,
+      transferOwnership,
+      buySeats,
       projectAccess,
       setProjectRoster,
       subscription,

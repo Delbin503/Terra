@@ -68,7 +68,7 @@ export const org = {
   name: "gg",
   initials: "GG",
   plan: "Free Plan",
-  members: 1,
+  members: 2,
   /** what Payment Details calls the subscription's owner */
   legalName: "Meta Block AI's org",
   billingEmail: "**********@gmail.com",
@@ -133,6 +133,12 @@ export const SEAT_INCLUDES: Record<SeatKind, string> = {
   viewer: "Can edit but cannot create new projects or manage team roles.",
 };
 
+/**
+ * The org starts with two people, not one. A roster of just yourself can't
+ * show what this screen is FOR — granting admin, transferring ownership and
+ * changing someone's seat are all things you do to another person, and with
+ * nobody else on the list every one of those states is unreachable.
+ */
 export const members: MemberRow[] = [
   {
     id: "m1",
@@ -143,6 +149,16 @@ export const members: MemberRow[] = [
     status: "active",
     projects: 0,
     lastActive: "less than a minute ago",
+  },
+  {
+    id: "m2",
+    name: "Henry William",
+    email: "henrysalmon@gmail.com",
+    role: "Editor",
+    seat: "full",
+    status: "active",
+    projects: 0,
+    lastActive: "1 day ago",
   },
 ];
 

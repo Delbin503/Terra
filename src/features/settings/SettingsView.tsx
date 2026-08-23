@@ -37,6 +37,16 @@ export function SettingsView({ onExit }: { onExit: (to?: AppDestination) => void
   );
 }
 
+/** The screens whose content is a table rather than a column of prose. */
+const WIDE = new Set<SettingsPage>([
+  "members",
+  "project-access",
+  "activity",
+  "balance",
+  "billing",
+  "plans",
+]);
+
 function SettingsShell({ onExit }: { onExit: (to?: AppDestination) => void }) {
   const { page, go } = useSettings();
   const [collapsed, setCollapsed] = useState(false);
@@ -64,7 +74,11 @@ function SettingsShell({ onExit }: { onExit: (to?: AppDestination) => void }) {
           <SettingsTopBar onExit={onExit} />
           <SettingsToast />
 
-          <div className="mx-auto mt-6 max-w-[62rem]">
+          {/* Most of Settings is a column of facts you READ, so it's held to a
+              comfortable measure. The table screens are the exception: six
+              columns of roster don't fit in 62rem and start wrapping every cell
+              into a paragraph, so they get the window. */}
+          <div className={cn("mx-auto mt-6", WIDE.has(page) ? "max-w-none" : "max-w-[62rem]")}>
             {page === "profile" && <ProfilePage />}
             {page === "messages" && <MessagePreferencesPage />}
             {page === "organizations" && <OrganizationsPage />}
