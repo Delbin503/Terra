@@ -62,26 +62,40 @@ function BudgetBody({
 }) {
   const rows = permutations(order, assets, 12);
   const affordable = totals.credits <= credits;
+  // "36 MB" set whole at the value size made the archive outweigh the credits
+  // — three glyphs of unit are wider than two of number, so the less important
+  // row won the page. The digits keep the size; the unit steps down.
+  const [archiveSize, archiveUnit] = formatBytes(totals.bytes).split(" ");
   const [showSubsets, setShowSubsets] = useState(false);
 
   return (
     <>
       {/* ------------------------------------------------------- the headline */}
+      {/* ONE caption, then the number.
+          The label, the figure and the working were three stacked lines, which
+          made the block read as a paragraph you had to parse rather than as an
+          answer. The working now rides in parentheses on the label — it is the
+          same sentence, so it belongs on the same line — leaving the figure
+          alone underneath with nothing to compete with. It takes the brand
+          colour because it is the one number this whole screen exists to show;
+          every other figure below it stays in ink. */}
       <div
         data-ui="dispatch-headline"
-        className="mb-3 rounded-2xl border border-glass/12 bg-glass/6 px-4 py-3.5 text-center"
+        className="mb-3 rounded-2xl border border-glass/10 bg-glass/5 px-5 py-5 text-center"
       >
-        <span className="type-eyebrow block text-content-muted">Frames this run</span>
+        <span className="type-eyebrow block text-content-subtle">
+          Frames this run{" "}
+          <span className="text-content-subtle">
+            ({formatCount(totals.subsets)} {totals.subsets === 1 ? "subset" : "subsets"} ×{" "}
+            {formatCount(totals.framesPerSubset)}{" "}
+            {totals.framesPerSubset === 1 ? "frame" : "frames"} from the camera rig)
+          </span>
+        </span>
         <span
           data-ui="terragen-total-frames"
-          className="type-display mt-1 block tabular-nums text-content"
+          className="type-display mt-2 block text-4xl tabular-nums text-brand"
         >
           {formatCount(totals.frames)}
-        </span>
-        <span className="type-caption mt-1 block text-content-subtle">
-          {formatCount(totals.subsets)} {totals.subsets === 1 ? "subset" : "subsets"} ×{" "}
-          {formatCount(totals.framesPerSubset)}{" "}
-          {totals.framesPerSubset === 1 ? "frame" : "frames"} from the camera rig
         </span>
       </div>
 
@@ -100,9 +114,9 @@ function BudgetBody({
       <div
         data-ui="dispatch-cost"
         className={cn(
-          "mb-4 divide-y overflow-hidden rounded-2xl border",
+          "mb-5 divide-y overflow-hidden rounded-2xl border",
           affordable
-            ? "divide-glass/10 border-glass/12 bg-glass/6"
+            ? "divide-glass/10 border-glass/10 bg-glass/5"
             : "divide-danger/25 border-danger/45 bg-danger-soft/25"
         )}
       >
@@ -114,11 +128,10 @@ function BudgetBody({
           tone={affordable ? "default" : "danger"}
           note={
             affordable ? (
-              <>
-                {formatCount(credits)} now →{" "}
-                <span className="text-content">{formatCount(credits - totals.credits)}</span> after
-                this run
-              </>
+              // The balance AFTER the run is the only figure worth carrying —
+              // "3,728 now → 3,712 after this run" spent a whole line restating
+              // a number already in the top bar to make one subtraction.
+              <>({formatCount(credits - totals.credits)} left)</>
             ) : (
               <span className="text-danger">
                 {formatCount(totals.credits - credits)} more than your balance of{" "}
@@ -131,7 +144,8 @@ function BudgetBody({
           icon="download"
           label="Archive"
           ui="dispatch-archive"
-          value={formatBytes(totals.bytes)}
+          value={archiveSize}
+          unit={archiveUnit}
           note={
             <>
               {formatCount(totals.frames)} {totals.frames === 1 ? "frame" : "frames"} at{" "}
@@ -149,15 +163,18 @@ function BudgetBody({
           you. Only what is there is listed: a row per thing, never a zero. */}
       {changes.length > 0 && (
         <PanelSection title="What you added">
-          <ul data-ui="dispatch-changes" className="space-y-1">
+          {/* Separated cards rather than a divided list. These are three
+              unrelated facts you scan for one of, not a table you read down,
+              and the gaps make each one its own target for the eye. */}
+          <ul data-ui="dispatch-changes" className="space-y-2">
             {changes.map((c) => (
               <li
                 key={c.label}
-                className="flex items-center gap-2 rounded-lg border border-glass/10 bg-glass/6 px-2.5 py-1.5"
+                className="flex items-center gap-2.5 rounded-xl border border-glass/10 bg-glass/5 px-3.5 py-3"
               >
-                <Icon name={c.icon} size={13} className="shrink-0 text-content-subtle" />
-                <span className="type-body grow truncate text-content-muted">{c.label}</span>
-                <span className="type-numeric-sm text-content">{c.value}</span>
+                <Icon name={c.icon} size={16} className="shrink-0 text-content-subtle" />
+                <span className="type-body grow truncate text-content">{c.label}</span>
+                <span className="type-numeric text-content-muted">{c.value}</span>
               </li>
             ))}
           </ul>
@@ -165,17 +182,20 @@ function BudgetBody({
       )}
 
       {/* ------------------------------------------------- where it comes from */}
+      {/* Only when there is something to explain.
+          On a one-subset order this section said "One subset — your scene
+          exactly as it stands", which is a restatement of the caption at the
+          top of the same dialog. A heading and a bordered box to repeat a line
+          already on screen is the section earning nothing, so it now appears
+          only when multipliers actually multiplied something. */}
+      {(totals.multipliers.length > 0 || rows.length > 0) && (
       <PanelSection title="Why this many" className="mb-0">
-        {totals.multipliers.length === 0 ? (
-          <p className="type-body rounded-xl border border-glass/10 bg-glass/6 px-3 py-2.5 text-content-muted">
-            One subset — your scene exactly as it stands, swept once by the camera rig.
-          </p>
-        ) : (
+        {totals.multipliers.length === 0 ? null : (
           <ul className="space-y-1">
             {totals.multipliers.map((m) => (
               <li
                 key={m.id}
-                className="flex items-center gap-2 rounded-lg border border-glass/10 bg-glass/6 px-2.5 py-2"
+                className="flex items-center gap-2 rounded-lg border border-glass/10 bg-glass/5 px-2.5 py-2"
               >
                 <Icon name={multiplierIcon(m.id)} size={14} className="shrink-0 text-content-subtle" />
                 <span className="type-body grow truncate text-content-muted">{m.label}</span>
@@ -217,7 +237,7 @@ function BudgetBody({
                 {rows.map((r) => (
                   <li
                     key={r.index}
-                    className="flex items-start gap-2 rounded-lg border border-glass/10 bg-glass/6 px-2 py-1.5"
+                    className="flex items-start gap-2 rounded-lg border border-glass/10 bg-glass/5 px-2 py-1.5"
                   >
                     <span className="type-numeric-sm w-4 shrink-0 pt-0.5 text-right text-content-subtle">
                       {r.index}
@@ -236,6 +256,7 @@ function BudgetBody({
           </>
         )}
       </PanelSection>
+      )}
     </>
   );
 }
@@ -252,6 +273,7 @@ function CostRow({
   icon,
   label,
   value,
+  unit,
   note,
   ui,
   tone = "default",
@@ -259,17 +281,19 @@ function CostRow({
   icon: IconName;
   label: string;
   value: string;
+  /** set one step down beside the number — "MB", not part of the figure */
+  unit?: string;
   note: React.ReactNode;
   ui: string;
   tone?: "default" | "danger";
 }) {
   return (
-    <div className="px-3.5 py-3">
+    <div className="px-4 py-3.5">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="type-body flex items-center gap-1.5 text-content-muted">
+        <span className="type-body-lg-strong flex items-center gap-2 text-content">
           <Icon
             name={icon}
-            size={13}
+            size={17}
             className={cn("shrink-0", tone === "danger" ? "text-danger" : "text-brand")}
           />
           {label}
@@ -277,14 +301,15 @@ function CostRow({
         <span
           data-ui={ui}
           className={cn(
-            "type-title tabular-nums",
+            "font-display text-xl font-semibold tabular-nums",
             tone === "danger" ? "text-danger" : "text-content"
           )}
         >
           {value}
+          {unit && <span className="type-body-strong ml-1 text-content-muted">{unit}</span>}
         </span>
       </div>
-      <p className="type-caption mt-1 text-content-subtle">{note}</p>
+      <p className="type-body-dense mt-0.5 text-content-subtle">{note}</p>
     </div>
   );
 }
@@ -399,7 +424,7 @@ export function DispatchReview({
         className="w-[min(30rem,calc(100vw-3rem))] max-w-none border-0 bg-transparent p-0 shadow-none"
       >
         <Panel ui="dispatch-review" thickness="overlay" className="max-h-[86vh] overflow-hidden">
-          <PanelHeader align="start" className="p-4">
+          <PanelHeader align="center" className="px-5 py-4">
             {/* Title alone — no mark, no subtitle. The subtitle said "what this
                 run costs, before it starts", which is what the frame count, the
                 archive size and the credits under it say in numbers one line
@@ -407,15 +432,17 @@ export function DispatchReview({
                 whose whole job is to be read carefully. */}
             <div className="min-w-0">
               <DialogTitle asChild>
-                <PanelTitle>Dispatch Work Order</PanelTitle>
+                <PanelTitle className="font-display text-lg font-semibold">
+                  Dispatch Work Order
+                </PanelTitle>
               </DialogTitle>
             </div>
             {/* Every other glass panel closes from its top-right corner, and
                 this one had nothing there — the only way out was the footer. */}
-            <PanelClose size="sm" label="Back to settings" onClick={onCancel} />
+            <PanelClose label="Back to settings" onClick={onCancel} />
           </PanelHeader>
 
-          <PanelBody>
+          <PanelBody className="p-5">
             <BudgetBody
               order={order}
               totals={totals}
@@ -425,7 +452,7 @@ export function DispatchReview({
             />
           </PanelBody>
 
-          <PanelFooter className="flex-col">
+          <PanelFooter className="flex-col p-5 pt-4">
             {warnings.map((g) => (
               <p
                 key={g.id}
@@ -440,7 +467,7 @@ export function DispatchReview({
               <Button
                 variant="secondary"
                 size="md"
-                className="flex-1 !rounded-xl"
+                className="h-12 flex-1 !rounded-2xl"
                 data-ui="dispatch-cancel"
                 onClick={onCancel}
               >
@@ -449,12 +476,12 @@ export function DispatchReview({
               <Button
                 variant="brand"
                 size="md"
-                className="flex-1 !rounded-xl"
+                className="h-12 flex-1 !rounded-2xl"
                 data-ui="dispatch-confirm"
                 disabled={blocked}
                 onClick={onConfirm}
               >
-                <Icon name="generate" size={15} />
+                <Icon name="generate" size={17} />
                 Dispatch {formatCount(totals.frames)} {totals.frames === 1 ? "frame" : "frames"}
               </Button>
             </div>
