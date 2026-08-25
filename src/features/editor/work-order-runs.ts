@@ -22,16 +22,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 export type RunStatus = "running" | "completed" | "failed" | "cancelled";
 
-/** Images are counted in frames; video in seconds. The unit rides with the row
- *  because the column shows it, and a video run counted in "images" is the kind
- *  of wrong that survives a long time. */
-export type RunUnit = "Images" | "Seconds";
+/** Every run is counted in frames, and a frame is an image. Video was a second
+ *  unit here — rows measured in seconds — and it described a dataset type
+ *  TerraGen doesn't produce in this release, so a run could claim a duration
+ *  nothing had rendered. One unit, and it matches what the archive contains. */
+export type RunUnit = "Images";
 
 export interface WorkOrderRun {
   id: string;
   /** ms since epoch — the column formats it, the sort compares it */
   createdAt: number;
-  dataType: "Image" | "Video";
+  dataType: "Image";
   project: string;
   /** produced so far, out of what was ordered */
   done: number;
@@ -56,6 +57,39 @@ export function runPercent(run: WorkOrderRun): number {
 /** Only a run still in flight can be called off. Everything else has already
  *  spent what it was going to spend. */
 export const isCancellable = (run: WorkOrderRun) => run.status === "running";
+
+/**
+ * How much longer this run has, in ms. Null for anything not running.
+ *
+ * READ OFF THE CLOCK, like `done` is — not counted down in state. The tick
+ * already recomputes progress from `startedAt` so a backgrounded tab catches
+ * up instead of falling behind, and a separate countdown would be a second
+ * clock free to disagree with the bar right beside it.
+ */
+export function runRemainingMs(run: WorkOrderRun, now = Date.now()): number | null {
+  if (run.status !== "running") return null;
+  return Math.max(0, run.startedAt + run.durationMs - now);
+}
+
+/**
+ * "about 2 min left" — the wait, in the coarsest unit that is still useful.
+ *
+ * DELIBERATELY VAGUE ABOVE A MINUTE. This is an estimate off a simulated
+ * duration, and a readout ticking "1 min 47 sec" claims a precision the
+ * pipeline cannot honour — it also makes the row twitch every second, which is
+ * exactly the wrong thing to do to a list people are scanning. Under a minute
+ * the seconds matter, because that is the point where waiting beats leaving.
+ */
+export function formatRemaining(ms: number): string {
+  const seconds = Math.ceil(ms / 1000);
+  if (seconds <= 0) return "finishing";
+  if (seconds < 60) return `${seconds} sec left`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `${minutes} min left`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} hr left` : `${hours} hr ${rest} min left`;
+}
 
 /** `WO000003-0000-0000` from `3`. */
 const orderId = (n: number) => `WO${String(n).padStart(6, "0")}-0000-0000`;
@@ -112,11 +146,11 @@ function seedRuns(project: string): WorkOrderRun[] {
     {
       id: orderId(1),
       createdAt: now - 2 * HOUR,
-      dataType: "Video",
+      dataType: "Image",
       project: "Sand Dune Project",
       done: 15,
       total: 320,
-      unit: "Seconds",
+      unit: "Images",
       status: "running",
       // Part-way through when the session opens, so the list has something in
       // flight in it without that run being about to finish.
@@ -142,7 +176,7 @@ function seedRuns(project: string): WorkOrderRun[] {
       project: "Sand Dune Project",
       done: 1200,
       total: 1200,
-      unit: "Seconds",
+      unit: "Images",
       status: "completed",
       startedAt: now,
       durationMs: durationFor(1200),
@@ -154,7 +188,7 @@ function seedRuns(project: string): WorkOrderRun[] {
       project: project,
       done: 1200,
       total: 1200,
-      unit: "Seconds",
+      unit: "Images",
       status: "completed",
       startedAt: now,
       durationMs: durationFor(1200),
@@ -174,11 +208,11 @@ function seedRuns(project: string): WorkOrderRun[] {
     {
       id: orderId(6),
       createdAt: now - 74 * HOUR,
-      dataType: "Video",
+      dataType: "Image",
       project: "Sand Dune Project",
       done: 1200,
       total: 1200,
-      unit: "Seconds",
+      unit: "Images",
       status: "completed",
       startedAt: now,
       durationMs: durationFor(1200),
@@ -188,9 +222,7 @@ function seedRuns(project: string): WorkOrderRun[] {
 
 export interface RunInit {
   project: string;
-  dataType: "Image" | "Video";
   total: number;
-  unit: RunUnit;
 }
 
 export interface WorkOrderRunStore {
@@ -243,11 +275,11 @@ export function useWorkOrderRuns(projectName: string): WorkOrderRunStore {
     const run: WorkOrderRun = {
       id: mintId(),
       createdAt: Date.now(),
-      dataType: init.dataType,
+      dataType: "Image",
       project: init.project,
       done: 0,
       total: Math.max(1, Math.round(init.total)),
-      unit: init.unit,
+      unit: "Images",
       status: "running",
       startedAt: Date.now(),
       durationMs: durationFor(init.total),

@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { Icon } from "@/components/icons";
-import { Button, Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui";
+import { Icon, type IconName } from "@/components/icons";
+import { Button, Dialog, DialogContent, DialogTitle } from "@/components/ui";
 import {
   Panel,
   PanelBody,
@@ -8,16 +9,15 @@ import {
   PanelFooter,
   PanelHeader,
   PanelSection,
-  PanelSubtitle,
   PanelTitle,
   Pill,
 } from "./ui";
 import type { Asset } from "./assets-data";
 import {
   AXIS_BY_ID,
+  type AxisId,
   formatBytes,
   formatCount,
-  formatDuration,
   permutations,
   type Gate,
   type Totals,
@@ -31,143 +31,320 @@ import {
  * order, one more environment value costs a full sweep again, and halving the
  * yaw increment costs the same. Nobody can hold that in their head from a list
  * of toggles, so the number is stated once, in full, at the moment it becomes a
- * decision. It is treated the way CaptureRunPanel treats plan.totalFrames — as
- * the thing the dataset is billed and judged on.
+ * decision.
  *
- * The permutation preview under it is the honesty check: the multiplication is
- * shown as the actual table TerraOrchestrator will walk, not as a number the
- * user has to take on faith.
+ * WHAT THIS REWRITE FIXED. The first cut was four stacked boxes of label/value
+ * pairs — subsets, frames each, total frames, then archive, render time and
+ * credits as three near-identical rows, then a multiplier list, then a
+ * permutation table. Everything was the same size, so nothing was the answer:
+ * people read it and still asked how long the run would take, because "31 sec"
+ * sat in a 13px row between two others exactly like it.
  *
- * NO PADDING AND NO SCROLLER OF ITS OWN. It was a standing right-hand rail
- * once, and it kept the rail's `h-full overflow-y-auto p-4` after it moved into
- * the dialog — which put a second scrollbar inside `PanelBody`'s, and gave the
- * dialog a body inset that no other panel in the editor has. The panel owns
- * both now, so this reads as the contents of a panel rather than as a panel
- * inside one.
+ * So there is now ONE headline (the frames you are buying), THREE tiles for the
+ * three things people actually came to check — how long, how big, how much —
+ * and one plain sentence explaining where the number came from. The permutation
+ * table is still here, but folded: it is the honesty check for a suspicious
+ * total, not something to read on every dispatch.
  */
 function BudgetBody({
   order,
   totals,
   assets,
   credits,
+  changes,
 }: {
   order: WorkOrder;
   totals: Totals;
   assets: Asset[];
   credits: number;
+  /** what the user put into this order — see `orderChanges` */
+  changes: Change[];
 }) {
   const rows = permutations(order, assets, 12);
   const affordable = totals.credits <= credits;
+  const [showSubsets, setShowSubsets] = useState(false);
 
   return (
     <>
-      {/* Headline — subsets and frames, in the order the pipeline produces them */}
-      <PanelSection title="Budget">
-        <div className="rounded-xl border border-glass/12 bg-glass/6 p-3">
-          <div className="flex items-baseline justify-between">
-            <span className="type-body text-content-subtle">Subsets</span>
-            <span className="type-numeric text-content">{formatCount(totals.subsets)}</span>
-          </div>
-          <div className="mt-1 flex items-baseline justify-between">
-            <span className="type-body text-content-subtle">Frames each</span>
-            <span className="type-numeric text-content">{formatCount(totals.framesPerSubset)}</span>
-          </div>
+      {/* ------------------------------------------------------- the headline */}
+      <div
+        data-ui="dispatch-headline"
+        className="mb-3 rounded-2xl border border-glass/12 bg-glass/6 px-4 py-3.5 text-center"
+      >
+        <span className="type-eyebrow block text-content-muted">Frames this run</span>
+        <span
+          data-ui="terragen-total-frames"
+          className="type-display mt-1 block tabular-nums text-content"
+        >
+          {formatCount(totals.frames)}
+        </span>
+        <span className="type-caption mt-1 block text-content-subtle">
+          {formatCount(totals.subsets)} {totals.subsets === 1 ? "subset" : "subsets"} ×{" "}
+          {formatCount(totals.framesPerSubset)}{" "}
+          {totals.framesPerSubset === 1 ? "frame" : "frames"} from the camera rig
+        </span>
+      </div>
 
-          <div className="my-2.5 h-px bg-glass/12" />
+      {/* --------------------------------------------------------- what it costs */}
+      {/* TWO ROWS OF THE SAME SHAPE, AND NO METER.
+          The meter drew this run's share of the balance, and on a normal order
+          that share is a fraction of a percent — it rendered as a six-pixel dot
+          with an empty track beside it, which reads as a broken progress bar
+          rather than as "barely anything". The line under the number already
+          does the meter's job in figures nobody has to measure by eye.
+          Archive gets the same shape rather than a cramped detail line: once
+          neither is pretending to be a gauge, the two ARE the same kind of
+          fact — a headline number and a sentence saying what it is made of —
+          and stacked they read as "this is what it costs, this is what you
+          get". */}
+      <div
+        data-ui="dispatch-cost"
+        className={cn(
+          "mb-4 divide-y overflow-hidden rounded-2xl border",
+          affordable
+            ? "divide-glass/10 border-glass/12 bg-glass/6"
+            : "divide-danger/25 border-danger/45 bg-danger-soft/25"
+        )}
+      >
+        <CostRow
+          icon="credits"
+          label="Credits"
+          ui="dispatch-credits"
+          value={formatCount(totals.credits)}
+          tone={affordable ? "default" : "danger"}
+          note={
+            affordable ? (
+              <>
+                {formatCount(credits)} now →{" "}
+                <span className="text-content">{formatCount(credits - totals.credits)}</span> after
+                this run
+              </>
+            ) : (
+              <span className="text-danger">
+                {formatCount(totals.credits - credits)} more than your balance of{" "}
+                {formatCount(credits)}
+              </span>
+            )
+          }
+        />
+        <CostRow
+          icon="download"
+          label="Archive"
+          ui="dispatch-archive"
+          value={formatBytes(totals.bytes)}
+          note={
+            <>
+              {formatCount(totals.frames)} {totals.frames === 1 ? "frame" : "frames"} at{" "}
+              {order.output.resolution.width}×{order.output.resolution.height}
+            </>
+          }
+        />
+      </div>
 
-          <div className="flex items-baseline justify-between">
-            <span className="type-body-strong text-content">Total frames</span>
-            <span data-ui="terragen-total-frames" className="type-title tabular-nums text-content">
-              {formatCount(totals.frames)}
-            </span>
-          </div>
-        </div>
+      {/* ------------------------------------------------ what you put in it */}
+      {/* The order, as a list of what the user actually did to it — because by
+          the time anyone reaches this screen they have been through six
+          sections and a library sheet, and "did the second chair make it in?"
+          is a fair question to be asking with a Dispatch button in front of
+          you. Only what is there is listed: a row per thing, never a zero. */}
+      {changes.length > 0 && (
+        <PanelSection title="What you added">
+          <ul data-ui="dispatch-changes" className="space-y-1">
+            {changes.map((c) => (
+              <li
+                key={c.label}
+                className="flex items-center gap-2 rounded-lg border border-glass/10 bg-glass/6 px-2.5 py-1.5"
+              >
+                <Icon name={c.icon} size={13} className="shrink-0 text-content-subtle" />
+                <span className="type-body grow truncate text-content-muted">{c.label}</span>
+                <span className="type-numeric-sm text-content">{c.value}</span>
+              </li>
+            ))}
+          </ul>
+        </PanelSection>
+      )}
 
-        {/* The three estimates read as panel detail rows — same divider, same
-            baseline — because that is what they are: label on the left, value on
-            the right. Only the icon and the tone are this panel's own. */}
-        <dl className="mt-1">
-          <Estimate icon="download" label="Archive" value={formatBytes(totals.bytes)} />
-          <Estimate icon="render-time" label="Render time" value={formatDuration(totals.seconds)} />
-          <Estimate
-            icon="credits"
-            label="Credits"
-            value={formatCount(totals.credits)}
-            tone={affordable ? "default" : "danger"}
-            note={affordable ? `${formatCount(credits - totals.credits)} left after` : "over balance"}
-          />
-        </dl>
-      </PanelSection>
-
-      {/* What is multiplying what */}
-      <PanelSection title="Multipliers">
+      {/* ------------------------------------------------- where it comes from */}
+      <PanelSection title="Why this many" className="mb-0">
         {totals.multipliers.length === 0 ? (
-          <p className="type-caption rounded-lg border border-glass/10 bg-glass/6 px-2.5 py-2 text-content-subtle">
-            No axis is on — this is a single subset that reproduces your scene.
+          <p className="type-body rounded-xl border border-glass/10 bg-glass/6 px-3 py-2.5 text-content-muted">
+            One subset — your scene exactly as it stands, swept once by the camera rig.
           </p>
         ) : (
           <ul className="space-y-1">
             {totals.multipliers.map((m) => (
               <li
                 key={m.id}
-                className="flex items-center gap-2 rounded-lg border border-glass/10 bg-glass/6 px-2.5 py-1.5"
+                className="flex items-center gap-2 rounded-lg border border-glass/10 bg-glass/6 px-2.5 py-2"
               >
-                {/* Weather multiplies like an axis but isn't one — it lives on
-                    the scene, so it has no entry in the axis table. */}
-                <Icon
-                  name={m.id === "weather" ? "sunny" : AXIS_BY_ID[m.id].icon}
-                  size={13}
-                  className="text-content-subtle"
-                />
+                <Icon name={multiplierIcon(m.id)} size={14} className="shrink-0 text-content-subtle" />
                 <span className="type-body grow truncate text-content-muted">{m.label}</span>
                 <span className="type-numeric text-content">×{m.count}</span>
               </li>
             ))}
+            <li className="flex items-center gap-2 px-2.5 pt-1">
+              <span className="type-caption grow text-content-subtle">Subsets</span>
+              <span className="type-numeric text-content">{formatCount(totals.subsets)}</span>
+            </li>
           </ul>
         )}
 
-        <p className="type-caption mt-2 text-content-subtle">
-          The camera rig sweeps {formatCount(totals.framesPerSubset)}{" "}
-          {totals.framesPerSubset === 1 ? "frame" : "frames"} inside every subset, in one session.
-        </p>
-      </PanelSection>
+        {/* The permutation table, folded. It is the check you run when the
+            total looks wrong, not part of reading the total. */}
+        {rows.length > 0 && (
+          <>
+            <button
+              type="button"
+              aria-expanded={showSubsets}
+              data-ui="dispatch-subsets-toggle"
+              onClick={() => setShowSubsets((v) => !v)}
+              className="type-caption mt-2 flex items-center gap-1.5 text-content-subtle transition-colors hover:text-content"
+            >
+              <Icon
+                name="chevron-down"
+                size={13}
+                className={cn("shrink-0 transition-transform", showSubsets && "rotate-180")}
+              />
+              {showSubsets
+                ? "Hide the subset list"
+                : totals.subsets > rows.length
+                  ? `Show the first ${rows.length} of ${formatCount(totals.subsets)} subsets`
+                  : `Show all ${rows.length} subsets`}
+            </button>
 
-      {/* The permutation table, as far as it's useful to show */}
-      <PanelSection title="Subset preview" className="mb-0">
-        {totals.subsets > rows.length && rows.length > 0 && (
-          <p className="type-caption mb-1.5 text-content-subtle">
-            First {rows.length} of {formatCount(totals.subsets)}.
-          </p>
-        )}
-
-        {rows.length === 0 ? (
-          <p className="type-caption rounded-lg border border-glass/10 bg-glass/6 px-2.5 py-2 text-content-subtle">
-            One subset: the scene exactly as it stands, swept by your camera rig.
-          </p>
-        ) : (
-          <ol className="space-y-1">
-            {rows.map((r) => (
-              <li
-                key={r.index}
-                className="flex items-start gap-2 rounded-lg border border-glass/10 bg-glass/6 px-2 py-1.5"
-              >
-                <span className="type-numeric-sm w-4 shrink-0 pt-0.5 text-right text-content-subtle">
-                  {r.index}
-                </span>
-                <span className="flex flex-wrap gap-1">
-                  {r.cells.map((c) => (
-                    <Pill key={`${c.axis}-${c.value}`} ui={`subset-${c.axis}`} tone="muted">
-                      {c.value}
-                    </Pill>
-                  ))}
-                </span>
-              </li>
-            ))}
-          </ol>
+            {showSubsets && (
+              <ol className="mt-2 space-y-1">
+                {rows.map((r) => (
+                  <li
+                    key={r.index}
+                    className="flex items-start gap-2 rounded-lg border border-glass/10 bg-glass/6 px-2 py-1.5"
+                  >
+                    <span className="type-numeric-sm w-4 shrink-0 pt-0.5 text-right text-content-subtle">
+                      {r.index}
+                    </span>
+                    <span className="flex flex-wrap gap-1">
+                      {r.cells.map((c) => (
+                        <Pill key={`${c.axis}-${c.value}`} ui={`subset-${c.axis}`} tone="muted">
+                          {c.value}
+                        </Pill>
+                      ))}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </>
         )}
       </PanelSection>
     </>
   );
+}
+
+/**
+ * One cost, as a headline number over the line that explains it.
+ *
+ * A ROW, NOT A TILE. Side-by-side tiles made credits and archive size look like
+ * peers to be compared, when one is money leaving the account and the other is
+ * a file you will download. Stacked, each gets a full-width number and its own
+ * sentence.
+ */
+function CostRow({
+  icon,
+  label,
+  value,
+  note,
+  ui,
+  tone = "default",
+}: {
+  icon: IconName;
+  label: string;
+  value: string;
+  note: React.ReactNode;
+  ui: string;
+  tone?: "default" | "danger";
+}) {
+  return (
+    <div className="px-3.5 py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="type-body flex items-center gap-1.5 text-content-muted">
+          <Icon
+            name={icon}
+            size={13}
+            className={cn("shrink-0", tone === "danger" ? "text-danger" : "text-brand")}
+          />
+          {label}
+        </span>
+        <span
+          data-ui={ui}
+          className={cn(
+            "type-title tabular-nums",
+            tone === "danger" ? "text-danger" : "text-content"
+          )}
+        >
+          {value}
+        </span>
+      </div>
+      <p className="type-caption mt-1 text-content-subtle">{note}</p>
+    </div>
+  );
+}
+
+/** One line of "what you added" — a thing the user put into this order. */
+export interface Change {
+  icon: IconName;
+  label: string;
+  value: string;
+}
+
+/**
+ * What the user actually did to this order, as rows.
+ *
+ * Derived here rather than assembled at the call site, so the review and the
+ * panel can never disagree about what "added" means — and deliberately SILENT
+ * about anything left at its default: a list that always says "0 swap objects"
+ * teaches you to stop reading it.
+ */
+export function orderChanges(
+  order: WorkOrder,
+  scene: { objects: number; weatherSets: number }
+): Change[] {
+  const rows: Change[] = [];
+  const swaps = order.swaps.filter((s) => s.inRun).length;
+  const envs = order.background.picks.filter((p) => p.inRun).length;
+  const annotations = Object.values(order.output.annotations).filter(Boolean).length;
+
+  if (scene.objects > 0) {
+    rows.push({ icon: "scene", label: "Objects in the scene", value: formatCount(scene.objects) });
+  }
+  if (swaps > 0) rows.push({ icon: "retry", label: "Swap objects", value: formatCount(swaps) });
+  if (envs > 0) {
+    rows.push({ icon: "panorama", label: "Environments added", value: formatCount(envs) });
+  }
+  if (scene.weatherSets > 0) {
+    rows.push({
+      icon: "sunny",
+      label: "Weather sets in the run",
+      value: formatCount(scene.weatherSets),
+    });
+  }
+  if (annotations > 0) {
+    rows.push({ icon: "capture", label: "Annotation types", value: formatCount(annotations) });
+  }
+  // Named rather than counted: the one row here that is a setting, not a tally.
+  rows.push({
+    icon: "settings",
+    label: "Frame resolution",
+    value: `${order.output.resolution.width}×${order.output.resolution.height}`,
+  });
+  return rows;
+}
+
+/** Weather and object swaps multiply like axes without being ones — they live
+ *  on the scene and on the order respectively, so neither has an axis entry. */
+function multiplierIcon(id: Totals["multipliers"][number]["id"]): IconName {
+  if (id === "weather") return "sunny";
+  if (id.startsWith("swaps:")) return "retry";
+  return AXIS_BY_ID[id as AxisId].icon;
 }
 
 /**
@@ -191,6 +368,7 @@ export function DispatchReview({
   assets,
   credits,
   gates,
+  changes,
   onConfirm,
   onCancel,
 }: {
@@ -199,6 +377,8 @@ export function DispatchReview({
   assets: Asset[];
   credits: number;
   gates: Gate[];
+  /** what the user put into this order — built by `orderChanges` */
+  changes: Change[];
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -212,26 +392,23 @@ export function DispatchReview({
           from rather than a second, flatter one. */}
       <DialogContent
         hideClose
-        aria-describedby="dispatch-review-description"
+        /* Nothing describes it any more, and pointing `aria-describedby` at an
+           element that no longer exists is worse than omitting it. */
+        aria-describedby={undefined}
         data-ui="dispatch-review-dialog"
         className="w-[min(30rem,calc(100vw-3rem))] max-w-none border-0 bg-transparent p-0 shadow-none"
       >
         <Panel ui="dispatch-review" thickness="overlay" className="max-h-[86vh] overflow-hidden">
           <PanelHeader align="start" className="p-4">
-            <div className="flex min-w-0 items-start gap-3">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand-soft text-brand">
-                <Icon name="generate" size={17} />
-              </span>
-              <div className="min-w-0">
-                <DialogTitle asChild>
-                  <PanelTitle>Dispatch Work Order</PanelTitle>
-                </DialogTitle>
-                <DialogDescription asChild>
-                  <PanelSubtitle id="dispatch-review-description">
-                    What this run costs, before it starts
-                  </PanelSubtitle>
-                </DialogDescription>
-              </div>
+            {/* Title alone — no mark, no subtitle. The subtitle said "what this
+                run costs, before it starts", which is what the frame count, the
+                archive size and the credits under it say in numbers one line
+                lower; the sparkle disc beside it was decoration on a screen
+                whose whole job is to be read carefully. */}
+            <div className="min-w-0">
+              <DialogTitle asChild>
+                <PanelTitle>Dispatch Work Order</PanelTitle>
+              </DialogTitle>
             </div>
             {/* Every other glass panel closes from its top-right corner, and
                 this one had nothing there — the only way out was the footer. */}
@@ -239,7 +416,13 @@ export function DispatchReview({
           </PanelHeader>
 
           <PanelBody>
-            <BudgetBody order={order} totals={totals} assets={assets} credits={credits} />
+            <BudgetBody
+              order={order}
+              totals={totals}
+              assets={assets}
+              credits={credits}
+              changes={changes}
+            />
           </PanelBody>
 
           <PanelFooter className="flex-col">
@@ -282,35 +465,3 @@ export function DispatchReview({
   );
 }
 
-function Estimate({
-  icon,
-  label,
-  value,
-  note,
-  tone = "default",
-}: {
-  icon: React.ComponentProps<typeof Icon>["name"];
-  label: string;
-  value: string;
-  note?: string;
-  tone?: "default" | "danger";
-}) {
-  return (
-    <div className="flex items-center gap-2 border-b border-glass/6 py-2 last:border-0">
-      <Icon
-        name={icon}
-        size={13}
-        className={tone === "danger" ? "text-danger" : "text-content-subtle"}
-      />
-      <dt className="type-body grow text-content-subtle">{label}</dt>
-      <dd className="text-right">
-        <span
-          className={cn("type-numeric", tone === "danger" ? "text-danger" : "text-content")}
-        >
-          {value}
-        </span>
-        {note && <span className="type-caption block text-content-subtle">{note}</span>}
-      </dd>
-    </div>
-  );
-}

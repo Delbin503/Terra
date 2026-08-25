@@ -10,9 +10,11 @@ import {
   type Column,
 } from "@/components/ui";
 import {
+  formatRemaining,
   formatRunDate,
   isCancellable,
   runPercent,
+  runRemainingMs,
   type WorkOrderRun,
   type WorkOrderRunStore,
 } from "./work-order-runs";
@@ -195,10 +197,21 @@ function RunAction({
   }
 
   const percent = runPercent(run);
+  // Recomputed on every tick, because the store hands out a fresh object for
+  // each running row once a second — the same beat that moves the bar.
+  const remaining = runRemainingMs(run);
   return (
     <div className="group/run flex flex-col items-end gap-1.5">
       <div className="flex w-full items-center justify-end gap-1.5">
-        <span className="type-caption text-content-muted">In Progress ({percent}%)</span>
+        {/* THE PERCENTAGE IS NOT THE QUESTION. "49%" answers how far along, and
+            what anyone actually wants to know standing in front of a render is
+            whether to wait for it — so the time to go rides beside it. */}
+        <span className="type-caption text-content-muted">
+          In Progress ({percent}%)
+          {remaining != null && (
+            <span className="text-content-subtle"> · {formatRemaining(remaining)}</span>
+          )}
+        </span>
         {isCancellable(run) && (
           <button
             type="button"

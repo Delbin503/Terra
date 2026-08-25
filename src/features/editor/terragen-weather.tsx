@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui";
@@ -44,6 +45,23 @@ import type { SceneApi } from "./useScene";
 export function WeatherSection({ scene }: { scene: SceneApi }) {
   const w = scene.weather;
 
+  /**
+   * Which saved set the dials are currently standing in for.
+   *
+   * EDITING IS A MODE, not a second copy. Pressing the pencil loads the set and
+   * remembers which one you loaded, so the conditions and dials above become
+   * that set's controls and the footer offers to write them back. Without it
+   * the only way to fix a set was to save a near-duplicate beside it — which is
+   * how a run ends up sweeping "Rain" and "Rain 2", one of them the mistake.
+   */
+  const [editing, setEditing] = useState<string | null>(null);
+
+  // A set can be deleted from under the edit — from this list, on this screen.
+  // Falling back to the plain save footer is the honest thing to do then.
+  useEffect(() => {
+    if (editing && !scene.savedWeather.some((s) => s.id === editing)) setEditing(null);
+  }, [editing, scene.savedWeather]);
+
   return (
     <div data-ui="terragen-editor-weather">
       <ConditionRow active={w.layers} onToggle={scene.toggleWeatherLayer} />
@@ -54,7 +72,7 @@ export function WeatherSection({ scene }: { scene: SceneApi }) {
         ))}
       </div>
 
-      <SetFooter scene={scene} />
+      <SetFooter scene={scene} editing={editing} onEdit={setEditing} />
     </div>
   );
 }
@@ -176,36 +194,82 @@ function LayerDials({
  *
  * Session-scoped, and it says so: there is no backend to persist to.
  */
-function SetFooter({ scene }: { scene: SceneApi }) {
+function SetFooter({
+  scene,
+  editing,
+  onEdit,
+}: {
+  scene: SceneApi;
+  /** id of the set the dials are standing in for, or null */
+  editing: string | null;
+  onEdit: (id: string | null) => void;
+}) {
   const saved = scene.savedWeather;
   const inRun = saved.filter((s) => s.inRun).length;
+  const editingSet = editing ? saved.find((s) => s.id === editing) ?? null : null;
 
   return (
     <div className="mt-1 border-t border-glass/10 pt-3">
-      <div className="flex gap-2">
-        <Button
-          variant="secondary"
-          size="sm"
-          className="grow"
-          data-ui="terragen-weather-reset"
-          onClick={scene.resetWeather}
-        >
-          {/* Quiet outline, not a bright glyph — the icon is a hint beside the
-              word, not a second thing competing with it. */}
-          <Icon name="retry" size={15} className="text-content-subtle" />
-          Reset
-        </Button>
-        <Button
-          variant="brand"
-          size="sm"
-          className="grow"
-          data-ui="terragen-weather-save"
-          onClick={() => scene.saveWeather()}
-        >
-          <Icon name="save" size={15} />
-          Save as set
-        </Button>
-      </div>
+      {editingSet ? (
+        /* The footer becomes that set's footer. Two exits — write it back, or
+           walk away — and no "Save as set" beside them, because a third button
+           that silently forks the set is the bug this mode exists to remove. */
+        <div data-ui="terragen-weather-editing">
+          <p className="type-caption mb-2 flex items-center gap-1.5 text-content-subtle">
+            <Icon name="edit" size={13} className="shrink-0 text-brand" />
+            Editing <span className="text-content">{editingSet.name}</span>
+          </p>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="grow"
+              data-ui="terragen-weather-edit-cancel"
+              onClick={() => onEdit(null)}
+            >
+              Done
+            </Button>
+            <Button
+              variant="brand"
+              size="sm"
+              className="grow"
+              data-ui="terragen-weather-edit-save"
+              onClick={() => {
+                scene.updateWeatherSet(editingSet.id);
+                onEdit(null);
+              }}
+            >
+              <Icon name="save" size={15} />
+              Update set
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            className="grow"
+            data-ui="terragen-weather-reset"
+            onClick={scene.resetWeather}
+          >
+            {/* Quiet outline, not a bright glyph — the icon is a hint beside the
+                word, not a second thing competing with it. */}
+            <Icon name="retry" size={15} className="text-content-subtle" />
+            Reset
+          </Button>
+          <Button
+            variant="brand"
+            size="sm"
+            className="grow"
+            data-ui="terragen-weather-save"
+            onClick={() => scene.saveWeather()}
+          >
+            <Icon name="save" size={15} />
+            Save as set
+          </Button>
+        </div>
+      )}
 
       {saved.length > 0 ? (
         <>
@@ -222,8 +286,12 @@ function SetFooter({ scene }: { scene: SceneApi }) {
                 key={s.id}
                 data-ui={`terragen-weather-set-${s.id}`}
                 className={cn(
-                  "flex items-center gap-2.5 rounded-lg border px-2.5 py-2 transition-colors",
-                  s.inRun ? "border-brand/40 bg-brand/8" : "border-glass/12 bg-glass/6"
+                  "flex items-center gap-2 rounded-lg border px-2.5 py-2 transition-colors",
+                  editing === s.id
+                    ? "border-brand bg-brand/12"
+                    : s.inRun
+                      ? "border-brand/40 bg-brand/8"
+                      : "border-glass/12 bg-glass/6"
                 )}
               >
                 <button
@@ -254,13 +322,36 @@ function SetFooter({ scene }: { scene: SceneApi }) {
                   </span>
                 </button>
 
+                {/* Edit loads the set into the dials above and puts the
+                    footer into update mode — the row itself stays a row. */}
+                <button
+                  type="button"
+                  aria-label={`Edit ${s.name}`}
+                  title={`Edit ${s.name}`}
+                  data-ui={`terragen-weather-set-${s.id}-edit`}
+                  onClick={() => {
+                    scene.loadWeather(s.id);
+                    onEdit(s.id);
+                  }}
+                  className={cn(
+                    "grid h-6 w-6 shrink-0 place-items-center rounded transition-colors",
+                    editing === s.id
+                      ? "bg-brand/20 text-brand"
+                      : "text-content-muted hover:bg-glass/20 hover:text-content"
+                  )}
+                >
+                  <Icon name="edit" size={12} />
+                </button>
+
                 <button
                   type="button"
                   aria-label={`Delete ${s.name}`}
+                  title={`Delete ${s.name}`}
+                  data-ui={`terragen-weather-set-${s.id}-delete`}
                   onClick={() => scene.deleteWeather(s.id)}
-                  className="grid h-5 w-5 shrink-0 place-items-center rounded text-content-muted transition-colors hover:bg-glass/20 hover:text-danger"
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded text-content-muted transition-colors hover:bg-glass/20 hover:text-danger"
                 >
-                  <Icon name="close" size={12} />
+                  <Icon name="trash" size={12} />
                 </button>
               </div>
             ))}

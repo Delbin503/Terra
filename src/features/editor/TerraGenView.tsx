@@ -13,11 +13,21 @@ import { WeatherSection } from "./terragen-weather";
 import { describeLayers } from "./weather";
 import { CameraSection } from "./terragen-camera";
 import { MasterSection, type GizmoMode } from "./terragen-master";
-import { SceneCanvas, type CameraHandle } from "./SceneCanvas";
-import { DispatchReview } from "./terragen-budget";
+import { SceneCanvas, type CameraGuide, type CameraHandle } from "./SceneCanvas";
+import {
+  atDistance,
+  azimuthOf,
+  groundDistance,
+  orbitPoint,
+  orbitShots,
+  planCapture,
+  withVerticalSpan,
+} from "./camera-rig";
+import { DispatchReview, orderChanges } from "./terragen-budget";
 import { AssetLibrary } from "./AssetLibrary";
 import type { Asset } from "./assets-data";
 import type { AssetStore } from "./useAssets";
+import { canTakeRole } from "./scene-types";
 import type { SceneApi } from "./useScene";
 import type { WorkOrderStore } from "./useWorkOrder";
 import {
@@ -34,6 +44,24 @@ import {
 } from "./work-order";
 
 type Vec3 = [number, number, number];
+
+/** The camera control currently in hand, or null for "just show me the rig". */
+export type CameraEdit = "distance" | "orbit" | "shotsDistance" | "shotsRotation" | null;
+
+/**
+ * What a pick in the library sheet is FOR.
+ *
+ *   · place — put the asset in the scene (Objects → Add from library)
+ *   · swap  — shortlist it as a stand-in for ONE named object
+ *   · env   — shortlist it as an environment the run sweeps
+ *
+ * Swap carries its target because every object has its own list now: the sheet
+ * has to know whose list a pick joins, and the button on it says the name.
+ */
+export type LibraryMode =
+  | { kind: "place" }
+  | { kind: "env" }
+  | { kind: "swap"; target: { id: string; name: string } };
 
 /**
  * Safety net on the loader, not its duration.
@@ -109,7 +137,6 @@ export function TerraGenView({
   onClose,
   onDispatch,
   reframeRig,
-  onUploadHdri,
 }: {
   scene: SceneApi;
   store: WorkOrderStore;
@@ -123,7 +150,6 @@ export function TerraGenView({
   onDispatch: (order: WorkOrder) => void;
   /** rebuild the rig's framing around the current master */
   reframeRig: () => void;
-  onUploadHdri: (file: File) => void;
 }) {
   const [dispatched, setDispatched] = useState(false);
   const [reviewing, setReviewing] = useState(false);
@@ -151,8 +177,18 @@ export function TerraGenView({
    * every overlay that was keeping clear of it reclaims the width.
    */
   const [collapsed, setCollapsed] = useState(false);
-  /** The asset library, as a bottom sheet over the stage. */
-  const [libraryOpen, setLibraryOpen] = useState(false);
+  /**
+   * The asset library, as a bottom sheet over the stage — and what picking in
+   * it means this time.
+   *
+   * ONE SHEET, THREE ERRANDS. Placing an object, shortlisting stand-ins for the
+   * master and shortlisting environments are all "find a thing in the library",
+   * and each used to have its own cut-down picker inline in the dock — three
+   * worse copies of the browser that already has folders, tags, search and
+   * upload. The mode says what a click does with what it finds; the sheet is
+   * the same one in all three cases.
+   */
+  const [library, setLibrary] = useState<LibraryMode | null>(null);
 
   const stageInset = collapsed ? COLLAPSED_INSET : STAGE_INSET;
   /**
@@ -207,6 +243,125 @@ export function TerraGenView({
     if (masterId && rigId) reframe.current();
   }, [masterId, rigId, masterSize]);
 
+  /**
+   * WHICH CAMERA CONTROL IS IN HAND, and therefore what the viewport draws.
+   *
+   * The camera section edits the rig, and until now the edit stage showed none
+   * of it: `SceneCanvas` was mounted here without a guide, so dragging Nearest
+   * moved a number the viewport had no way to draw (the near reach is data on
+   * the rig, not a camera position) and changing the shot counts moved nothing
+   * at all. You were tuning a sweep against a still picture.
+   *
+   * The guides are the editor's own — the same distance halos, the same shot
+   * markers, the same grabbable rig handles — so a control in this panel and
+   * the same control in Terra Web put identical geometry on screen.
+   */
+  const [cameraEdit, setCameraEdit] = useState<CameraEdit>(null);
+
+  /**
+   * Put the rig on screen, because the camera controls are about to move it.
+   *
+   * Touching Distance or Climb while the sweep preview is in front changes the
+   * picture in ways that are almost impossible to read — the preview is shot
+   * FROM the camera, so moving the camera moves the whole world. The edit stage
+   * shows the rig itself, and selecting one of its cameras makes SceneCanvas
+   * fly to and frame the pair (see `FocusRig`), which is the same thing that
+   * happens when you click a camera in Terra Web.
+   */
+  const focusCamera = () => {
+    const cam = rig.start ?? rig.end;
+    if (!cam) return;
+    setStage("edit");
+    scene.select(cam.id);
+  };
+
+  /**
+   * What the edit stage draws over the scene while the rig is being worked on.
+   *
+   * Mirrors EditorView's `cameraGuide` case for case, because it IS that
+   * picture: the distance preview stands the pair at the near reach and leaves
+   * afterimages where they will return to (nothing moves — the near reach is a
+   * saved number), the shot markers draw every stop and every frame, and with
+   * no control in hand the rig itself is drawn with its handles live.
+   */
+  const cameraGuide: CameraGuide | null = (() => {
+    const { rig: cameraRig, start, end, target } = rig;
+    if (!cameraRig || !start || !end) return null;
+    const camSelected = scene.selected?.source === "camera";
+    if (!cameraEdit && !camSelected) return null;
+
+    if (cameraEdit === "distance") {
+      const near = [start, end].map((cam) => atDistance(target, cam.position, rig.nearDistance));
+      return {
+        kind: "distance",
+        centre: target,
+        near: { y: near[0][1], radius: Math.max(0.2, groundDistance(target, near[0])) },
+        far: { y: end.position[1], radius: Math.max(0.2, groundDistance(target, end.position)) },
+        active: null,
+        previews: near,
+        afterimages: [start.position, end.position],
+        hides: [start.id, end.id],
+      };
+    }
+
+    if (cameraEdit === "orbit") {
+      // The ring is drawn where the CAMERAS travel, not around the master's
+      // footprint: orbiting swings the rig around the object, so the circle the
+      // handle runs along has to be the circle the cameras run along. The arc
+      // laid over it is the wedge the master actually turns through.
+      return {
+        kind: "orbit",
+        centre: target,
+        y: start.position[1],
+        radius: Math.max(0.9, groundDistance(target, start.position)),
+        azimuth: azimuthOf(target, end.position),
+        arc: { start: cameraRig.orbitStart, end: cameraRig.orbitEnd },
+      };
+    }
+
+    if (cameraEdit === "shotsDistance" || cameraEdit === "shotsRotation") {
+      const plan = planCapture(
+        atDistance(target, start.position, rig.nearDistance),
+        end.position,
+        cameraRig
+      );
+      return {
+        kind: "shots",
+        centre: target,
+        stops: plan.passes.map((pass) => ({
+          position: pass.position,
+          y: pass.position[1],
+          radius: Math.max(0.2, groundDistance(target, pass.position)),
+        })),
+        bearings: orbitShots(cameraRig.orbitStart, cameraRig.orbitEnd, cameraRig.shotsPerRotation),
+        focus: cameraEdit === "shotsDistance" ? "distance" : "rotation",
+      };
+    }
+
+    return { kind: "rig", centre: target, start: start.position, end: end.position };
+  })();
+
+  /** The rig's own handles, dragged in the viewport — same edits the panel's
+   *  sliders make, so the two are one control with two grips. */
+  const orbitRig = (deg: number) => {
+    const { start, end, target } = rig;
+    if (!start || !end) return;
+    const delta = deg - azimuthOf(target, end.position);
+    [start, end].forEach((cam) =>
+      scene.updateOne(cam.id, {
+        position: orbitPoint(target, cam.position, azimuthOf(target, cam.position) + delta),
+      })
+    );
+  };
+
+  const spanRig = (metres: number) => {
+    const { start, end } = rig;
+    if (!start || !end) return;
+    scene.updateOne(end.id, {
+      position: withVerticalSpan(start.position, end.position, Math.max(0, metres)),
+    });
+  };
+
   if (!order) return null;
 
   // Weather sets multiply the sweep — the count comes off the scene, since that
@@ -218,7 +373,6 @@ export function TerraGenView({
     {
       masterCount: roles.master ? 1 : 0,
       hasRig: rig.hasRig,
-      hasEnvironment: scene.objects.some((o) => o.source === "environment"),
       credits,
     },
     totals
@@ -240,7 +394,15 @@ export function TerraGenView({
       {/* ------------------------------------------------------------ stage */}
       {/* Both are mounted; only one is visible. Toggling must not cost a
           WebGL context and a 4K environment reload each way. */}
-      <EditStage scene={scene} gizmoMode={gizmoMode} hidden={preview} inset={stageInset} />
+      <EditStage
+        scene={scene}
+        gizmoMode={gizmoMode}
+        hidden={preview}
+        inset={stageInset}
+        cameraGuide={cameraGuide}
+        onOrbit={orbitRig}
+        onSpan={spanRig}
+      />
       <SweepRender
         scene={scene}
         rig={rig}
@@ -260,25 +422,52 @@ export function TerraGenView({
       {/* The library, as the bottom sheet it is everywhere else in Terra Web.
           Same component as the editor's, so folders, tags, search and upload
           all behave here exactly as they do out there. */}
-      {libraryOpen && (
+      {library && (
         <AssetLibrary
+          /* Keyed on the errand: the category it opens on and whether
+             multi-select is armed are read at mount, so switching from
+             "add swap objects" to "add from library" while the sheet is
+             already up has to remount it — otherwise you get the swap
+             sheet's environment filter over the place sheet's job. */
+          key={library.kind === "swap" ? `swap-${library.target.id}` : library.kind}
           store={assetStore}
           /* All Assets, NOT 3D Models. "3D Models" is the AI-output folder —
              `filterByCategory` narrows it to meshes with `generated` set — so
              opening there showed an empty grid and a Generate 3D button to
              someone who only wanted to place a chair. The catalogue is in All
-             Assets, which is what "add from library" means. */
-          initialCategory="all"
+             Assets, which is what "add from library" means. Environments open
+             on their own category, since that errand has exactly one type. */
+          initialCategory={library.kind === "env" ? "environments" : "all"}
+          /* The button says what the pick will do. Both shortlists arm the
+             library's own multi-select, so the checkbox on every card is the
+             one the user asked for rather than a second one drawn here. */
+          placeLabel={
+            library.kind === "swap"
+              ? `Swap for ${library.target.name}`
+              : library.kind === "env"
+                ? "Add to run"
+                : undefined
+          }
           rightInset={stageInset}
-          onClose={() => setLibraryOpen(false)}
+          onClose={() => setLibrary(null)}
           onPlace={(a) => {
-            // `scene.add` selects what it adds, so the object arrives with the
-            // gizmo already on it — and the sheet closes, because the next
-            // thing you want is the viewport it just landed in.
+            /* THE TWO SHORTLISTS KEEP THE SHEET OPEN. Both are multi-select by
+               nature — six stand-ins, four skies — and closing on the first
+               pick would mean re-opening, re-searching and re-scrolling for
+               every one after it. The dock's list updates live behind the
+               sheet, so what you have chosen so far is visible while you
+               choose the rest, and you close when you're done. */
+            if (library.kind === "swap")
+              return store.addSwap(library.target, { id: a.id, name: a.name });
+            if (library.kind === "env") return store.addEnv(a.id);
+            // Placing is the opposite: `scene.add` selects what it adds, so the
+            // object arrives with the gizmo already on it — and the sheet
+            // closes, because the next thing you want is the viewport it just
+            // landed in.
             scene.add(a.name, a.type, undefined, a.modelUrl);
-            setLibraryOpen(false);
+            setLibrary(null);
           }}
-          onGenerate3D={() => setLibraryOpen(false)}
+          onGenerate3D={() => setLibrary(null)}
         />
       )}
 
@@ -297,19 +486,20 @@ export function TerraGenView({
         subsets={totals.subsets}
         gizmoMode={gizmoMode}
         onGizmoMode={setGizmoMode}
-        onUploadHdri={onUploadHdri}
         onReseed={() => store.reseed(scene, assets)}
         onDispatch={() => setReviewing(true)}
         onClose={onClose}
         collapsed={collapsed}
         onToggleCollapsed={() => setCollapsed((c) => !c)}
-        onBrowseLibrary={() => {
-          // The sheet covers the bottom of the stage, and the Objects section
-          // it was opened from is what you check the result against — so the
-          // dock stays up rather than being folded away for it.
+        onBrowseLibrary={(mode) => {
+          // The sheet covers the bottom of the stage, and the section it was
+          // opened from is what you check the result against — so the dock
+          // stays up rather than being folded away for it.
           setCollapsed(false);
-          setLibraryOpen(true);
+          setLibrary(mode);
         }}
+        onFocusCamera={focusCamera}
+        onCameraEdit={setCameraEdit}
       />
 
       {reviewing && (
@@ -319,6 +509,14 @@ export function TerraGenView({
           assets={assets}
           credits={credits}
           gates={gates}
+          /* The scene's own two contributions to the list: how much is in the
+             frame, and how many weather sets are checked into the run. Both
+             live on the scene rather than on the order, so they are counted
+             here and handed over. */
+          changes={orderChanges(order, {
+            objects: scene.objects.filter((o) => canTakeRole(o.source)).length,
+            weatherSets,
+          })}
           onCancel={() => setReviewing(false)}
           onConfirm={() => {
             setReviewing(false);
@@ -501,22 +699,6 @@ function SweepRender({
         )
       )}
 
-      {/* ------------------------------------------------------ frame caption */}
-      {!loading && rig.hasMaster && (
-        <div
-          className="pointer-events-none absolute left-0 top-4 flex justify-center"
-          style={{ right: inset }}
-        >
-          <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-glass/15 bg-canvas/75 px-3 py-1.5 backdrop-blur-md">
-            <Icon name="camera" size={13} className="shrink-0 text-brand" />
-            <span className="type-caption-strong text-content">Scene preview</span>
-            <Pill ui="preview-scope" tone="muted">
-              Camera only
-            </Pill>
-          </div>
-        </div>
-      )}
-
       {/* ---------------------------------------------------------- scrubber */}
       {/* Its own dark ground rather than glass alone: this floats over a live
           render that can be any brightness, and over sunlit rock the glass tint
@@ -578,12 +760,19 @@ function EditStage({
   gizmoMode,
   hidden,
   inset,
+  cameraGuide,
+  onOrbit,
+  onSpan,
 }: {
   scene: SceneApi;
   gizmoMode: GizmoMode;
   hidden?: boolean;
   /** width the dock is occupying — keeps the cube and handles clear of it */
   inset: number;
+  /** what the rig is doing right now — see `cameraGuide` in TerraGenView */
+  cameraGuide: CameraGuide | null;
+  onOrbit: (deg: number) => void;
+  onSpan: (metres: number) => void;
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
@@ -610,6 +799,9 @@ function EditStage({
         cameraRef={cameraRef}
         // Clear of the dock, the same way the editor clears its own.
         gizmoInset={inset}
+        cameraGuide={cameraGuide}
+        onOrbit={onOrbit}
+        onSpan={onSpan}
       />
     </div>
   );
@@ -725,13 +917,14 @@ function TerraGenDock({
   subsets,
   gizmoMode,
   onGizmoMode,
-  onUploadHdri,
   onReseed,
   onDispatch,
   onClose,
   collapsed,
   onToggleCollapsed,
   onBrowseLibrary,
+  onFocusCamera,
+  onCameraEdit,
 }: {
   scene: SceneApi;
   order: WorkOrder;
@@ -739,7 +932,11 @@ function TerraGenDock({
   assets: Asset[];
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  onBrowseLibrary: () => void;
+  onBrowseLibrary: (mode: LibraryMode) => void;
+  /** show the rig in the edit stage, framed — see `focusCamera` */
+  onFocusCamera: () => void;
+  /** which camera control is in hand, so the stage can draw its guide */
+  onCameraEdit: (edit: CameraEdit) => void;
   roles: ReturnType<typeof sceneRoles>;
   rig: ReturnType<typeof rigState>;
   gates: ReturnType<typeof preflight>;
@@ -750,7 +947,6 @@ function TerraGenDock({
   subsets: number;
   gizmoMode: GizmoMode;
   onGizmoMode: (m: GizmoMode) => void;
-  onUploadHdri: (file: File) => void;
   onReseed: () => void;
   onDispatch: () => void;
   onClose: () => void;
@@ -803,12 +999,13 @@ function TerraGenDock({
         data-ui="terragen-header"
         className="flex shrink-0 items-center gap-3 border-b border-glass/12 px-4 py-3"
       >
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand-soft text-brand">
-          <Icon name="generate" size={17} />
-        </span>
+        {/* ONE TITLE, NO MARK. It was a brand-filled sparkle disc, "Generate",
+            and "Work Order" underneath — three things saying one thing, and the
+            two-line title made the header taller than the sections it sits over
+            while still not naming what the panel is. It is the Generate Work
+            Order panel, so that is what it says. */}
         <div className="min-w-0 grow">
-          <h2 className="type-heading text-content">Generate</h2>
-          <p className="type-caption text-content-muted">Work Order</p>
+          <h2 className="type-heading truncate text-content">Generate Work Order</h2>
         </div>
         <GlassGhostButton
           ui="terragen-reseed"
@@ -849,11 +1046,14 @@ function TerraGenDock({
             >
               <MasterSection
                 scene={scene}
+                order={order}
+                store={store}
                 roles={roles}
                 assets={assets}
                 gizmoMode={gizmoMode}
                 onGizmoMode={onGizmoMode}
-                onBrowseLibrary={onBrowseLibrary}
+                onBrowseLibrary={() => onBrowseLibrary({ kind: "place" })}
+                onBrowseSwaps={(target) => onBrowseLibrary({ kind: "swap", target })}
               />
             </Section>
 
@@ -863,9 +1063,21 @@ function TerraGenDock({
               icon="camera"
               summary={cameraSummary(rig)}
               open={open === "camera"}
-              onOpen={() => toggleOpen("camera")}
+              onOpen={() => {
+                // Opening the section is already the statement "I am about to
+                // move the rig", so the stage answers before the first drag
+                // rather than after it. Closing it puts the guides away.
+                if (open !== "camera") onFocusCamera();
+                else onCameraEdit(null);
+                toggleOpen("camera");
+              }}
             >
-              <CameraSection scene={scene} rig={rig} roles={roles} />
+              <CameraSection
+                scene={scene}
+                rig={rig}
+                onFocusCamera={onFocusCamera}
+                onEditing={onCameraEdit}
+              />
             </Section>
 
             {/* Weather is the third scene section: it edits the scene, not the
@@ -887,6 +1099,11 @@ function TerraGenDock({
             </Section>
 
             {/* --- the axes -------------------------------------------- */}
+            {/* NO SWITCH ON THESE ROWS ANY MORE. The environment axis has one
+                control and one list, and an empty list already says "off" —
+                the switch only added a second way to say it, and a third state
+                to get stuck in (rows chosen, axis silently off). The axis arms
+                itself from its picks; see `useWorkOrder.addEnv`. */}
             {PANEL_AXES.map((a) => (
               <Section
                 key={a.id}
@@ -897,14 +1114,13 @@ function TerraGenDock({
                 on={order[a.id].on}
                 open={open === a.id}
                 onOpen={() => toggleOpen(a.id)}
-                onToggle={() => store.toggle(a.id)}
               >
                 <AxisEditor
                   section={a.id}
                   order={order}
                   store={store}
                   assets={assets}
-                  onUploadHdri={onUploadHdri}
+                  onBrowseLibrary={() => onBrowseLibrary({ kind: "env" })}
                 />
               </Section>
             ))}
@@ -931,9 +1147,7 @@ function TerraGenDock({
             id="output"
             label="Output"
             icon="capture"
-            summary={`${order.output.images ? "Images" : "No type"} · ${
-              Object.values(order.output.annotations).filter(Boolean).length
-            } annotations`}
+            summary={outputSummary(order)}
             open={open === "output"}
             onOpen={() => toggleOpen("output")}
           >
@@ -942,7 +1156,7 @@ function TerraGenDock({
               order={order}
               store={store}
               assets={assets}
-              onUploadHdri={onUploadHdri}
+              onBrowseLibrary={() => onBrowseLibrary({ kind: "env" })}
             />
           </Section>
         </div>
@@ -1017,6 +1231,13 @@ function cameraSummary(rig: ReturnType<typeof rigState>): string {
       ? `${rig.nearDistance} m`
       : `${rig.nearDistance}–${rig.farDistance} m`;
   return `${rig.masterName} · ${reach}`;
+}
+
+/** The output row, closed: what comes back, at what size, with how much on it. */
+function outputSummary(order: WorkOrder): string {
+  const { width, height } = order.output.resolution;
+  const annotations = Object.values(order.output.annotations).filter(Boolean).length;
+  return `${order.output.images ? "Images" : "No type"} · ${width}×${height} · ${annotations} annotations`;
 }
 
 /** The master row, closed: the hero first, then what else is in the frame with

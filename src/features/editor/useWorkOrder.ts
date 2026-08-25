@@ -33,6 +33,19 @@ export interface WorkOrderStore {
   setOutput: (patch: Partial<OutputSpec>) => void;
   toggleAnnotation: (id: AnnotationId) => void;
   setPrompt: (prompt: string) => void;
+
+  /* --- the two shortlists -------------------------------------------------
+   * Stand-ins and environments are both "picked from the library, then tuned
+   * as a list", so they get the same three verbs rather than each growing its
+   * own vocabulary. Adding is idempotent on the asset id: picking the same
+   * mesh twice is a mis-click, not a request for two identical subsets.
+   */
+  addSwap: (target: { id: string; name: string }, asset: { id: string; name: string }) => void;
+  toggleSwap: (targetId: string, assetId: string) => void;
+  removeSwap: (targetId: string, assetId: string) => void;
+  addEnv: (assetId: string) => void;
+  toggleEnv: (assetId: string) => void;
+  removeEnv: (assetId: string) => void;
 }
 
 export function useWorkOrder(): WorkOrderStore {
@@ -84,5 +97,109 @@ export function useWorkOrder(): WorkOrderStore {
     setOrder((prev) => (prev ? { ...prev, prompt } : prev));
   }, []);
 
-  return { order, seedIfEmpty, reseed, toggle, patch, setOutput, toggleAnnotation, setPrompt };
+  /**
+   * Idempotent PER TARGET, not per asset: the same chair can stand in for two
+   * different objects — that is a legitimate thing to ask for — but adding it
+   * twice to one object is a mis-click, not a request for two identical
+   * subsets.
+   */
+  const addSwap = useCallback<WorkOrderStore["addSwap"]>((target, asset) => {
+    setOrder((prev) =>
+      prev && !prev.swaps.some((s) => s.targetId === target.id && s.assetId === asset.id)
+        ? {
+            ...prev,
+            swaps: [
+              ...prev.swaps,
+              {
+                targetId: target.id,
+                targetName: target.name,
+                assetId: asset.id,
+                name: asset.name,
+                inRun: true,
+              },
+            ],
+          }
+        : prev
+    );
+  }, []);
+
+  const isSwap = (s: { targetId: string; assetId: string }, targetId: string, assetId: string) =>
+    s.targetId === targetId && s.assetId === assetId;
+
+  const toggleSwap = useCallback((targetId: string, assetId: string) => {
+    setOrder((prev) =>
+      prev
+        ? {
+            ...prev,
+            swaps: prev.swaps.map((s) =>
+              isSwap(s, targetId, assetId) ? { ...s, inRun: !s.inRun } : s
+            ),
+          }
+        : prev
+    );
+  }, []);
+
+  const removeSwap = useCallback((targetId: string, assetId: string) => {
+    setOrder((prev) =>
+      prev
+        ? { ...prev, swaps: prev.swaps.filter((s) => !isSwap(s, targetId, assetId)) }
+        : prev
+    );
+  }, []);
+
+  /**
+   * The environment axis arms itself.
+   *
+   * Its switch is gone from the row — an axis with one control and one list has
+   * nothing a switch adds that emptying the list doesn't say better — so `on`
+   * is derived from the picks here, in the one place they change.
+   */
+  const withEnv = (prev: WorkOrder, picks: WorkOrder["background"]["picks"]): WorkOrder => ({
+    ...prev,
+    background: { ...prev.background, picks, on: picks.some((p) => p.inRun) },
+  });
+
+  const addEnv = useCallback((assetId: string) => {
+    setOrder((prev) =>
+      prev && !prev.background.picks.some((p) => p.assetId === assetId)
+        ? withEnv(prev, [...prev.background.picks, { assetId, inRun: true }])
+        : prev
+    );
+  }, []);
+
+  const toggleEnv = useCallback((assetId: string) => {
+    setOrder((prev) =>
+      prev
+        ? withEnv(
+            prev,
+            prev.background.picks.map((p) =>
+              p.assetId === assetId ? { ...p, inRun: !p.inRun } : p
+            )
+          )
+        : prev
+    );
+  }, []);
+
+  const removeEnv = useCallback((assetId: string) => {
+    setOrder((prev) =>
+      prev ? withEnv(prev, prev.background.picks.filter((p) => p.assetId !== assetId)) : prev
+    );
+  }, []);
+
+  return {
+    order,
+    seedIfEmpty,
+    reseed,
+    toggle,
+    patch,
+    setOutput,
+    toggleAnnotation,
+    setPrompt,
+    addSwap,
+    toggleSwap,
+    removeSwap,
+    addEnv,
+    toggleEnv,
+    removeEnv,
+  };
 }

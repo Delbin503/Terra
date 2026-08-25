@@ -21,6 +21,7 @@ import {
   regionAt,
   seedCounts,
   segmentImage,
+  type Region,
   type SegmentResult,
 } from "./segmentation";
 
@@ -33,10 +34,18 @@ import {
  *           timestamp you don't want the generator to learn from. Destination-out
  *           on a canvas, so what it removes is really gone rather than covered.
  *
- *   SEGMENT split the photo into things. Type keywords ("humans") and each gets
- *           a labelled count you can correct; type nothing and you get every
- *           region, then click the ones that matter. Either way Save records
- *           what was labelled, and Create is what consumes it.
+ *   SEGMENT split the photo into things. Type keywords ("humans, trees") and each
+ *           becomes a group in the Segmented items list with the regions it
+ *           found; type nothing and every region is offered instead. Clicking a
+ *           region in the photo adds it to the list or drops it out again, and
+ *           the counts follow. Save records what was labelled, and Create is
+ *           what consumes it.
+ *
+ * NO TOOL BUTTONS. There was an eraser/pick pair in the footer, and it made the
+ * two jobs modal: half the time a click did nothing because the photo was in the
+ * other mode, and the mode was a 36px icon two hundred pixels from the cursor.
+ * The GESTURE says which one you meant instead — drag to erase, click to
+ * select — which is the distinction the hand is already making.
  *
  * Both passes share one undo stack, because to the user they are one edit of one
  * photo. See segmentation.ts for what the keyword ranking can and cannot know.
@@ -57,11 +66,54 @@ const SOURCE_MAX = 1400;
  */
 const BRUSH = { min: 12, max: 160, step: 4, initial: 64 };
 
-type Tool = "erase" | "pick";
+/**
+ * How far the pointer must travel before a press counts as an erase.
+ *
+ * This is the whole modeless story: under the threshold you selected a region,
+ * over it you painted. In stage pixels, and deliberately small — a deliberate
+ * drag clears it within a few pixels, while the wobble of a click on a trackpad
+ * does not.
+ */
+const DRAG_SLOP = 4;
 
-/** One point on the undo stack: the erase passes, plus what is hand-picked. */
+/** What a keyword found, or — with no keywords — everything the pass saw. */
+interface Group {
+  word: string;
+  /** region ids belonging to this group, in the order they were assigned */
+  ids: number[];
+}
+
+/** The group name used when the user segments without typing anything. */
+const ALL_REGIONS = "Regions";
+
+/**
+ * A hue per group.
+ *
+ * ONE COLOUR FOR EVERYTHING WAS THE BUG. Every outline, fill and badge was the
+ * brand orange, so a photo with six keywords on it was six identical-looking
+ * selections and the only way to tell which region belonged to which word was
+ * to click a row and watch the others fade. Colour is what a legend is FOR:
+ * "Humans" and the three outlines that are humans should be the same colour,
+ * and reading the photo should not require operating it.
+ *
+ * Fixed hues rather than theme tokens, because these are data colours — they
+ * have to stay distinct from each other and hold up over an arbitrary
+ * photograph, which a palette built for UI surfaces does not promise. Kept at
+ * high saturation and mid lightness so they read over both a sunlit path and a
+ * shadow, and ordered so that neighbours in the list are far apart on the wheel.
+ */
+const GROUP_HUES = [96, 200, 32, 320, 260, 170, 8, 52, 224, 140];
+
+const groupHue = (i: number) => GROUP_HUES[i % GROUP_HUES.length];
+/** the group's line colour */
+const groupInk = (i: number) => `hsl(${groupHue(i)} 85% 55%)`;
+/** the same colour as a wash, for the region fill and the list row's bar */
+const groupWash = (i: number, alpha: number) => `hsl(${groupHue(i)} 85% 55% / ${alpha})`;
+
+/** One point on the undo stack: the erase passes, plus what is in the list. */
 interface Snapshot {
   strokes: Stroke[];
+  /** region ids currently counted — clicking a region adds or drops it here */
   picked: number[];
 }
 
@@ -102,7 +154,6 @@ export function ImageStudioDialog({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [source, setSource] = useState<HTMLCanvasElement | null>(null);
 
-  const [tool, setTool] = useState<Tool>("erase");
   const [brush, setBrush] = useState(BRUSH.initial);
   const [text, setText] = useState("");
 
@@ -111,7 +162,13 @@ export function ImageStudioDialog({
   const snap = history[at] ?? EMPTY;
 
   const [seg, setSeg] = useState<SegmentResult | null>(null);
-  const [labels, setLabels] = useState<Label[]>([]);
+  /** what the last pass produced, as the list shows it */
+  const [groups, setGroups] = useState<Group[]>([]);
+  /** whether that pass was run against typed keywords */
+  const [keyworded, setKeyworded] = useState(false);
+  /** the group being worked on — its regions are lit, the rest recede */
+  const [activeGroup, setActiveGroup] = useState<number | null>(null);
+  const [listOpen, setListOpen] = useState(true);
   /**
    * The strokes as they stood when the last pass ran. Snapshots share the same
    * strokes array until an erase actually changes it, so comparing by identity
@@ -132,6 +189,8 @@ export function ImageStudioDialog({
    * whole stroke. `strokeTick` exists only to schedule the repaint.
    */
   const draftRef = useRef<Stroke | null>(null);
+  /** where the press started, and whether it has become a drag yet */
+  const pressRef = useRef<{ u: number; v: number; x: number; y: number } | null>(null);
   const [strokeTick, setStrokeTick] = useState(0);
   const [cursor, setCursor] = useState<{ x: number; y: number; r: number } | null>(
     null
@@ -168,14 +227,17 @@ export function ImageStudioDialog({
     const edit = image?.edit ?? null;
     setHistory([{ strokes: edit?.strokes ?? [], picked: [] }]);
     setAt(0);
-    setLabels(edit?.labels ?? []);
     setText((edit?.labels ?? []).map((l) => l.word).join(", "));
     setSeg(null);
+    setGroups([]);
+    setKeyworded(false);
+    setActiveGroup(null);
+    setListOpen(true);
     setSegStrokes(null);
     setTouched(false);
     setConfirmClose(false);
     draftRef.current = null;
-    setTool("erase");
+    pressRef.current = null;
     // Restoring one image's session must not depend on the object identity of
     // the whole list, only on which photo this is.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -218,22 +280,27 @@ export function ImageStudioDialog({
   }
 
   const words = parseKeywords(text);
-  const keywordMode = labels.length > 0;
-  const assigned = useMemo(
-    () => (seg && keywordMode ? assignSubjects(seg, labels.map((l) => l.count)) : []),
-    [seg, keywordMode, labels]
-  );
-  const highlighted = useMemo(() => {
-    const set = new Set<number>();
-    for (const a of assigned) set.add(a.region.id);
-    for (const id of snap.picked) set.add(id);
-    return set;
-  }, [assigned, snap.picked]);
 
   // Whatever was segmented described the pixels that were there a moment ago.
   const stale = Boolean(seg) && snap.strokes !== segStrokes;
-  const labelled = assigned.length + snap.picked.length;
-  const room = seg ? seg.subjects.length - assigned.length : 0;
+  const selectable = Boolean(seg) && !stale;
+
+  /** id → the group holding it, and its position within that group. */
+  const placement = useMemo(() => {
+    const map = new Map<number, { group: number; index: number }>();
+    groups.forEach((g, group) =>
+      g.ids.forEach((id, index) => map.set(id, { group, index }))
+    );
+    return map;
+  }, [groups]);
+
+  const pickedSet = useMemo(() => new Set(snap.picked), [snap.picked]);
+  /** how many of each group's regions are counted right now */
+  const counts = useMemo(
+    () => groups.map((g) => g.ids.filter((id) => pickedSet.has(id)).length),
+    [groups, pickedSet]
+  );
+  const total = counts.reduce((n, c) => n + c, 0);
 
   /* --------------------------------------------------------------- actions --- */
 
@@ -243,26 +310,57 @@ export function ImageStudioDialog({
     const result = segmentImage(canvas);
     setSeg(result);
     setSegStrokes(snap.strokes);
-    setLabels(
-      words.length
-        ? words.map((word, i) => ({
-            word,
-            count: seedCounts(result, words.length)[i],
-          }))
-        : []
-    );
-    // Region ids are only meaningful within one pass, so a new pass drops the
-    // hand-picked set rather than carrying stale ids forward.
+    setListOpen(true);
+    setActiveGroup(null);
+
+    if (words.length) {
+      // One group per keyword, filled from the subject ranking. Everything the
+      // pass offered starts counted — dropping the one it got wrong is a click,
+      // where hunting for the two it got right is a search.
+      const assigned = assignSubjects(result, seedCounts(result, words.length));
+      const next = words.map((word, i) => ({
+        word,
+        ids: assigned.filter((a) => a.word === i).map((a) => a.region.id),
+      }));
+      setGroups(next);
+      setKeyworded(true);
+      commit({ picked: next.flatMap((g) => g.ids) });
+      return;
+    }
+
+    // No keywords: every region is on offer and none is counted, because
+    // without a word for them there is nothing to claim they are.
+    setGroups([
+      { word: ALL_REGIONS, ids: result.regions.filter((r) => r.outline).map((r) => r.id) },
+    ]);
+    setKeyworded(false);
     commit({ picked: [] });
   }
 
-  function step(index: number, by: number) {
-    setLabels((ls) =>
-      ls.map((l, i) =>
-        i === index ? { ...l, count: Math.max(0, l.count + by) } : l
-      )
-    );
-    setTouched(true);
+  /**
+   * Add a region to the list, or drop it out.
+   *
+   * A region nobody assigned joins the ACTIVE group, which is what makes the
+   * list additive rather than a fixed answer: the ranking missed the fourth
+   * runner, you click them, and Humans reads 4. With no group selected there is
+   * nothing to add it to, so the click is ignored rather than guessing.
+   */
+  function toggleRegion(id: number) {
+    const place = placement.get(id);
+    if (!place) {
+      if (activeGroup == null) return;
+      setGroups((gs) =>
+        gs.map((g, i) => (i === activeGroup ? { ...g, ids: [...g.ids, id] } : g))
+      );
+      commit({ picked: [...snap.picked, id] });
+      return;
+    }
+    setActiveGroup(place.group);
+    commit({
+      picked: pickedSet.has(id)
+        ? snap.picked.filter((x) => x !== id)
+        : [...snap.picked, id],
+    });
   }
 
   function stageAt(e: React.PointerEvent<HTMLDivElement>) {
@@ -270,65 +368,93 @@ export function ImageStudioDialog({
     return {
       u: (e.clientX - box.left) / box.width,
       v: (e.clientY - box.top) / box.height,
+      x: e.clientX - box.left,
+      y: e.clientY - box.top,
       box,
     };
   }
 
+  /**
+   * Press down. With nothing segmented the brush starts immediately — there is
+   * no other thing a press could mean. Once regions exist the stroke waits for
+   * `DRAG_SLOP`, so a click can still turn out to have been a selection and no
+   * erase dot flashes under the cursor on the way.
+   */
   function onDown(e: React.PointerEvent<HTMLDivElement>) {
     if (!source) return;
-    const { u, v } = stageAt(e);
-    if (tool === "pick") {
-      const region = seg ? regionAt(seg, u, v) : null;
-      if (!region) return;
-      const picked = snap.picked.includes(region.id)
-        ? snap.picked.filter((id) => id !== region.id)
-        : [...snap.picked, region.id];
-      commit({ picked });
-      return;
-    }
+    const { u, v, x, y } = stageAt(e);
     e.currentTarget.setPointerCapture(e.pointerId);
-    draftRef.current = {
-      size: brushPx,
-      pts: [[u * source.width, v * source.height]],
-    };
-    setStrokeTick((t) => t + 1);
+    pressRef.current = { u, v, x, y };
+    if (!selectable) {
+      draftRef.current = {
+        size: brushPx,
+        pts: [[u * source.width, v * source.height]],
+      };
+      setStrokeTick((t) => t + 1);
+    }
   }
 
   function onMove(e: React.PointerEvent<HTMLDivElement>) {
     if (!source) return;
-    const { u, v, box } = stageAt(e);
-    setCursor(
-      tool === "erase"
-        ? {
-            x: e.clientX - box.left,
-            y: e.clientY - box.top,
-            r: (brushPx / 2) * (box.width / source.width),
-          }
-        : null
-    );
-    setHover(tool === "pick" && seg ? (regionAt(seg, u, v)?.id ?? null) : null);
-    const draft = draftRef.current;
-    if (!draft) return;
-    draft.pts.push([u * source.width, v * source.height]);
+    const { u, v, x, y, box } = stageAt(e);
+    setCursor({
+      x,
+      y,
+      r: (brushPx / 2) * (box.width / source.width),
+    });
+    setHover(selectable && seg ? (regionAt(seg, u, v)?.id ?? null) : null);
+
+    const press = pressRef.current;
+    if (!press) return;
+
+    // The press has become a drag — start the stroke from where it began, so
+    // the first few pixels aren't lost to the threshold.
+    if (!draftRef.current) {
+      if (Math.hypot(x - press.x, y - press.y) < DRAG_SLOP) return;
+      draftRef.current = {
+        size: brushPx,
+        pts: [[press.u * source.width, press.v * source.height]],
+      };
+    }
+    draftRef.current.pts.push([u * source.width, v * source.height]);
     setStrokeTick((t) => t + 1);
   }
 
   function onUp() {
+    const press = pressRef.current;
     const draft = draftRef.current;
-    if (!draft) return;
+    pressRef.current = null;
     draftRef.current = null;
-    commit({ strokes: [...snap.strokes, draft] });
+
+    if (draft) {
+      commit({ strokes: [...snap.strokes, draft] });
+      return;
+    }
+    // Never moved: it was a click on the photo, which is how regions are
+    // added to and dropped from the list.
+    if (press && selectable && seg) {
+      const region = regionAt(seg, press.u, press.v);
+      if (region) toggleRegion(region.id);
+    }
+    setStrokeTick((t) => t + 1);
   }
 
   const dirty = touched || at > 0;
 
   function save() {
     const canvas = canvasRef.current;
+    const labels: Label[] = keyworded
+      ? groups
+          .map((g, i) => ({ word: g.word, count: counts[i] }))
+          .filter((l) => l.count > 0)
+      : [];
     onSave({
       url: snap.strokes.length && canvas ? canvas.toDataURL("image/png") : null,
       strokes: snap.strokes,
-      labels: labels.filter((l) => l.count > 0),
-      picked: snap.picked.length,
+      labels,
+      // Without keywords there is no word to file them under, so they count as
+      // hand-picked regions — which is exactly what they are.
+      picked: keyworded ? 0 : total,
     });
   }
 
@@ -343,19 +469,14 @@ export function ImageStudioDialog({
       return "The photo changed — segmentize again to refresh the outlines.";
     }
     if (!seg) {
-      return "Erase what shouldn't be in the world, or segmentize to label what is.";
+      return "Drag to erase what shouldn't be in the world, or segmentize to label what is.";
     }
-    if (keywordMode) {
-      if (!seg.subjects.length) {
-        return "Nothing in this photo reads as a subject — segmentize with no keywords and pick the regions by hand instead.";
-      }
-      return `${labelled} labelled across ${labels.length} keyword${
-        labels.length === 1 ? "" : "s"
-      } · adjust a count with + and −`;
+    if (keyworded && total === 0 && groups.every((g) => g.ids.length === 0)) {
+      return "Nothing in this photo reads as a subject — segmentize with no keywords and click the regions by hand instead.";
     }
-    return `${seg.regions.length} regions found · switch to pick and click the ones that matter${
-      snap.picked.length ? ` · ${snap.picked.length} picked` : ""
-    }`;
+    return `${total} labelled · click a region to add or drop it${
+      activeGroup != null ? ` from ${groups[activeGroup].word}` : ""
+    } · drag to erase`;
   }
 
   /* ----------------------------------------------------------------- view --- */
@@ -382,12 +503,17 @@ export function ImageStudioDialog({
           the world it generates.
         </DialogDescription>
 
-        {/* Keywords — the ask, and then what came back for it. A group on the
-            glass (frost + hairline) holding a recessed field, which is how the
-            editor's panels are built. */}
-        <div className="rounded-xl border border-glass/10 bg-glass/5 p-2.5">
+        {/* Keywords — the ask, and the answer beside it.
+            THE LIST BELONGS UP HERE, NOT OVER THE PHOTO. It floated top-right
+            of the stage for a while, which put it on top of whatever the
+            photographer had framed top-right — in a landscape shot that is
+            usually sky, but in a street shot it was sitting on two of the
+            regions it was counting. The ask and what came back for it are one
+            statement, so they share one bar, and the photo underneath is left
+            whole. */}
+        <div className="flex items-stretch gap-2 rounded-xl border border-glass/10 bg-glass/5 p-2.5">
           <form
-            className="field-well flex items-center gap-2 rounded-lg border px-1.5 py-1"
+            className="field-well flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-1.5 py-1"
             onSubmit={(e) => {
               e.preventDefault();
               runSegment();
@@ -400,8 +526,13 @@ export function ImageStudioDialog({
               aria-label="Keywords to segment by"
               className="type-body-lg min-w-0 flex-1 bg-transparent px-1.5 py-1 text-content outline-none placeholder:text-content-subtle"
             />
+            {/* A COUNT, NOT A QUOTA. It used to read "0/4", which is a cap
+                stated as a scoreboard — and there is no reason a street photo
+                should be describable in four words. */}
             <span className="type-caption hidden shrink-0 text-content-subtle sm:block">
-              {words.length}/4 · comma-separated
+              {words.length === 0
+                ? "comma-separated"
+                : `${words.length} keyword${words.length === 1 ? "" : "s"} · comma-separated`}
             </span>
             <button
               type="submit"
@@ -417,34 +548,19 @@ export function ImageStudioDialog({
             </button>
           </form>
 
-          {labels.length > 0 && (
-            <ul className="mt-2.5 space-y-1.5 border-t border-glass/10 pt-2.5">
-              {labels.map((label, i) => (
-                <li
-                  key={label.word}
-                  className="flex items-center gap-2 rounded-lg border border-glass/10 bg-glass/10 px-3 py-1.5"
-                >
-                  <span className="type-body-lg flex-1 truncate capitalize text-content">
-                    {label.word}
-                  </span>
-                  <Stepper
-                    icon="step-up"
-                    label={`One more ${label.word}`}
-                    disabled={room <= 0}
-                    onClick={() => step(i, 1)}
-                  />
-                  <span className="type-numeric field-well grid h-7 min-w-[2.5rem] place-items-center rounded-md border text-md text-content">
-                    {label.count}
-                  </span>
-                  <Stepper
-                    icon="step-down"
-                    label={`One fewer ${label.word}`}
-                    disabled={label.count === 0}
-                    onClick={() => step(i, -1)}
-                  />
-                </li>
-              ))}
-            </ul>
+          {/* Only after a pass, and only while it still describes these pixels:
+              a segmented list beside a photo that has been erased since is a
+              count of something that is no longer there. */}
+          {seg && !stale && groups.length > 0 && (
+            <SegmentedList
+              groups={groups}
+              counts={counts}
+              open={listOpen}
+              active={activeGroup}
+              onToggleOpen={() => setListOpen((o) => !o)}
+              onClose={() => setListOpen(false)}
+              onPick={(i) => setActiveGroup((cur) => (cur === i ? null : i))}
+            />
           )}
         </div>
 
@@ -454,7 +570,7 @@ export function ImageStudioDialog({
             <div
               className={cn(
                 "relative max-h-[54vh] max-w-full overflow-hidden rounded-lg",
-                tool === "erase" ? "cursor-none" : "cursor-crosshair"
+                "cursor-none"
               )}
               style={{ aspectRatio: `${source.width} / ${source.height}` }}
               onPointerDown={onDown}
@@ -468,46 +584,20 @@ export function ImageStudioDialog({
             >
               <canvas ref={canvasRef} className="h-full w-full select-none" />
 
-              {seg && (
-                <svg
-                  viewBox={`0 0 ${seg.width} ${seg.height}`}
-                  preserveAspectRatio="none"
-                  className="pointer-events-none absolute inset-0 h-full w-full"
-                  aria-hidden
-                >
-                  {seg.regions.map((region) => {
-                    const on = highlighted.has(region.id);
-                    // With keywords the answer IS the selection — showing every
-                    // other region alongside it just buries it.
-                    if (keywordMode && !on) return null;
-                    const near = hover === region.id;
-                    return (
-                      <path
-                        key={region.id}
-                        d={region.outline}
-                        vectorEffect="non-scaling-stroke"
-                        strokeLinejoin="round"
-                        fill={
-                          on
-                            ? "hsl(var(--brand) / 0.24)"
-                            : near
-                              ? "hsl(var(--brand) / 0.12)"
-                              : "transparent"
-                        }
-                        stroke={
-                          on || near
-                            ? "hsl(var(--brand))"
-                            : "hsl(var(--line) / 0.4)"
-                        }
-                        strokeWidth={on ? 2.25 : near ? 1.75 : 0.75}
-                      />
-                    );
-                  })}
-                </svg>
+              {seg && !stale && (
+                <RegionOverlay
+                  seg={seg}
+                  groups={groups}
+                  placement={placement}
+                  picked={pickedSet}
+                  activeGroup={activeGroup}
+                  hover={hover}
+                  onToggle={toggleRegion}
+                />
               )}
 
               {/* The brush, as a ring — a cursor can't show its own diameter. */}
-              {tool === "erase" && cursor && (
+              {cursor && (
                 <span
                   aria-hidden
                   className="pointer-events-none absolute rounded-full border border-white/80 bg-white/10 shadow-sm"
@@ -534,38 +624,24 @@ export function ImageStudioDialog({
 
         {/* Footer */}
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
-          <ToolButton
-            icon="magic-eraser"
-            label="Magic eraser — drag to wipe"
-            active={tool === "erase"}
-            onClick={() => setTool("erase")}
-          />
-          <ToolButton
-            icon="pick-region"
-            label={seg ? "Pick regions" : "Segmentize first, then pick regions"}
-            active={tool === "pick"}
-            disabled={!seg}
-            onClick={() => setTool("pick")}
-          />
-
-          {tool === "erase" && (
-            <label className="flex h-9 items-center gap-2.5 rounded-lg border border-glass/10 bg-glass/5 px-3">
-              <span className="type-label shrink-0 text-content-muted">Size</span>
-              <input
-                type="range"
-                aria-label="Brush size"
-                min={BRUSH.min}
-                max={BRUSH.max}
-                step={BRUSH.step}
-                value={brush}
-                onChange={(e) => setBrush(Number(e.target.value))}
-                className="h-1 w-24 cursor-pointer accent-brand"
-              />
-              <span className="type-numeric w-6 shrink-0 text-right text-content">
-                {brush}
-              </span>
-            </label>
-          )}
+          {/* The brush size is always here now, because the brush is always
+              available — there is no mode for it to belong to. */}
+          <label className="flex h-9 items-center gap-2.5 rounded-lg border border-glass/10 bg-glass/5 px-3">
+            <span className="type-label shrink-0 text-content-muted">Size</span>
+            <input
+              type="range"
+              aria-label="Brush size"
+              min={BRUSH.min}
+              max={BRUSH.max}
+              step={BRUSH.step}
+              value={brush}
+              onChange={(e) => setBrush(Number(e.target.value))}
+              className="h-1 w-24 cursor-pointer accent-brand"
+            />
+            <span className="type-numeric w-6 shrink-0 text-right text-content">
+              {brush}
+            </span>
+          </label>
 
           <span className="mx-0.5 h-6 w-px bg-glass/15" />
           <ToolButton
@@ -620,6 +696,261 @@ export function ImageStudioDialog({
   );
 }
 
+/* ------------------------------------------------------------------ parts -- */
+
+/**
+ * The outlines, and a numbered badge on every region the list knows about.
+ *
+ * COUNTED AND UNCOUNTED BOTH SHOW. A dropped region keeps its outline, dashed
+ * and grey, with a grey number — because "this one is not in the count" is a
+ * state you need to be able to see and click back on. Hiding it would make the
+ * drop indistinguishable from the pass never having found it.
+ *
+ * The badge is a real button: it is the keyboard's way to the same toggle, and
+ * on a crowded photo it is a bigger target than the region itself.
+ */
+function RegionOverlay({
+  seg,
+  groups,
+  placement,
+  picked,
+  activeGroup,
+  hover,
+  onToggle,
+}: {
+  seg: SegmentResult;
+  groups: Group[];
+  placement: Map<number, { group: number; index: number }>;
+  picked: Set<number>;
+  activeGroup: number | null;
+  hover: number | null;
+  onToggle: (id: number) => void;
+}) {
+  const known = (r: Region) => placement.get(r.id) ?? null;
+  const dimmed = (r: Region) => {
+    const place = known(r);
+    return activeGroup != null && (!place || place.group !== activeGroup);
+  };
+
+  return (
+    <>
+      <svg
+        viewBox={`0 0 ${seg.width} ${seg.height}`}
+        preserveAspectRatio="none"
+        className="pointer-events-none absolute inset-0 h-full w-full"
+        aria-hidden
+      >
+        {seg.regions.map((region) => {
+          const place = known(region);
+          const on = picked.has(region.id);
+          const near = hover === region.id;
+          // An unassigned region is only worth drawing while the cursor is on
+          // it — otherwise the photo disappears under a mesh of outlines.
+          if (!place && !near) return null;
+          const faded = dimmed(region);
+          // Counted: its group's colour. Dropped: grey, whatever group it is
+          // in — "not in the count" has to survive being read at a glance, and
+          // a dimmer version of the group colour would just look like a
+          // different group.
+          const ink = on && place ? groupInk(place.group) : "hsl(0 0% 78% / 0.85)";
+          return (
+            <path
+              key={region.id}
+              d={region.outline}
+              vectorEffect="non-scaling-stroke"
+              strokeLinejoin="round"
+              strokeDasharray={on ? undefined : "4 3"}
+              opacity={faded ? 0.35 : 1}
+              fill={
+                on && place
+                  ? groupWash(place.group, 0.22)
+                  : near
+                    ? "hsl(0 0% 100% / 0.12)"
+                    : "transparent"
+              }
+              stroke={ink}
+              strokeWidth={on ? 2.25 : near ? 1.75 : 1.25}
+            />
+          );
+        })}
+      </svg>
+
+      {groups.flatMap((group, gi) =>
+        group.ids.map((id, index) => {
+          const region = seg.regions[id];
+          if (!region) return null;
+          const on = picked.has(id);
+          const faded = activeGroup != null && activeGroup !== gi;
+          return (
+            <button
+              key={`${gi}-${id}`}
+              type="button"
+              aria-pressed={on}
+              aria-label={`${group.word} ${index + 1} — ${on ? "counted, click to drop" : "dropped, click to add"}`}
+              title={`${group.word} ${index + 1}`}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggle(id);
+              }}
+              className={cn(
+                "type-caption-strong absolute grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border tabular-nums transition-opacity",
+                !on && "border-glass/40 bg-canvas/85 text-content-subtle",
+                faded && "opacity-40"
+              )}
+              style={{
+                left: `${(region.cx / seg.width) * 100}%`,
+                top: `${(region.cy / seg.height) * 100}%`,
+                // Dark ink on a bright, saturated ground: these sit over a
+                // photograph, where a white numeral on lime is unreadable.
+                ...(on
+                  ? {
+                      background: groupInk(gi),
+                      borderColor: groupInk(gi),
+                      color: "hsl(220 25% 12%)",
+                    }
+                  : null),
+              }}
+            >
+              {index + 1}
+            </button>
+          );
+        })
+      )}
+    </>
+  );
+}
+
+/**
+ * SEGMENTED ITEMS — what the pass found, as a list you can work.
+ *
+ * Every row is a keyword and the number of regions currently counted under it,
+ * and choosing one lights those regions on the photo while everything else
+ * recedes. That is what makes the count checkable: a row claiming three humans
+ * is one click from showing you which three, and one more from dropping the one
+ * that is actually a mailbox.
+ *
+ * The bar behind each row is the count to scale, so the shape of the label set
+ * reads before any of the numbers do.
+ *
+ * A DROPDOWN IN THE TOP BAR, not a panel on the photo. Sitting over the stage
+ * it covered whatever was framed in that corner — including, on a street shot,
+ * two of the regions it was counting — and it had to be there before there was
+ * anything to list. Now it appears only once a pass has run and still holds,
+ * beside the keywords that asked for it, and its closed state is one line: the
+ * word, and how many things this photo is claiming.
+ */
+function SegmentedList({
+  groups,
+  counts,
+  open,
+  active,
+  onToggleOpen,
+  onClose,
+  onPick,
+}: {
+  groups: Group[];
+  counts: number[];
+  open: boolean;
+  active: number | null;
+  onToggleOpen: () => void;
+  onClose: () => void;
+  onPick: (index: number) => void;
+}) {
+  const peak = Math.max(1, ...counts);
+  const total = counts.reduce((n, c) => n + c, 0);
+  const wrap = useRef<HTMLDivElement>(null);
+
+  /* Outside pointerdown closes it — including a press on the photo, which is
+     the one place people go next. Escape is Radix's (it closes the dialog). */
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) onClose();
+    };
+    window.addEventListener("pointerdown", onDown);
+    return () => window.removeEventListener("pointerdown", onDown);
+  });
+
+  return (
+    <div ref={wrap} data-ui="segmented-items" className="relative shrink-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggleOpen}
+        className={cn(
+          "flex h-full items-center gap-2 rounded-lg border px-3 transition-colors",
+          open
+            ? "border-brand/60 bg-brand/15 text-content"
+            : "border-glass/15 bg-glass/8 text-content hover:bg-glass/15"
+        )}
+      >
+        <span className="type-body-strong hidden truncate sm:block">Segmented items</span>
+        <span className="type-body-strong sm:hidden">Items</span>
+        {/* The count is what the label is FOR — how many things this photo is
+            claiming — so it reads as a number, not as a badge on a menu. */}
+        <span className="type-numeric-sm text-content-muted">{total}</span>
+        <Icon
+          name="chevron-down"
+          size={14}
+          className={cn("shrink-0 text-content-subtle transition-transform", open && "rotate-180")}
+        />
+      </button>
+
+      {open && (
+        <div
+          /* Its own dark ground rather than glass alone: this hangs over a
+             photo that can be any brightness, and a tint would lose the labels
+             over a sunlit path. */
+          className="absolute right-0 top-[calc(100%+6px)] z-50 w-[min(17rem,70vw)] overflow-hidden rounded-xl border border-glass/20 bg-canvas/95 shadow-lg backdrop-blur-md"
+        >
+          <ul className="max-h-[40vh] overflow-y-auto">
+            {groups.map((group, i) => {
+              const count = counts[i];
+              const on = active === i;
+              return (
+                <li key={group.word} className="border-b border-glass/10 last:border-0">
+                  <button
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => onPick(i)}
+                    className="relative flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-glass/10"
+                  >
+                    {/* The bar is the row's own colour, so the list reads as the
+                        legend for the outlines rather than as a table beside
+                        them. Selecting deepens it instead of swapping it for a
+                        brand tint, which would throw away the identity. */}
+                    <span
+                      aria-hidden
+                      className="absolute inset-y-0 left-0 transition-[width]"
+                      style={{
+                        width: `${(count / peak) * 100}%`,
+                        background: groupWash(i, on ? 0.42 : 0.2),
+                      }}
+                    />
+                    <span
+                      aria-hidden
+                      className="relative h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ background: groupInk(i) }}
+                    />
+                    <span className="type-body relative grow truncate capitalize text-content">
+                      {group.word}
+                    </span>
+                    <span className="type-numeric-sm relative text-content">{count}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="type-caption border-t border-glass/12 px-3 py-2 text-content-subtle">
+            Choose one to light its regions, then click the photo to add or drop.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ToolButton({
   icon,
   label,
@@ -654,29 +985,5 @@ function ToolButton({
         <Icon name={icon} size={17} />
       </button>
     </Tooltip>
-  );
-}
-
-function Stepper({
-  icon,
-  label,
-  disabled,
-  onClick,
-}: {
-  icon: IconName;
-  label: string;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="grid h-7 w-7 place-items-center rounded-md border border-glass/15 text-content-muted transition-colors hover:bg-glass/15 hover:text-content disabled:pointer-events-none disabled:opacity-35"
-    >
-      <Icon name={icon} size={15} />
-    </button>
   );
 }

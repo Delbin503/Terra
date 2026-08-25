@@ -563,8 +563,13 @@ export function SettingControl({
  *   · Nearest — all but touching the master. TerraGen clamps here anyway, so
  *     the floor is shown rather than applied silently behind the user.
  *   · Furthest — where the master stops being the subject of the frame.
+ *
+ * Exported because TerraGen's Camera Settings section shows the SAME control:
+ * the Work Order edits the same rig from a different panel, and a second
+ * implementation of "how far in does the sweep travel" is exactly the kind of
+ * thing that drifts.
  */
-function DistanceControl({
+export function DistanceControl({
   nearDistance,
   farDistance,
   nearLimit,

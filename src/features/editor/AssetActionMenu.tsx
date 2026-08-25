@@ -36,6 +36,7 @@ export function AssetActionMenu({
   onSelect,
   onDelete,
   onPlace,
+  placeLabel,
   onAddToFolder,
 }: {
   anchor: MenuAnchor;
@@ -46,12 +47,14 @@ export function AssetActionMenu({
   onSelect: (a: Asset) => void;
   onDelete: (a: Asset) => void;
   onPlace: (a: Asset) => void;
+  /** what placing means here — TerraGen's shortlists don't touch the scene */
+  placeLabel?: string;
   onAddToFolder: (a: Asset) => void;
 }) {
   const { asset } = anchor;
   const items: MenuItem[] = [
     { icon: "info", label: "View Info", run: () => onViewInfo(asset) },
-    { icon: "place", label: "Place in Scene", run: () => onPlace(asset) },
+    { icon: "place", label: placeLabel ?? "Place in Scene", run: () => onPlace(asset) },
     { icon: "select-check", label: "Select Items", run: () => onSelect(asset) },
     { icon: "folder-add", label: "Add to Folder", run: () => onAddToFolder(asset) },
   ];

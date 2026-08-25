@@ -298,6 +298,37 @@ export function useScene() {
     []
   );
 
+  /**
+   * Write the live weather back over a set you loaded to edit.
+   *
+   * WHY THIS EXISTS. Saving was the only way in, so correcting a set meant
+   * loading it, changing a dial, saving — and ending up with "Rain" and
+   * "Rain 2", both checked into the run, one of them wrong. Overwriting keeps
+   * the id, the name and the checkbox, so a set that was in the run stays in it
+   * and the subset count doesn't move under the edit.
+   */
+  const updateWeatherSet = useCallback(
+    (id: string) =>
+      setSavedWeather((prev) =>
+        prev.map((s) =>
+          // Copied on the way in, for the same reason `loadWeather` copies on
+          // the way out: the stored state must not alias the live one.
+          s.id === id ? { ...s, state: patchWeather(weatherRef.current, {}) } : s
+        )
+      ),
+    []
+  );
+
+  /** Rename a set. The name is how it's identified in the run, so it's editable
+   *  in place rather than only at save time. */
+  const renameWeatherSet = useCallback(
+    (id: string, name: string) =>
+      setSavedWeather((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, name: name.trim() || s.name } : s))
+      ),
+    []
+  );
+
   /** Check a saved set into the run, or out of it — see `SavedWeather.inRun`. */
   const toggleWeatherInRun = useCallback(
     (id: string) =>
@@ -716,6 +747,8 @@ export function useScene() {
     saveWeather,
     loadWeather,
     deleteWeather,
+    updateWeatherSet,
+    renameWeatherSet,
     toggleWeatherInRun,
   };
 }

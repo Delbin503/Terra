@@ -338,6 +338,59 @@ export function Check({
   );
 }
 
+/**
+ * Checkbox as a CHIP — the same statement as `Check`, laid out inline.
+ *
+ * Annotations and dataset types are short labels with a binary state, and a
+ * full-width row each turned seven of them into a 300px column that pushed the
+ * rest of the Output section off the panel. Wrapped chips say the same thing in
+ * a third of the height, and the set reads as a set rather than as a form.
+ */
+export function ChipCheck({
+  label,
+  title,
+  checked,
+  disabled,
+  comingSoon,
+  onChange,
+}: {
+  label: string;
+  /** the long form, on hover — chips carry the short one */
+  title?: string;
+  checked: boolean;
+  disabled?: boolean;
+  comingSoon?: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={title ?? label}
+      title={comingSoon ? `${title ?? label} — coming soon` : title ?? label}
+      disabled={disabled}
+      data-ui={`terragen-chip-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+      onClick={onChange}
+      className={cn(
+        "type-caption-strong flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 transition-colors",
+        checked ? "border-brand bg-brand/12 text-content" : "border-glass/12 bg-glass/6 text-content-muted",
+        disabled ? "cursor-not-allowed opacity-45" : "hover:border-glass/30 hover:text-content"
+      )}
+    >
+      <span
+        className={cn(
+          "grid h-3.5 w-3.5 shrink-0 place-items-center rounded-[4px] border",
+          checked ? "border-brand bg-brand text-brand-foreground" : "border-glass/25"
+        )}
+      >
+        {checked && <Icon name="check" size={9} strokeWidth={3} />}
+      </span>
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
 /** Segmented control — a small set of mutually exclusive choices. */
 export function Segmented<T extends string>({
   value,

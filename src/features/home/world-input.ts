@@ -106,7 +106,17 @@ export function labelTotal(edit: ImageEdit | null): number {
   return edit.labels.reduce((n, l) => n + l.count, 0) + edit.picked;
 }
 
-/** Up to four keywords, comma-separated, de-duped, blanks dropped. */
+/**
+ * Keywords, comma-separated, de-duped, blanks dropped.
+ *
+ * NO CEILING. It was four, borrowed from `MAX_IMAGES` for no better reason than
+ * that four was already a number in this file — but the two count different
+ * things. Four is how many faces a world has; a photo of a street has humans,
+ * cars, signs, trees, bollards and bins in it, and a label set that stops at
+ * the fourth thing is a dataset with the rest of the street unlabelled. What
+ * the segmentation can actually point at is the real limit, and the segmented
+ * list states that honestly by showing the count each keyword found.
+ */
 export function parseKeywords(text: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -116,7 +126,6 @@ export function parseKeywords(text: string): string[] {
     if (!word || seen.has(key)) continue;
     seen.add(key);
     out.push(word);
-    if (out.length === 4) break;
   }
   return out;
 }

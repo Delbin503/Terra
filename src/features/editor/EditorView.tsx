@@ -1223,29 +1223,13 @@ export function EditorView({
             }
           }}
           onClose={() => setTerraGenOpen(false)}
-          onUploadHdri={(file) => {
-            // Into the library first, then onto the axis: an HDRI that existed
-            // only inside one Work Order would be unreachable next time.
-            const asset = assets.add({
-              name: file.name.replace(/\.[^.]+$/, ""),
-              type: "environment",
-            });
-            workOrder.patch("background", {
-              assetIds: [...(workOrder.order?.background.assetIds ?? []), asset.id],
-            });
-          }}
           onDispatch={(order) => {
             // The dispatch now lands somewhere the user can find it again. The
             // total comes from the order itself so the row's denominator is the
             // number the review screen just charged for.
             const weatherSets = scene.savedWeather.filter((s) => s.inRun).length;
             const totals = computeTotals(order, assets.assets, rigState(scene).frames, weatherSets);
-            runs.add({
-              project: projectName,
-              dataType: order.output.images ? "Image" : "Video",
-              total: totals.frames,
-              unit: order.output.images ? "Images" : "Seconds",
-            });
+            runs.add({ project: projectName, total: totals.frames });
           }}
         />
       )}

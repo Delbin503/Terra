@@ -125,9 +125,56 @@ export interface BackgroundAxis extends AxisBase {
   /** what's placed in the scene — null when nothing is. Value #1 of the axis,
    *  and the one case where the scene can't supply one. */
   baseLabel: string | null;
-  /** extra HDRIs, base excluded */
-  assetIds: string[];
+  /**
+   * Extra HDRIs, base excluded — each with its own checkbox.
+   *
+   * A PICK IS NOT AUTOMATICALLY A VALUE. The list used to be bare ids: chosen
+   * meant swept, and taking one out of the run meant losing it from the list
+   * and finding it in the library again. Carrying `inRun` per row is what lets
+   * the section be a shortlist you build once and a run you tune afterwards —
+   * the same bargain the weather sets make.
+   */
+  picks: EnvPick[];
 }
+
+/** One HDRI on the shortlist, and whether the run sweeps it. */
+export interface EnvPick {
+  assetId: string;
+  inRun: boolean;
+}
+
+/**
+ * A stand-in for one object in the scene, rendered in its place.
+ *
+ * WHY THESE AREN'T SCENE EDITS. Swapping in the Objects section used to replace
+ * an object's mesh outright, which made "render this dataset over six chairs"
+ * a six-visit chore that destroyed the scene a little more each time. A swap is
+ * therefore an ORDER-LEVEL substitution: the scene keeps the arrangement you
+ * posed, and TerraGen re-renders the same rig, weather and framing once per
+ * stand-in. Nothing here moves anything in the viewport.
+ *
+ * WHY IT CARRIES A TARGET. Swaps were the master's alone at first, on the
+ * reasoning that the master is what the dataset is about. But a scene is a
+ * whole frame — the bollard beside the car matters to the model being trained
+ * as much as the car does — and there was no way to vary anything else without
+ * editing the scene and losing it. Any object that can hold a role can hold a
+ * swap list, and each list is counted against its own object.
+ */
+export interface ObjectSwap {
+  /** scene object this stands in for */
+  targetId: string;
+  /** its name when the swap was added — what the multiplier row is labelled */
+  targetName: string;
+  assetId: string;
+  /** the asset's name at the time it was picked — the row's label */
+  name: string;
+  /** this stand-in is one of the values the run renders */
+  inRun: boolean;
+}
+
+/** One object's stand-ins, in the order they were added. */
+export const swapsFor = (o: WorkOrder, targetId: string): ObjectSwap[] =>
+  o.swaps.filter((s) => s.targetId === targetId);
 
 export interface LayoutAxis extends AxisBase {
   /** how many arrangements TerraArrange should return */
@@ -188,16 +235,37 @@ export const ANNOTATIONS: AnnotationMeta[] = [
   { id: "cosmos", label: "Cosmos-compatible prompts", scope: "video", note: "Per-video", comingSoon: true },
 ];
 
+/** The frame size TerraGen renders at. Drives the archive estimate, since a
+ *  4K frame is four 1080p frames' worth of bytes. */
+export interface Resolution {
+  width: number;
+  height: number;
+}
+
+export const RESOLUTION_PRESETS: { label: string; width: number; height: number }[] = [
+  { label: "HD · 1280×720", width: 1280, height: 720 },
+  { label: "Full HD · 1920×1080", width: 1920, height: 1080 },
+  { label: "QHD · 2560×1440", width: 2560, height: 1440 },
+  { label: "4K UHD · 3840×2160", width: 3840, height: 2160 },
+];
+
+/** Bounds on a custom size — under the floor there is nothing to annotate, and
+ *  over the ceiling TerraGen refuses the job rather than rendering it slowly. */
+export const RESOLUTION_LIMITS = { min: 256, max: 7680 };
+
 export interface OutputSpec {
   images: boolean;
   /** not in this release — the annotation set changes substantially with it */
   video: boolean;
+  resolution: Resolution;
   annotations: Record<AnnotationId, boolean>;
 }
 
 export interface WorkOrder {
   background: BackgroundAxis;
   layouts: LayoutAxis;
+  /** stand-ins rendered in place of the objects they name — see `ObjectSwap` */
+  swaps: ObjectSwap[];
   output: OutputSpec;
   /** the SAB prompt this order was authored from, if any */
   prompt: string;
@@ -310,12 +378,14 @@ export function deriveWorkOrder(scene: SceneApi, assets: Asset[]): WorkOrder {
       on: false,
       baseAssetId: baseAsset?.id ?? null,
       baseLabel: placedEnv?.name ?? null,
-      assetIds: [],
+      picks: [],
     },
     layouts: { on: false, count: 4, volume: [10, 4, 10], concepts: [] },
+    swaps: [],
     output: {
       images: true,
       video: false,
+      resolution: { width: 1920, height: 1080 },
       annotations: {
         aabb: true,
         obb: false,
@@ -345,7 +415,7 @@ export function axisValues(o: WorkOrder, id: AxisId, assets: Asset[]): string[] 
   switch (id) {
     case "background": {
       const base = o.background.baseLabel;
-      const extras = o.background.assetIds.map(assetName);
+      const extras = o.background.picks.filter((p) => p.inRun).map((p) => assetName(p.assetId));
       // With nothing placed there is no value #1 to pin, so the axis is worth
       // only what was added — and preflight blocks the dispatch either way.
       if (!o.background.on) return [base ?? "No HDRI"];
@@ -375,8 +445,10 @@ export function axisSummary(o: WorkOrder, id: AxisId, assets: Asset[]): string {
 }
 
 export interface Multiplier {
-  /** an axis, or "weather" — the scene-owned set sweep that multiplies like one */
-  id: AxisId | "weather";
+  /** an axis, or one of the two things that multiply like one without being an
+   *  axis: the scene-owned weather sets, and one object's stand-ins
+   *  (`swaps:<objectId>`, one row per object that has any) */
+  id: AxisId | "weather" | `swaps:${string}`;
   label: string;
   count: number;
 }
@@ -404,6 +476,8 @@ export interface Totals {
 const CREDITS_PER_FRAME = 0.125;
 const CREDITS_PER_SUBSET = 7;
 const BYTES_PER_FRAME = 0.5 * 1024 * 1024;
+/** What `BYTES_PER_FRAME` is a frame OF. A 4K frame is four of these. */
+const BASE_PIXELS = 1920 * 1080;
 const SECONDS_PER_FRAME = 0.22;
 const SECONDS_PER_SUBSET = 15;
 
@@ -436,6 +510,29 @@ export function computeTotals(
     multipliers.push({ id: "weather", label: "Weather sets", count: weatherSets });
   }
 
+  /**
+   * Stand-ins multiply the same way, and the object you actually posed is
+   * value #1 of its own list — the run always contains the scene as it stands.
+   *
+   * ONE ROW PER OBJECT, and they multiply EACH OTHER: two stand-ins for the car
+   * and one for the bollard is 3 × 2 = six versions of the scene, not five.
+   * Collapsing them into a single "Object swaps ×4" would have understated the
+   * bill by a factor, which is the one mistake this whole screen exists to
+   * prevent.
+   */
+  const targets: string[] = [];
+  o.swaps.forEach((s) => {
+    if (s.inRun && !targets.includes(s.targetId)) targets.push(s.targetId);
+  });
+  targets.forEach((targetId) => {
+    const mine = o.swaps.filter((s) => s.targetId === targetId && s.inRun);
+    multipliers.push({
+      id: `swaps:${targetId}`,
+      label: `${mine[0].targetName} swaps`,
+      count: mine.length + 1,
+    });
+  });
+
   const subsets = multipliers.reduce((n, m) => n * Math.max(1, m.count), 1);
   const frames = subsets * perSubset;
 
@@ -444,7 +541,13 @@ export function computeTotals(
     subsets,
     frames,
     credits: Math.round(frames * CREDITS_PER_FRAME + subsets * CREDITS_PER_SUBSET),
-    bytes: frames * BYTES_PER_FRAME,
+    // Scaled by frame size: the archive is the one estimate the resolution
+    // actually changes, and a 4K run that reported 1080p bytes would understate
+    // it fourfold.
+    bytes:
+      frames *
+      BYTES_PER_FRAME *
+      ((o.output.resolution.width * o.output.resolution.height) / BASE_PIXELS),
     seconds: frames * SECONDS_PER_FRAME + subsets * SECONDS_PER_SUBSET,
     multipliers,
   };
@@ -567,9 +670,19 @@ export interface Gate {
 export interface PreflightContext {
   masterCount: number;
   hasRig: boolean;
-  hasEnvironment: boolean;
   credits: number;
 }
+
+/*
+ * NO ENVIRONMENT GATE. There was one — "No HDRI in the scene" — and it read the
+ * scene for an object with `source === "environment"`, which is not how every
+ * route into the scene places a sky. So it stayed lit after the user had added
+ * one, telling them to do a thing they had just done, on the last screen before
+ * they spend credits. A check that cries wolf about the one condition it exists
+ * to catch is worse than no check: it teaches people to dispatch through the
+ * warning strip. The axis still names the scene's own environment as value #1,
+ * and TerraGen supplies its default sky when there is none.
+ */
 
 /** Soft ceiling — past this the bill is worth a second look, not a refusal. */
 const FRAME_WARN_AT = 10_000;
@@ -595,14 +708,6 @@ export function preflight(o: WorkOrder, ctx: PreflightContext, totals: Totals): 
       id: "rig",
       level: "block",
       message: "Place a Camera to define the sweep.",
-    });
-  }
-
-  if (!ctx.hasEnvironment) {
-    gates.push({
-      id: "hdri",
-      level: o.background.on ? "block" : "warn",
-      message: "No HDRI in the scene — the Background axis needs a base environment.",
     });
   }
 

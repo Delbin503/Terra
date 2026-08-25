@@ -77,6 +77,7 @@ export function AssetLibrary({
   store,
   initialCategory = "all",
   pick,
+  placeLabel,
   rightInset = 0,
   onClose,
   onPlace,
@@ -87,6 +88,17 @@ export function AssetLibrary({
   initialCategory?: CategoryId;
   /** when set, the library acts as a chooser instead of a browser */
   pick?: PickRequest;
+  /**
+   * What choosing DOES, when it isn't "add to the scene".
+   *
+   * TerraGen opens this same sheet to build two shortlists — stand-ins for the
+   * master, environments for the run — and neither puts anything in the
+   * viewport, so a brand button reading "Add to scene" would be a lie in the
+   * one place the user is deciding whether to trust the panel. Passing a label
+   * also arms multi-select from the start, because a shortlist is a
+   * several-at-once errand by nature.
+   */
+  placeLabel?: string;
   /**
    * Extra px to keep clear on the right. The dock is a bottom sheet spanning
    * the viewport, and in TerraGen a 400px panel is pinned to that edge — without
@@ -123,7 +135,7 @@ export function AssetLibrary({
   // Multi-select is armed from the ⋮ menu ("Select Items") rather than being
   // always-on: a plain click on a card otherwise has two meanings at once.
   // Pick mode is the exception — choosing is the only thing a click can mean.
-  const [selectMode, setSelectMode] = useState(picking);
+  const [selectMode, setSelectMode] = useState(picking || Boolean(placeLabel));
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
@@ -667,7 +679,7 @@ export function AssetLibrary({
                   className="!rounded-full"
                 >
                   <Icon name="place" size={16} />
-                  Add to scene
+                  {placeLabel ?? "Add to scene"}
                 </Button>
               </div>
             </div>
@@ -686,6 +698,7 @@ export function AssetLibrary({
           onSelect={armSelect}
           onDelete={remove}
           onAddToFolder={(a) => setFiling([a.id])}
+          placeLabel={placeLabel}
           onPlace={(a) => {
             onPlace(a);
             setMenu(null);
