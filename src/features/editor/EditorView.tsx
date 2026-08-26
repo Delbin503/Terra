@@ -33,7 +33,6 @@ import { SettingControl } from "./SettingControl";
 import { ObjectToolbar, type EditTab } from "./ObjectToolbar";
 import { ObjectTitle } from "./ObjectTitle";
 import { MarqueeSelect } from "./MarqueeSelect";
-import { GroupNameBar } from "./GroupNameBar";
 import { ContextMenu, IS_MAC, MOD, type MenuItem } from "./ContextMenu";
 import { ObjectInfoPanel } from "./ObjectInfoPanel";
 import { SceneLayersPanel } from "./SceneLayersPanel";
@@ -148,18 +147,6 @@ export function EditorView({
    * the old floating panels so hard to reason about.
    */
   const [drawingSpace, setDrawingSpace] = useState(false);
-  /**
-   * The group whose name has never been typed.
-   *
-   * Carries the id it belongs to — not just a boolean — so a group made while
-   * the previous naming bar is still up can't be renamed by it, and the count so
-   * the bar can say what was just made. Cleared on commit or dismiss: a group
-   * you come back to later is renamed from the title or the layers panel like
-   * anything else.
-   */
-  const [namingGroup, setNamingGroup] = useState<{ id: string; name: string; count: number } | null>(
-    null
-  );
   /** Where the marquee selection's menu was asked for, if it is open. */
   const [marqueeMenu, setMarqueeMenu] = useState<{ x: number; y: number } | null>(null);
   /** Which of the focused space's three tiles is lit, if any. */
@@ -626,19 +613,16 @@ export function EditorView({
   }, [marquee.length]);
 
   /**
-   * Collapse the current marquee into a group and hand it to the user to name.
+   * Collapse the current marquee into a group.
    *
-   * The default name is what the group would be called if they never typed
-   * anything, and it counts the groups that exist rather than the times this ran
-   * — otherwise deleting "Group 2" and grouping again would produce a second
-   * "Group 3" and no "Group 2".
+   * The name is provisional and renamed the way anything else is — the title,
+   * F2, or a double-click in the layers tree. It counts the groups that EXIST
+   * rather than the times this ran, so deleting "Group 2" and grouping again
+   * doesn't produce a second "Group 3" and no "Group 2".
    */
   const groupMarquee = () => {
     const n = scene.objects.filter((o) => o.group).length + 1;
-    const count = marquee.length;
-    const fallback = `Group ${n}`;
-    const id = scene.group(marquee.map((o) => o.id), fallback);
-    if (id) setNamingGroup({ id, name: fallback, count });
+    scene.group(marquee.map((o) => o.id), `Group ${n}`);
   };
 
   /**
@@ -1370,21 +1354,6 @@ export function EditorView({
             </button>
           </GlassBar>
         </div>
-      )}
-
-      {/* Naming, straight after grouping — see `GroupNameBar` for why this is a
-          bar and not the title's own rename. */}
-      {namingGroup && selected?.id === namingGroup.id && (
-        <GroupNameBar
-          name={namingGroup.name}
-          count={namingGroup.count}
-          insetLeft={leftInset}
-          onCommit={(name) => {
-            scene.update(namingGroup.id, { name });
-            setNamingGroup(null);
-          }}
-          onDismiss={() => setNamingGroup(null)}
-        />
       )}
 
       {marqueeMenu && marquee.length > 1 && (
