@@ -34,6 +34,7 @@
 import type { IconName } from "@/components/icons";
 import type { Asset } from "./assets-data";
 import type { SceneObject } from "./scene-types";
+import { newSeed } from "./arrange";
 import type { SceneApi } from "./useScene";
 import {
   atDistance,
@@ -89,10 +90,10 @@ export const AXES: AxisMeta[] = [
   },
   {
     id: "layouts",
-    label: "AI Layouts",
-    icon: "layout",
+    label: "Arrangement",
+    icon: "arrange",
     blurb:
-      "TerraArrange authors the arrangements; TerraGen only executes them. You define the volume and how many to generate.",
+      "Rearrange the objects inside your space and render each arrangement. Every one is reproducible from its seed.",
   },
 ];
 
@@ -102,15 +103,15 @@ export const AXIS_BY_ID: Record<AxisId, AxisMeta> = AXES.reduce(
 );
 
 /**
- * The axes the panel actually shows.
+ * The axes the panel shows.
  *
- * AI Layouts is modelled, counted and billed like any other axis, but it has no
- * section: TerraArrange doesn't exist yet, so its editor could only ever author
- * a request nothing can answer. It stays in `AXES` so the dispatch review keeps
- * counting it if it is ever switched on programmatically, and comes back here
- * the day the service ships.
+ * Arrangement used to be filtered out of this list: it was modelled and counted
+ * like any other axis, but there was no service to author a request to, so its
+ * editor could only ever ask for something nothing could answer. The solver in
+ * `arrange.ts` is that answer — it runs in the browser, deterministically, from
+ * a seed — so the axis is back on the panel and the filter is gone.
  */
-export const PANEL_AXES = AXES.filter((a) => a.id !== "layouts");
+export const PANEL_AXES = AXES;
 
 /* ----------------------------------------------------------------- state -- */
 
@@ -176,13 +177,49 @@ export interface ObjectSwap {
 export const swapsFor = (o: WorkOrder, targetId: string): ObjectSwap[] =>
   o.swaps.filter((s) => s.targetId === targetId);
 
+/**
+ * REARRANGE THE SCENE, N TIMES.
+ *
+ * The axis holds a REQUEST, not a set of positions: how many arrangements, the
+ * seed they descend from, the space they happen in and the rules that constrain
+ * them. `arrange()` turns that into coordinates on demand, so the order stays
+ * small enough to store and the arrangements stay reproducible from it.
+ *
+ * WHY A VOLUME ID AND NOT DIMENSIONS. It used to carry its own `[x, y, z]`,
+ * which meant the panel could describe a 10 × 4 × 10 room while the viewport
+ * showed an 8 × 8 × 2.7 one and neither was wrong. The volume is scene state
+ * (see `scene-volume.ts`); this points at it.
+ */
 export interface LayoutAxis extends AxisBase {
-  /** how many arrangements TerraArrange should return */
+  /** how many arrangements the run renders */
   count: number;
-  /** metres — the volume concepts get scattered through */
-  volume: [number, number, number];
-  concepts: string[];
+  /**
+   * What arrangement #1 descends from; #n uses `seedFor(seed, n)`.
+   *
+   * THE FIELD THAT MAKES THIS A DATASET. Without it a run produces N rooms
+   * nobody can ever get back — including the backend, which rebuilds the scene
+   * headlessly and has only the order to rebuild it from.
+   */
+  seed: number;
+  /** the space they happen inside — null until one is drawn */
+  volumeId: string | null;
 }
+
+/**
+ * WHAT MOVES IS NOT A SETTING.
+ *
+ * The axis used to carry a role filter and a per-object rule list, each with a
+ * control in the panel. Between them they were two thirds of the section and
+ * neither earned it: the answer is the same every time — everything in the room
+ * that isn't the master, on the floor, out of each other's way — and the two
+ * controls mostly offered ways to make a worse room.
+ *
+ * The MASTER is the one real exclusion, and it was never expressible anyway:
+ * the capture rig is framed on it (`camera-rig.framingPosition`), so moving it
+ * invalidates every shot in the order. That rule lives in the solver's callers
+ * now, where the Space panel's Scatter already kept it, so a room the axis
+ * builds and a room the button builds are arranged by the same sentence.
+ */
 
 /**
  * The three role groups, as the panel sees them.
@@ -380,7 +417,16 @@ export function deriveWorkOrder(scene: SceneApi, assets: Asset[]): WorkOrder {
       baseLabel: placedEnv?.name ?? null,
       picks: [],
     },
-    layouts: { on: false, count: 4, volume: [10, 4, 10], concepts: [] },
+    layouts: {
+      // Opens at ONE — the scene as posed, multiplying nothing. Nobody should
+      // discover they armed a four-subset sweep by opening a panel.
+      on: false,
+      count: 1,
+      // A fresh seed per Work Order rather than a constant: two orders authored
+      // in the same session should not silently produce the same four rooms.
+      seed: newSeed(),
+      volumeId: scene.activeVolumeId,
+    },
     swaps: [],
     output: {
       images: true,
@@ -423,9 +469,11 @@ export function axisValues(o: WorkOrder, id: AxisId, assets: Asset[]): string[] 
       return [base, ...extras];
     }
     case "layouts":
+      // Off, the axis contributes the room exactly as it is posed — the same
+      // bargain every other axis makes with its scene value.
       return o.layouts.on
-        ? Array.from({ length: o.layouts.count }, (_, i) => `Layout ${i + 1}`)
-        : ["Scene arrangement"];
+        ? Array.from({ length: o.layouts.count }, (_, i) => `Arrangement ${i + 1}`)
+        : ["As arranged"];
   }
 }
 
@@ -708,6 +756,22 @@ export function preflight(o: WorkOrder, ctx: PreflightContext, totals: Totals): 
       id: "rig",
       level: "block",
       message: "Place a Camera to define the sweep.",
+    });
+  }
+
+  /**
+   * An arrangement needs somewhere to happen.
+   *
+   * A BLOCK, NOT A WARNING: with no volume the solver has no bounds to sample
+   * inside, so the axis would multiply the bill by `count` and render the same
+   * scene that many times. That is money for nothing, which is exactly what
+   * this strip exists to stop.
+   */
+  if (o.layouts.on && !o.layouts.volumeId) {
+    gates.push({
+      id: "arrangement",
+      level: "block",
+      message: "Draw a space before sweeping arrangements — the solver needs bounds.",
     });
   }
 

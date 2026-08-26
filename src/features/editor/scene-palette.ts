@@ -117,6 +117,45 @@ export const CAMERA_RIG = {
 } as const;
 
 /**
+ * The arrangement volume — the box you define a space with.
+ *
+ * INDIGO, NOT ORANGE. `--accent` is what the design system already reserves for
+ * generative and 3D affordances, and the volume is the thing the arrangement
+ * solver works inside; orange is the brand's action colour and is already spent
+ * on the capture rig, which shares the viewport with it.
+ *
+ * `contact` is the amber a wall flashes when an object is clamped against it —
+ * the same yellow the rig's afterimage uses, because both mean "this is the
+ * limit you just met" rather than "this is a thing you can touch".
+ */
+export const VOLUME = {
+  edge: "#655ce0",
+  /**
+   * The box when it ISN'T the thing you're working on.
+   *
+   * A neutral grey rather than a dimmer indigo. Colour in this editor means
+   * "this is live" — the rig is orange while it's yours, the roles carry their
+   * own hues — so a room sitting quietly in the background should read as
+   * scenery, and the purple should arrive the moment you take hold of it.
+   *
+   * LIGHT GREY, NOT MID GREY. Quiet has to mean uncoloured, not invisible: a
+   * mid grey outline over a lit outdoor HDRI is the same value as the ground
+   * behind it and the box simply disappears, which reads as the space having
+   * been deleted rather than deselected.
+   */
+  idle: "#d5d0ca",
+  /** the translucent footprint quad */
+  floor: "#655ce0",
+  /** a face with its wall switched on */
+  wall: "#7b73e6",
+  handle: "#8983ea",
+  handleHot: "#ffffff",
+  contact: "#ffd84d",
+  /** the rectangle being dragged out in define mode */
+  draft: "#8983ea",
+} as const;
+
+/**
  * The orientation cube in the top-right corner.
  *
  * Built from the glass roles rather than its own greys: the cube floats over

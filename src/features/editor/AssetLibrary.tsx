@@ -82,6 +82,7 @@ export function AssetLibrary({
   onClose,
   onPlace,
   onGenerate3D,
+  onDefineSpace,
 }: {
   store: AssetStore;
   /** open straight onto a category — used when a generation finishes */
@@ -108,6 +109,8 @@ export function AssetLibrary({
   onClose: () => void;
   onPlace: (asset: Asset) => void;
   onGenerate3D: () => void;
+  /** Put a space in the scene. Shown as a tile under Utilities. */
+  onDefineSpace?: () => void;
 }) {
   const { assets, folders } = store;
   const picking = Boolean(pick);
@@ -545,8 +548,16 @@ export function AssetLibrary({
                   />
                 )}
               </div>
-            ) : visible.length > 0 ? (
+            ) : visible.length > 0 || (category === "utilities" && onDefineSpace) ? (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-3">
+                {/* A space is a utility in exactly the sense the capture rig is:
+                    scene apparatus you drop in, not content you made. It is not
+                    an Asset — it has no file, no thumbnail and no type — so it
+                    is a tile rather than a row in the list, which keeps
+                    `AssetType` from growing a member nothing else can handle. */}
+                {category === "utilities" && onDefineSpace && (
+                  <SpaceTile onPick={onDefineSpace} />
+                )}
                 {visible.map((a) => (
                   <AssetCard
                     key={a.id}
@@ -1015,6 +1026,35 @@ function SortMenu({
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * The Define-a-space tile.
+ *
+ * Drawn as a card so it sits in the same grid as everything else, but with the
+ * accent rather than a thumbnail: it makes something rather than placing
+ * something that already exists, and a fake preview of an empty box would be a
+ * picture of nothing.
+ */
+function SpaceTile({ onPick }: { onPick: () => void }) {
+  return (
+    <button
+      type="button"
+      data-ui="asset-card-space"
+      onClick={onPick}
+      className="group flex flex-col overflow-hidden rounded-xl border border-accent/40 bg-accent/10 text-left transition-colors hover:border-accent/70 hover:bg-accent/16"
+    >
+      <span className="grid aspect-[4/3] w-full place-items-center text-accent">
+        <Icon name="space" size={34} strokeWidth={1.4} />
+      </span>
+      <span className="border-t border-accent/25 px-2.5 py-2">
+        <span className="type-body-strong block truncate text-content">Space</span>
+        <span className="type-caption block truncate text-content-subtle">
+          Define an area · Utility
+        </span>
+      </span>
+    </button>
   );
 }
 

@@ -10,6 +10,14 @@ import {
 } from "./scene-types";
 import { subtreeIds } from "./scene-tree";
 import {
+  clampIntoVolume,
+  halfExtent,
+  isInside,
+  makeVolume,
+  type SceneVolume,
+} from "./scene-volume";
+import type { Placement } from "./arrange";
+import {
   CAMERA_DEFAULTS,
   distance,
   framingPosition,
@@ -72,10 +80,22 @@ function cloneSubtree(source: SceneObject[], rootId: string) {
   return { clones, rootId: idMap.get(rootId)! };
 }
 
+/**
+ * Which objects a volume is entitled to hold.
+ *
+ * A camera is exempt because the capture rig orbits the master and routinely
+ * stands OUTSIDE the room looking into it — clamping one would fight the sweep
+ * the whole time. An HDRI or skybox is exempt because it is the world, not a
+ * thing in it; a sky pushed inside a living room is a nonsense.
+ */
+const isContainable = (source: AssetType) =>
+  source !== "camera" && source !== "environment" && source !== "skybox";
+
 /** Everything undo has to put back. */
 interface Snapshot {
   objects: SceneObject[];
   rigs: CameraRig[];
+  volumes: SceneVolume[];
   selectedId: string | null;
 }
 
@@ -134,6 +154,31 @@ export function useScene() {
   const [objects, setObjects] = useState<SceneObject[]>(seed.objects);
   const [rigs, setRigs] = useState<CameraRig[]>(seed.rigs);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * The volumes drawn in the scene, and which one is armed.
+   *
+   * A LIST FROM DAY ONE even though the UI only draws one at a time: "living
+   * room and kitchen" is the obvious second thing anyone asks for, and adding
+   * the second later would mean migrating every reader of a singular field.
+   *
+   * `activeVolumeId` is what containment and the Arrangement axis read. It is a
+   * separate piece of state from `selectedId` on purpose — a volume is not a
+   * SceneObject, so selecting a chair must not disarm the room it sits in.
+   */
+  const [volumes, setVolumes] = useState<SceneVolume[]>([]);
+  const [activeVolumeId, setActiveVolumeId] = useState<string | null>(null);
+  /**
+   * The volume the editor is FOCUSED ON — the one wearing its title, its
+   * toolbar and its purple.
+   *
+   * SEPARATE FROM `activeVolumeId` because they answer different questions.
+   * "Active" is which room this project is about: it survives clicking away,
+   * and it is what the Arrangement axis renders long after you stopped editing
+   * the box. "Selected" is whether you are editing it RIGHT NOW, and it is what
+   * containment reads — so an object dropped while the space is selected lands
+   * inside it, and the same drop with nothing selected lands where you let go.
+   */
+  const [selectedVolumeId, setSelectedVolumeId] = useState<string | null>(null);
   const [env, setEnvState] = useState<SceneEnv>({ brightness: 1, warmth: 0 });
   /**
    * The atmosphere the scene stands in — one configuration, not a set to
@@ -178,10 +223,10 @@ export function useScene() {
    * loop, and a user who picked four things and pressed one button expects one
    * undo to take back what that button did — not four.
    */
-  const live = useRef<Snapshot>({ objects, rigs, selectedId });
+  const live = useRef<Snapshot>({ objects, rigs, volumes, selectedId });
   useEffect(() => {
-    live.current = { objects, rigs, selectedId };
-  }, [objects, rigs, selectedId]);
+    live.current = { objects, rigs, volumes, selectedId };
+  }, [objects, rigs, volumes, selectedId]);
 
   const past = useRef<HistoryEntry[]>([]);
   const future = useRef<Snapshot[]>([]);
@@ -220,6 +265,7 @@ export function useScene() {
   const restore = useCallback((snap: Snapshot) => {
     setObjects(snap.objects);
     setRigs(snap.rigs);
+    setVolumes(snap.volumes);
     setSelectedId(snap.selectedId);
   }, []);
 
@@ -338,12 +384,104 @@ export function useScene() {
     []
   );
 
+  /* --------------------------------------------------------------- volumes */
+
+  /**
+   * The armed volume, mirrored for the mutators.
+   *
+   * `add` and `update` are `useCallback([])` — stable for the life of the editor,
+   * which is what stops every panel below them re-rendering on each keystroke.
+   * They cannot close over `volumes` without giving that up, so the one value
+   * they need reads off a ref instead. Same bargain `weatherRef` already makes.
+   *
+   * It holds null when containment is off, so the clamp sites don't each have to
+   * remember to check the flag.
+   */
+  const containRef = useRef<SceneVolume | null>(null);
+  containRef.current = volumes.find((v) => v.id === selectedVolumeId && v.contain) ?? null;
+
+  const addVolume = useCallback((center: Vec3, size: Vec3, name?: string) => {
+    const v = makeVolume(center, size, name);
+    setVolumes((prev) => [...prev, v]);
+    setActiveVolumeId(v.id);
+    // A space you just drew is a space you are editing — it opens focused, the
+    // same way a dropped object used to.
+    setSelectedVolumeId(v.id);
+    setSelectedId(null);
+    return v.id;
+  }, []);
+
+  /**
+   * Resize, rename, wall off, arm or disarm a volume.
+   *
+   * IT NEVER MOVES AN OBJECT. Dragging a face inward past a sofa leaves the sofa
+   * exactly where it is; the panel counts it as outside and offers to bring it
+   * in. Silently relocating someone's scene on a slider drag would be the worst
+   * available behaviour, and the clamp is a rule about EDITS, not a rule the
+   * scene is continuously re-validated against.
+   */
+  const updateVolume = useCallback((id: string, patch: Partial<SceneVolume>) => {
+    setVolumes((prev) => prev.map((v) => (v.id === id ? { ...v, ...patch } : v)));
+  }, []);
+
+  const removeVolume = useCallback((id: string) => {
+    setVolumes((prev) => {
+      const next = prev.filter((v) => v.id !== id);
+      // Arm whatever is left rather than leaving the editor with volumes drawn
+      // and none of them holding anything.
+      setActiveVolumeId((cur) => (cur === id ? next[0]?.id ?? null : cur));
+      setSelectedVolumeId((cur) => (cur === id ? null : cur));
+      return next;
+    });
+  }, []);
+
+  /**
+   * Focus a volume, or clear the focus.
+   *
+   * ONE SELECTION AT A TIME across the whole scene: focusing a space drops the
+   * object selection and vice versa, because both drive the same three pieces
+   * of chrome — the title, the bottom toolbar and the inspector column — and
+   * two things claiming them at once is two titles over one viewport.
+   */
+  const selectVolume = useCallback((id: string | null) => {
+    setSelectedVolumeId(id);
+    if (id) {
+      setSelectedId(null);
+      setActiveVolumeId(id);
+    }
+  }, []);
+
+  /** Select an object. Clears any focused volume, for the reason above. */
+  const selectObject = useCallback((id: string | null) => {
+    setSelectedId(id);
+    if (id) setSelectedVolumeId(null);
+  }, []);
+
+  /* --------------------------------------------------------------- objects */
+
+  /**
+   * Place an object.
+   *
+   * IT DOES NOT SELECT WHAT IT PLACED. Selecting an object opens focus mode —
+   * the title takeover, the fly-in, the bottom toolbar — so adding four things
+   * from the library used to mean being thrown into and out of focus four
+   * times, each one hiding the scene you were building. Placing puts a thing
+   * in the world; clicking it is how you say you want to work on it.
+   *
+   * Paste and Duplicate still focus what they made, and should: those act on
+   * something you already had hold of, so landing on the copy is continuing the
+   * gesture rather than interrupting one.
+   */
   const add = useCallback(
     (name: string, source: AssetType, position?: Vec3, modelUrl?: string) => {
       const obj = makeSceneObject(name, source, position, modelUrl);
-      setObjects((prev) => [...prev, obj]);
-      setSelectedId(obj.id);
-      return obj.id;
+      const vol = containRef.current;
+      const placed =
+        vol && isContainable(source)
+          ? { ...obj, position: clampIntoVolume(vol, obj.position, halfExtent(obj)) }
+          : obj;
+      setObjects((prev) => [...prev, placed]);
+      return placed.id;
     },
     []
   );
@@ -391,6 +529,7 @@ export function useScene() {
         },
       ]);
       setSelectedId(start.id);
+      setSelectedVolumeId(null);
       return rigId;
     },
     []
@@ -406,22 +545,45 @@ export function useScene() {
       const target = prev.find((o) => o.id === id);
       if (!target) return prev;
 
+      /**
+       * CONTAINMENT, APPLIED ONCE.
+       *
+       * Every position change in the editor funnels through here — the transform
+       * gizmo, the properties panel's numeric rows, paste, the layers tree and
+       * the arrangement solver — so clamping in this one spot is clamping in all
+       * of them, and there is no route into the scene that can quietly bypass it.
+       *
+       * The clamp reads the object's SCALE, incoming if this same patch changes
+       * it: scaling a chair up against a wall has to push it back off the wall,
+       * not clamp the new size against the old footprint.
+       */
+      const vol = containRef.current;
+      const next: Partial<SceneObject> =
+        vol && patch.position && isContainable(target.source)
+          ? {
+              ...patch,
+              position: clampIntoVolume(vol, patch.position, halfExtent({
+                scale: patch.scale ?? target.scale,
+              })),
+            }
+          : patch;
+
       const partnerId =
-        target.rigId && patch.position
+        target.rigId && next.position
           ? prev.find((o) => o.rigId === target.rigId && o.id !== id)?.id
           : undefined;
 
-      if (!partnerId || !patch.position) {
-        return prev.map((o) => (o.id === id ? { ...o, ...patch } : o));
+      if (!partnerId || !next.position) {
+        return prev.map((o) => (o.id === id ? { ...o, ...next } : o));
       }
 
       const d: Vec3 = [
-        patch.position[0] - target.position[0],
-        patch.position[1] - target.position[1],
-        patch.position[2] - target.position[2],
+        next.position[0] - target.position[0],
+        next.position[1] - target.position[1],
+        next.position[2] - target.position[2],
       ];
       return prev.map((o) => {
-        if (o.id === id) return { ...o, ...patch };
+        if (o.id === id) return { ...o, ...next };
         if (o.id !== partnerId) return o;
         return {
           ...o,
@@ -429,6 +591,26 @@ export function useScene() {
         };
       });
     });
+  }, []);
+
+  /**
+   * Apply a whole arrangement in one go.
+   *
+   * One `setObjects` rather than a `update()` per object, because the solver
+   * produced a ROOM: applying it object by object would put twenty entries on
+   * the undo stack for one click, and each intermediate state would be a room
+   * half-rearranged. The positions arrive already clamped — the solver never
+   * samples outside the volume — so this deliberately does not clamp again.
+   */
+  const applyPlacements = useCallback((placements: Placement[]) => {
+    if (placements.length === 0) return;
+    const byId = new Map(placements.map((p) => [p.id, p]));
+    setObjects((prev) =>
+      prev.map((o) => {
+        const p = byId.get(o.id);
+        return p ? { ...o, position: p.position, rotationDeg: p.rotationDeg } : o;
+      })
+    );
   }, []);
 
   /**
@@ -483,6 +665,7 @@ export function useScene() {
     const { clones, rootId } = cloneSubtree(clipboard.objects, clipboard.rootId);
     setObjects((prev) => [...prev, ...clones]);
     setSelectedId(rootId);
+    setSelectedVolumeId(null);
     return rootId;
   }, [clipboard]);
 
@@ -662,6 +845,42 @@ export function useScene() {
     [objects]
   );
 
+  /** The volume wearing the editor's focus chrome, or null. */
+  const selectedVolume = useMemo(
+    () => volumes.find((v) => v.id === selectedVolumeId) ?? null,
+    [volumes, selectedVolumeId]
+  );
+
+  /** The volume the Arrangement axis and the Space panel work on, or null. */
+  const activeVolume = useMemo(
+    () => volumes.find((v) => v.id === activeVolumeId) ?? null,
+    [volumes, activeVolumeId]
+  );
+
+  /**
+   * Objects that fall outside the armed volume.
+   *
+   * The only way this list is ever non-empty is a face dragged inward over
+   * something, or containment switched on over a scene built without it — both
+   * cases where moving things on the user's behalf would be wrong. So it is
+   * reported, and the panel offers a button.
+   */
+  const outsideVolume = useMemo(() => {
+    if (!activeVolume) return [];
+    return objects.filter(
+      (o) =>
+        isContainable(o.source) &&
+        !o.hidden &&
+        // A LOCKED object is where somebody put it, deliberately. Counting it
+        // as stray would have "Bring them inside" promise to move something the
+        // lock exists to stop moving — and the button, which goes through
+        // `applyPlacements`, would have kept that promise.
+        !o.locked &&
+        !isInside(activeVolume, o)
+    );
+  }, [objects, activeVolume]);
+
+
   /** The rig the current selection belongs to, if it's a camera. */
   const selectedRig = useMemo(
     () => (selected?.rigId ? rigs.find((r) => r.id === selected.rigId) ?? null : null),
@@ -707,10 +926,23 @@ export function useScene() {
       setBranchFlag: (...a: Parameters<typeof setBranchFlag>) => (commit(), setBranchFlag(...a)),
       setRole: (...a: Parameters<typeof setRole>) => (commit(), setRole(...a)),
       reframeRig: (...a: Parameters<typeof reframeRig>) => (commit(), reframeRig(...a)),
+      // Volumes join the same history as the objects they hold. Drawing a room,
+      // dragging a face and scattering its contents are all edits, and an undo
+      // that could take back the scatter but not the face that caused it would
+      // be undoing half a gesture.
+      addVolume: (...a: Parameters<typeof addVolume>) => (commit(), addVolume(...a)),
+      updateVolume: (id: string, patch: Partial<SceneVolume>) => (
+        commit(`volume:${id}:${Object.keys(patch).join(",")}`), updateVolume(id, patch)
+      ),
+      removeVolume: (...a: Parameters<typeof removeVolume>) => (commit(), removeVolume(...a)),
+      applyPlacements: (...a: Parameters<typeof applyPlacements>) => (
+        commit(), applyPlacements(...a)
+      ),
     }),
     [
       commit, add, addCameraRig, update, updateOne, updateRig, remove, duplicate, paste,
-      setBranchFlag, setRole, reframeRig,
+      setBranchFlag, setRole, reframeRig, addVolume, updateVolume, removeVolume,
+      applyPlacements,
     ]
   );
 
@@ -724,9 +956,19 @@ export function useScene() {
     backgroundObjects,
     selectedRig,
     rigCameras,
+    volumes,
+    activeVolume,
+    activeVolumeId,
+    selectedVolume,
+    selectedVolumeId,
+    outsideVolume,
+    // Arming a volume is not an edit for the same reason selecting an object
+    // isn't — it changes what the next edit will do, not what the scene is.
+    armVolume: setActiveVolumeId,
+    selectVolume,
     // Selection is NOT tracked. Clicking around the scene isn't an edit, and a
     // history full of look-at-this steps buries the edits you actually want back.
-    select: setSelectedId,
+    select: selectObject,
     ...tracked,
     copy,
     canPaste: clipboard !== null,

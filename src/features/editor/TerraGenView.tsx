@@ -211,6 +211,26 @@ export function TerraGenView({
   // user edits what it was queued from.
   useEffect(() => setDispatched(false), [order]);
 
+  /**
+   * The Arrangement axis follows whichever space is armed in the scene.
+   *
+   * SYNCED HERE, NOT IN THE AXIS EDITOR. The editor only mounts while its
+   * section is open, so an order whose Arrangement section was never expanded
+   * would carry whatever volume existed when the draft was first seeded — and
+   * the preflight gate and the dispatched job both read that field. This runs
+   * for as long as the panel is up, which is every path that can reach Dispatch.
+   */
+  const armedVolumeId = scene.activeVolumeId;
+  const orderVolumeId = order?.layouts.volumeId ?? null;
+  useEffect(() => {
+    if (order && orderVolumeId !== armedVolumeId) {
+      store.patch("layouts", { volumeId: armedVolumeId });
+    }
+    // `order` is deliberately absent: it changes on every edit, and the two ids
+    // are the only things that decide whether this has work to do.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderVolumeId, armedVolumeId, store]);
+
   // Derived every render, not read from the draft: the rig and the roles keep
   // moving — and now they move from inside this panel too.
   const rig = rigState(scene);
@@ -1119,6 +1139,7 @@ function TerraGenDock({
                   section={a.id}
                   order={order}
                   store={store}
+                  scene={scene}
                   assets={assets}
                   onBrowseLibrary={() => onBrowseLibrary({ kind: "env" })}
                 />
@@ -1155,6 +1176,7 @@ function TerraGenDock({
               section="output"
               order={order}
               store={store}
+              scene={scene}
               assets={assets}
               onBrowseLibrary={() => onBrowseLibrary({ kind: "env" })}
             />

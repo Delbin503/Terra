@@ -13,6 +13,8 @@ import { ViewCube, CUBE_PX, TRI_TIP } from "./ViewCube";
 import { distance } from "./camera-rig";
 import { CAMERA_RIG, READOUT } from "./scene-palette";
 import type { SceneApi } from "./useScene";
+import { VolumeBox, VolumeDraw, VolumeHandles, type VolumeGizmo } from "./VolumeBox";
+import { contactWalls, type SceneVolume, type Vec3 } from "./scene-volume";
 
 const R2D = 180 / Math.PI;
 
@@ -129,6 +131,28 @@ export interface CameraHandle {
   dom: HTMLElement;
 }
 
+/**
+ * What the viewport is being asked to do about volumes.
+ *
+ * Absent entirely — which is how TerraGen's edit stage mounts this canvas — the
+ * armed volume still DRAWS but grows no handles and starts no draw gesture. The
+ * Arrangement axis needs to show you the room it is filling; it has no business
+ * letting you resize it from there, because the Space panel isn't on screen to
+ * say what changed.
+ */
+export interface VolumeEdit {
+  /** Define mode: the next drag on the ground draws a footprint. */
+  drawing: boolean;
+  onDrawn: (center: Vec3, size: Vec3) => void;
+  onCancelDraw: () => void;
+  onResize: (patch: Partial<SceneVolume>) => void;
+  /** A resize grip is being held. The editor hides its own chrome while it is. */
+  onDragging?: (dragging: boolean) => void;
+  /** Which handle set is armed, from the inspector's active setting. Omit to
+   *  leave the box bare — a space you are only looking at grows no grips. */
+  gizmo?: VolumeGizmo;
+}
+
 interface SceneCanvasProps {
   scene: SceneApi;
   gizmoMode: "translate" | "rotate" | "scale";
@@ -146,6 +170,8 @@ interface SceneCanvasProps {
   onOrbit?: (deg: number) => void;
   /** the sweep's climb handle was dragged to this vertical separation */
   onSpan?: (metres: number) => void;
+  /** define mode + the resize handles. Omit for a read-only box. */
+  volumeEdit?: VolumeEdit;
   /**
    * Extra px the orientation cube steps left, away from the right edge.
    *
@@ -1219,6 +1245,7 @@ export function SceneCanvas({
   cameraGuide,
   onOrbit,
   onSpan,
+  volumeEdit,
   gizmoInset = 0,
 }: SceneCanvasProps) {
   const [meshes, setMeshes] = useState<Record<string, Object3D>>({});
@@ -1314,6 +1341,43 @@ export function SceneCanvas({
         hideIds={guideHides}
       />
 
+      {/* The volumes, and the affordances that change them.
+          Drawn AFTER the world so their translucent faces composite over the
+          objects inside rather than being written into the depth buffer in
+          front of them, and drawn HERE rather than inside SceneWorld because
+          SceneWorld is also what renders a captured frame — a dataset image
+          with a violet box across it would be a picture of the tool. */}
+      {scene.volumes.map((v) => (
+        <VolumeBox
+          key={v.id}
+          volume={v}
+          selected={v.id === scene.selectedVolumeId}
+          onSelect={() => scene.selectVolume(v.id)}
+          /* Only the SELECTED object lights a face. Every object pressed to a
+             wall lighting one at once would be a room outlined in amber, which
+             says nothing about the thing currently in your hand. */
+          contact={
+            v.id === scene.selectedVolumeId && v.contain && sel && sel.source !== "camera"
+              ? contactWalls(v, sel)
+              : undefined
+          }
+        />
+      ))}
+      {/* Handles belong to the FOCUSED space. A box you can see but haven't
+          picked up is scenery; growing grips on it would be nine invitations to
+          resize something you were only looking at. */}
+      {volumeEdit?.gizmo && !volumeEdit.drawing && scene.selectedVolume && (
+        <VolumeHandles
+          volume={scene.selectedVolume}
+          gizmo={volumeEdit.gizmo}
+          onResize={volumeEdit.onResize}
+          onDragging={volumeEdit.onDragging}
+        />
+      )}
+      {volumeEdit?.drawing && (
+        <VolumeDraw onDone={volumeEdit.onDrawn} onCancel={volumeEdit.onCancelDraw} />
+      )}
+
       {gizmoOn && (
         <TransformControls
           ref={gizmoRef}
@@ -1339,7 +1403,15 @@ export function SceneCanvas({
         enableDamping
         dampingFactor={0.08}
         minDistance={2}
-        maxDistance={60}
+        /**
+         * Far enough out to frame a room.
+         *
+         * It was 60 m, which is a sensible ceiling for orbiting one object and
+         * far too near for a defined space: a 40 m footprint cannot be seen
+         * whole from 60 m, so the edge dolly would run into this limit halfway
+         * through the drag that created it and simply stop.
+         */
+        maxDistance={160}
         maxPolarAngle={Math.PI / 2.05}
         autoRotate={!!selectedId && focusSettled && !transforming}
         autoRotateSpeed={0.9}

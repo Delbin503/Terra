@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui";
@@ -16,6 +16,10 @@ import {
 } from "./work-order";
 import type { WorkOrderStore } from "./useWorkOrder";
 import { Cost, Group, Note, InSceneChip, ChipCheck } from "./terragen-parts";
+import { arrange, makeRule, newSeed, seedFor } from "./arrange";
+import { describeVolume } from "./scene-volume";
+import { canTakeRole } from "./scene-types";
+import type { SceneApi } from "./useScene";
 
 /**
  * TERRAGEN AXIS EDITORS — the body of each axis section.
@@ -40,6 +44,8 @@ export interface EditorProps {
   order: WorkOrder;
   store: WorkOrderStore;
   assets: Asset[];
+  /** The Arrangement axis reads the volume and moves the objects in it. */
+  scene: SceneApi;
   /** open the asset library sheet — the same one the Objects section uses */
   onBrowseLibrary: () => void;
 }
@@ -49,7 +55,7 @@ export function AxisEditor(props: EditorProps) {
     case "background":
       return <BackgroundEditor {...props} />;
     case "layouts":
-      return <LayoutsEditor {...props} />;
+      return <ArrangementEditor {...props} />;
     case "output":
       return <OutputEditor {...props} />;
   }
@@ -183,113 +189,168 @@ function BackgroundEditor({ order, store, assets, onBrowseLibrary }: EditorProps
   );
 }
 
-/* --- AI layouts ----------------------------------------------------------- */
+/* --- arrangement ---------------------------------------------------------- */
 
-function LayoutsEditor({ order, store }: EditorProps) {
+/**
+ * ARRANGEMENT — rearrange the room, N times, reproducibly.
+ *
+ * The axis and the Space panel's Scatter button call the SAME `arrange()` with
+ * the same rules, which is the whole reason the solver is a pure function. The
+ * difference is only how many times: Scatter is one shuffle you keep, this is a
+ * sweep the run renders one subset per arrangement.
+ *
+ * WHY THE PREVIEW APPLIES TO THE SCENE. There is nowhere else to show it. A
+ * thumbnail strip would need N offscreen renders of a scene the viewport is
+ * already displaying, so instead each button applies its arrangement to the
+ * objects that are already there — undoable, and the same positions the backend
+ * will rebuild from the seed.
+ */
+function ArrangementEditor({ order, store, scene }: EditorProps) {
   const l = order.layouts;
-  const [draft, setDraft] = useState("");
+  const v = scene.activeVolume;
 
-  const addConcept = () => {
-    const v = draft.trim();
-    if (!v || l.concepts.includes(v)) return;
-    store.patch("layouts", { concepts: [...l.concepts, v] });
-    setDraft("");
+  /**
+   * What the run rearranges, and what it arranges AROUND.
+   *
+   * The same split the Space panel's Scatter makes, for the same reason: the
+   * master is what every camera is framed on, so moving it would invalidate the
+   * shots this very order describes. Locked and hidden objects are left alone
+   * because that is what those flags mean.
+   */
+  const movable = useMemo(
+    () =>
+      scene.objects.filter(
+        (o) => canTakeRole(o.source) && o.role !== "master" && !o.locked && !o.hidden
+      ),
+    [scene.objects]
+  );
+
+  const fixed = useMemo(
+    () => scene.objects.filter((o) => canTakeRole(o.source) && !movable.includes(o)),
+    [scene.objects, movable]
+  );
+
+  const [applied, setApplied] = useState<number | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const apply = (index: number) => {
+    if (!v) return;
+    const result = arrange(
+      { volume: v, movable, fixed, rules: movable.map((o) => makeRule(o.id)) },
+      seedFor(l.seed, index)
+    );
+    scene.applyPlacements(result.placements);
+    setApplied(index);
+    setNote(
+      result.unplaced.length === 0
+        ? null
+        : `${result.unplaced.length} couldn't be fitted — widen the space or lower the clearance.`
+    );
   };
 
   return (
-    <div data-ui="terragen-editor-layouts">
+    <div data-ui="terragen-editor-arrangement">
       <Cost>
         {l.on
           ? `${l.count} arrangements — one subset each`
-          : "Off — objects stay exactly where you placed them."}
+          : "One arrangement — the scene exactly as you posed it. Ask for two or more to sweep."}
       </Cost>
 
-      <Note>
-        TerraArrange authors these arrangements; TerraGen only executes them. This is a request,
-        not a placement tool — you'll see what came back before anything renders.
-      </Note>
+      {/* ---------------------------------------------------------- the space */}
+      <Group title="Space">
+        {v ? (
+          <InSceneChip label={`${v.name} · ${describeVolume(v)}`} />
+        ) : (
+          <Note tone="warn">
+            No space is drawn. Add one from the asset library, under Utilities — the solver
+            needs bounds before it can arrange anything.
+          </Note>
+        )}
+      </Group>
 
-      <div className="mt-4">
-        <Group title="How many">
-          <FactorCard
-            label="Arrangements"
-            value={l.count}
-            min={1}
-            max={24}
-            step={1}
-            precision={0}
-            onChange={(v) => store.patch("layouts", { count: v })}
-          />
-        </Group>
+      {/* --------------------------------------------------------- how many */}
+      <Group title="How many">
+        {/* The count IS the switch. At 1 the axis multiplies nothing and the
+            run renders the room as posed; from 2 it becomes a sweep. See
+            `useWorkOrder.patch` for why there is no separate on/off. */}
+        <FactorCard
+          label="Arrangements"
+          value={l.count}
+          min={1}
+          max={24}
+          step={1}
+          precision={0}
+          onChange={(n) => store.patch("layouts", { count: n })}
+        />
+      </Group>
 
-        <Group title="Volume" hint="metres">
-          <div className="grid grid-cols-3 gap-2">
-            {(["X", "Y", "Z"] as const).map((axis, i) => (
-              <NumberInput
-                key={axis}
-                bordered
-                className="w-full text-left"
-                aria-label={`Volume ${axis}`}
-                value={l.volume[i]}
-                min={1}
-                step={0.5}
-                onChange={(e) => {
-                  const next = [...l.volume] as [number, number, number];
-                  next[i] = parseFloat(e.target.value) || 1;
-                  store.patch("layouts", { volume: next });
-                }}
-              />
-            ))}
-          </div>
-        </Group>
-
-        <Group title="Concepts to scatter" hint={`${l.concepts.length} listed`}>
-          <div className="flex gap-2">
+      {/* ------------------------------------------------------------- seed */}
+      <Group title="Seed" hint="every arrangement descends from it">
+        <div className="flex items-stretch gap-2">
+          <label className="field-well flex min-w-0 grow items-center gap-2 rounded-lg border px-2.5 py-1.5">
             <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addConcept();
-                }
+              aria-label="Arrangement seed"
+              value={l.seed}
+              inputMode="numeric"
+              onChange={(e) => {
+                const n = parseInt(e.target.value.replace(/\D/g, ""), 10);
+                store.patch("layouts", { seed: Number.isFinite(n) ? n : 0 });
               }}
-              placeholder="traffic cone, kerb, bollard…"
-              data-ui="terragen-concept-input"
-              className="field-well type-body w-full rounded-lg border px-2.5 py-2 text-content outline-none placeholder:text-content-subtle"
+              data-ui="terragen-seed-input"
+              className="type-numeric min-w-0 grow bg-transparent text-content outline-none"
             />
-            <Button variant="secondary" size="sm" onClick={addConcept} disabled={!draft.trim()}>
-              Add
-            </Button>
-          </div>
-          {l.concepts.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {l.concepts.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  data-ui={`terragen-concept-${c.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
-                  onClick={() =>
-                    store.patch("layouts", { concepts: l.concepts.filter((x) => x !== c) })
-                  }
-                  className="type-caption-strong flex items-center gap-1 rounded-full border border-glass/12 bg-glass/6 px-2.5 py-1 text-content hover:border-danger/40 hover:text-danger"
-                >
-                  {c}
-                  <Icon name="close" size={11} />
-                </button>
-              ))}
-            </div>
-          )}
-        </Group>
-
-        <Button variant="outline" size="sm" disabled>
-          <Icon name="ai" size={15} />
-          Preview layouts
-        </Button>
+          </label>
+          <button
+            type="button"
+            data-ui="terragen-reseed"
+            aria-label="New seed"
+            title="New seed"
+            onClick={() => {
+              store.patch("layouts", { seed: newSeed() });
+              setApplied(null);
+            }}
+            className="grid w-10 shrink-0 place-items-center rounded-lg border border-glass/15 bg-glass/8 text-content-muted transition-colors hover:border-glass/30 hover:text-content"
+          >
+            <Icon name="seed" size={16} />
+          </button>
+        </div>
         <p className="type-caption mt-1.5 text-content-subtle">
-          Previews arrive with the TerraArrange service.
+          Write it down and this exact set of rooms comes back — here, and on the render farm.
         </p>
-      </div>
+      </Group>
+
+      {/* ---------------------------------------------------------- preview */}
+      <Group title="Preview" hint="applies to the viewport">
+        <div className="flex flex-wrap gap-1.5">
+          {Array.from({ length: l.count }, (_, i) => (
+            <button
+              key={i}
+              type="button"
+              disabled={!v || movable.length === 0}
+              onClick={() => apply(i)}
+              /* `terragen-arrangement-*`, not `terragen-preview-*`: the preview
+                 namespace already belongs to the scene-preview transport
+                 (`terragen-preview-play` / `-scrub`) at the top of this mode. */
+              data-ui={`terragen-arrangement-${i + 1}`}
+              className={cn(
+                "type-caption-strong rounded-lg border px-2.5 py-1.5 tabular-nums transition-colors disabled:opacity-40",
+                applied === i
+                  ? "border-brand bg-brand/15 text-brand-on-glass"
+                  : "border-glass/12 bg-glass/6 text-content hover:border-glass/30"
+              )}
+            >
+              {i + 1}
+            </button>
+          ))}
+        </div>
+        {note && (
+          <p className="type-caption mt-2 text-warning">{note}</p>
+        )}
+        <p className="type-caption mt-1.5 text-content-subtle">
+          Clicking one rearranges the scene so you can look at it. Undo puts it back; the run
+          rebuilds every arrangement from the seed regardless.
+        </p>
+      </Group>
     </div>
   );
 }

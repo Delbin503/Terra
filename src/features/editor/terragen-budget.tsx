@@ -345,6 +345,16 @@ export function orderChanges(
   if (envs > 0) {
     rows.push({ icon: "panorama", label: "Environments added", value: formatCount(envs) });
   }
+  // Named with its seed rather than counted alone: the count says how big the
+  // sweep is, the seed says which sweep — and the seed is the only part of this
+  // review a person might want to write down.
+  if (order.layouts.on) {
+    rows.push({
+      icon: "arrange",
+      label: `Arrangements (seed ${order.layouts.seed})`,
+      value: formatCount(order.layouts.count),
+    });
+  }
   if (scene.weatherSets > 0) {
     rows.push({
       icon: "sunny",

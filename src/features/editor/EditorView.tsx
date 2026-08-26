@@ -5,6 +5,8 @@ import {
   type CameraGuide,
   type CameraHandle,
 } from "./SceneCanvas";
+import { GlassBar } from "@/components/glass";
+import { Icon } from "@/components/icons";
 import { EditorTopBar } from "./EditorTopBar";
 import { EditorToolBar, type ToolId, type FlyoutAction } from "./EditorToolBar";
 import { EditorActions } from "./EditorActions";
@@ -15,6 +17,17 @@ import { EditorToast } from "./EditorToast";
 import { ExitProjectDialog } from "./ExitProjectDialog";
 import { MatPreviewView } from "./MatPreviewView";
 import { AiAgentPanel } from "./AiAgentPanel";
+import {
+  VOLUME_GIZMO,
+  VolumeInspectorPanel,
+  VolumeSettingControl,
+  VolumeToolbar,
+  type VolumeSetting,
+  type VolumeTab,
+} from "./VolumeInspector";
+import { describeVolume, volumeArea } from "./scene-volume";
+import { newSeed } from "./arrange";
+import { floorY, isOverFootprint } from "./scene-volume";
 import { ObjectPropertiesPanel, type SettingKey } from "./ObjectPropertiesPanel";
 import { SettingControl } from "./SettingControl";
 import { ObjectToolbar, type EditTab } from "./ObjectToolbar";
@@ -123,6 +136,30 @@ export function EditorView({
   const [gen3dOpen, setGen3dOpen] = useState(false);
   const [matOpen, setMatOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+  /**
+   * Define mode: the next drag on the ground draws a footprint.
+   *
+   * It lives here rather than in the Space panel because the VIEWPORT is what
+   * acts on it — the panel only asks. Keeping it in the panel would mean the
+   * canvas reading state out of a sibling, which is the arrangement that made
+   * the old floating panels so hard to reason about.
+   */
+  const [drawingSpace, setDrawingSpace] = useState(false);
+  /** Which of the focused space's three tiles is lit, if any. */
+  const [volumeTab, setVolumeTab] = useState<VolumeTab | null>(null);
+  /** Which row of the space inspector is open — and therefore which gizmo. */
+  const [volumeSetting, setVolumeSetting] = useState<VolumeSetting | null>(null);
+  /**
+   * A resize grip is in hand.
+   *
+   * Everything the focused space normally shows gets out of the way while this
+   * is true — the title, the tiles and the inspector are three panels over the
+   * box whose shape you are trying to judge, and the readout riding the box is
+   * already saying the numbers.
+   */
+  const [volumeDragging, setVolumeDragging] = useState(false);
+  const [volumeSeed, setVolumeSeed] = useState(newSeed);
+  const [volumeReport, setVolumeReport] = useState<string | null>(null);
   /** the TerraGen sheet — the Work Order author behind Generate */
   const [terraGenOpen, setTerraGenOpen] = useState(false);
   /** text handed from TerraGen's prompt row to the chatbot when it opens */
@@ -167,6 +204,14 @@ export function EditorView({
    * a multi-view pass is exactly long enough that they aren't.
    */
   const [genToast, setGenToast] = useState<"multiview" | "mesh" | null>(null);
+  /**
+   * "That went in the room, not where you let go."
+   *
+   * A drop outside an armed volume still lands INSIDE it, which is correct and
+   * also surprising — the object appears somewhere the pointer never was. The
+   * toast is the sentence that stops it reading as a bug.
+   */
+  const [spaceToast, setSpaceToast] = useState<string | null>(null);
   /** "Saved" — nothing to open, so it says its piece and goes */
   const [savedToast, setSavedToast] = useState(false);
   /** the leave-the-editor confirm */
@@ -500,7 +545,20 @@ export function EditorView({
     } catch {
       /* ignore */
     }
-    let point: [number, number, number] = [0, 0.5, 0];
+    /**
+     * WHERE THE DROP RAY LANDS.
+     *
+     * With a volume armed the ray meets the VOLUME'S FLOOR rather than the
+     * infinite ground at y = 0 — so a room raised onto a mezzanine takes drops
+     * on its own deck instead of underneath it. `useScene.add` clamps whatever
+     * comes out of this, so a drop in the garden still ends up in the room; the
+     * footprint test is only so we can SAY that is what happened rather than
+     * silently teleporting the thing the user just let go of.
+     */
+    const vol = scene.activeVolume;
+    const ground = vol ? floorY(vol) : 0;
+    let point: [number, number, number] = [0, ground + 0.5, 0];
+    let landedOutside = false;
     const cam = cameraRef.current;
     if (cam) {
       const rect = cam.dom.getBoundingClientRect();
@@ -511,14 +569,34 @@ export function EditorView({
       const ray = new Raycaster();
       ray.setFromCamera(ndc, cam.camera);
       const hit = new Vector3();
-      if (ray.ray.intersectPlane(new Plane(new Vector3(0, 1, 0), 0), hit)) {
-        point = [hit.x, 0.5, hit.z];
+      if (ray.ray.intersectPlane(new Plane(new Vector3(0, 1, 0), -ground), hit)) {
+        point = [hit.x, ground + 0.5, hit.z];
+        landedOutside = !!vol && vol.contain && !isOverFootprint(vol, hit.x, hit.z);
       }
     }
     place(name, type, point, modelUrl);
+    setSpaceToast(landedOutside ? `${name} snapped into ${vol!.name}` : null);
   };
 
   const selected = scene.selected;
+  const focusedVolume = scene.selectedVolume;
+
+  /**
+   * Escape backs out of define mode.
+   *
+   * It is the ONLY way out now that the Space panel and its Cancel button are
+   * gone — and it is the way out anyone would try first. Without it a mis-click
+   * on the library tile leaves the viewport waiting for a footprint drag with
+   * no way to say "never mind" but drawing a room and deleting it.
+   */
+  useEffect(() => {
+    if (!drawingSpace) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawingSpace(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawingSpace]);
 
   /**
    * A capture camera's relationship to the master: how far the rig reaches, and
@@ -814,6 +892,30 @@ export function EditorView({
         cameraGuide={cameraGuide}
         onOrbit={orbitRig}
         onSpan={setRigSpan}
+        /* Handles only while the Space panel is open. The box itself always
+           draws — you need to see the room you are dropping into — but grips
+           that resize it with nothing on screen to say what changed would be
+           an edit nobody asked for. */
+        /* Handles follow the FOCUS. Selecting a space is what says "I am
+           editing this" — and while one is being drawn there is no space to
+           select yet, so define mode arms it on its own. */
+        volumeEdit={
+          drawingSpace || scene.selectedVolumeId
+            ? {
+                drawing: drawingSpace,
+                onDrawn: (center, size) => {
+                  scene.addVolume(center, size);
+                  setDrawingSpace(false);
+                },
+                onCancelDraw: () => setDrawingSpace(false),
+                onResize: (patch) => {
+                  if (scene.selectedVolumeId) scene.updateVolume(scene.selectedVolumeId, patch);
+                },
+                onDragging: setVolumeDragging,
+                gizmo: volumeSetting ? VOLUME_GIZMO[volumeSetting] : undefined,
+              }
+            : undefined
+        }
         gizmoInset={gizmoInset}
       />
 
@@ -922,6 +1024,14 @@ export function EditorView({
             dockOpen={tool === "assets"}
             onDismiss={() => setGenToast(null)}
           />
+        ) : spaceToast ? (
+          <EditorToast
+            ui="space-snap-toast"
+            icon="space"
+            message={spaceToast}
+            dockOpen={tool === "assets"}
+            onDismiss={() => setSpaceToast(null)}
+          />
         ) : savedToast ? (
           <EditorToast
             ui="saved-toast"
@@ -978,6 +1088,14 @@ export function EditorView({
             }
             onClose={() => setTool(null)}
             onPlace={(a) => place(a.name, a.type, undefined, a.modelUrl)}
+            onDefineSpace={() => {
+              // Straight into define mode, library closed: the gesture is the
+              // point, and a tile that only opened a panel would be one more
+              // click in front of the drag. The draft's own readout carries the
+              // instructions — "drag the footprint", then "click to place".
+              setTool(null);
+              setDrawingSpace(true);
+            }}
             onGenerate3D={() => {
               setTool(null);
               setGen3dOpen(true);
@@ -1073,6 +1191,98 @@ export function EditorView({
           )}
         </PanelDock>
       </div>
+
+      {/* Define mode has to say so.
+          The Space panel used to carry this sentence, and taking the panel away
+          left a mode with no evidence it was on: the viewport looked exactly as
+          it had a moment before, and the only clue that a drag would draw a room
+          was remembering you had clicked the tile. */}
+      {drawingSpace && (
+        <div
+          data-ui="space-draw-hint"
+          className="pointer-events-none fixed bottom-6 left-1/2 z-30 -translate-x-1/2"
+          style={{ marginLeft: leftInset / 2 }}
+        >
+          <GlassBar ui="space-draw" shape="pill" className="pointer-events-auto h-11 gap-2.5 px-4">
+            <Icon name="space" size={16} className="shrink-0 text-accent" />
+            <span className="type-body text-content">
+              Drag a rectangle on the ground, then move up to raise it
+            </span>
+            <button
+              type="button"
+              data-ui="space-draw-cancel"
+              onClick={() => setDrawingSpace(false)}
+              className="type-caption-strong ml-1 shrink-0 rounded-md border border-glass/15 px-2 py-1 text-content-muted transition-colors hover:border-glass/30 hover:text-content"
+            >
+              Esc
+            </button>
+          </GlassBar>
+        </div>
+      )}
+
+      {/* ------------------------------------------------- the focused space */}
+      {/* A space wears exactly the chrome an object does — same title, same
+          bottom tiles, same inspector column — because it IS a thing in the
+          scene. All three go away while a grip is in hand: see `volumeDragging`. */}
+      {focusedVolume && !volumeDragging && (
+        <ObjectTitle
+          name={focusedVolume.name}
+          dark={titleDark}
+          role="none"
+          typeLabel="Space"
+          description={`${describeVolume(focusedVolume)} · ${volumeArea(focusedVolume).toFixed(
+            1
+          )} m² floor. ${
+            focusedVolume.contain
+              ? "Anything you place while this is selected lands inside it."
+              : "Containment is off — objects come and go freely."
+          }`}
+          insetLeft={leftInset}
+          onRename={(name) => scene.updateVolume(focusedVolume.id, { name })}
+          onBack={() => scene.selectVolume(null)}
+          onDelete={() => scene.removeVolume(focusedVolume.id)}
+        />
+      )}
+      {focusedVolume && !volumeDragging && (
+        <VolumeToolbar
+          tab={volumeTab}
+          insetLeft={leftInset}
+          onTab={(t) => {
+            setVolumeTab((cur) => (cur === t ? null : t));
+            // A different tab is a different set of rows, so whatever was open
+            // in the old one has no row to point at any more.
+            setVolumeSetting(null);
+          }}
+        />
+      )}
+      {focusedVolume && volumeSetting && !volumeDragging && (
+        <VolumeSettingControl
+          volume={focusedVolume}
+          setting={volumeSetting}
+          patch={(next) => scene.updateVolume(focusedVolume.id, next)}
+          onClose={() => setVolumeSetting(null)}
+        />
+      )}
+      {focusedVolume && volumeTab && !volumeDragging && (
+        <div
+          data-ui="volume-inspector-column"
+          className="pointer-events-none fixed bottom-6 right-4 z-30 flex w-[320px] flex-col items-stretch gap-2.5"
+        >
+          <VolumeInspectorPanel
+            scene={scene}
+            volume={focusedVolume}
+            tab={volumeTab}
+            active={volumeSetting}
+            seed={volumeSeed}
+            report={volumeReport}
+            /* Toggling, like the object list: clicking the open row closes its
+               control and disarms its gizmo, leaving the space selected. */
+            onSelect={(k) => setVolumeSetting((cur) => (cur === k ? null : k))}
+            onSeed={setVolumeSeed}
+            onReport={setVolumeReport}
+          />
+        </div>
+      )}
 
       {/* Per-object controls: bottom toolbar → filtered right panel → setting */}
       {selected && (

@@ -89,7 +89,12 @@ export function ObjectTitle({
   insetLeft?: number;
   onRename: (name: string) => void;
   onBack: () => void;
-  onViewInfo: () => void;
+  /**
+   * Open the details panel. OPTIONAL, and the ⓘ mark is dropped without it —
+   * a space has no info panel to open, and a mark that leads nowhere is worse
+   * than no mark.
+   */
+  onViewInfo?: () => void;
   onDelete: () => void;
 }) {
   // `dark` = the sampled backdrop is bright, so the label inks dark.
@@ -385,7 +390,7 @@ export function ObjectTitle({
           viewport position maps straight to left/top without inverting the tilt;
           being screen-aligned rather than tilted reads fine for a small mark.
           Hidden while renaming, when the layout is in flux. */}
-      {!editing && infoPos && (
+      {!editing && infoPos && onViewInfo && (
         <button
           type="button"
           aria-label="View info"

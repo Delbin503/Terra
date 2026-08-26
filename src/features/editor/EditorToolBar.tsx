@@ -9,6 +9,10 @@ export type FlyoutAction = "mat" | "gen3d" | "sab";
 
 const TOOLS: { id: ToolId; icon: IconName; label: string }[] = [
   { id: "scene", icon: "scene", label: "Scene objects" },
+  // No Space button. A space is a thing you bring INTO the scene, so it is
+  // picked up where every other placeable thing is picked up — the library,
+  // under Utilities, beside the capture rig. A fourth top-level tool for one
+  // more droppable was a tool bar growing a row per noun.
   { id: "assets", icon: "assets", label: "Assets" },
   { id: "ai", icon: "ai", label: "AI Tools" },
 ];

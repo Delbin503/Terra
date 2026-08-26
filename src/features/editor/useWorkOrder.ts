@@ -72,7 +72,27 @@ export function useWorkOrder(): WorkOrderStore {
   }, []);
 
   const patch = useCallback<WorkOrderStore["patch"]>((id, next) => {
-    setOrder((prev) => (prev ? { ...prev, [id]: { ...prev[id], ...next } } : prev));
+    setOrder((prev) => {
+      if (!prev) return prev;
+      const merged = { ...prev[id], ...next };
+      /**
+       * The Arrangement axis arms itself from its COUNT.
+       *
+       * Same bargain the environment axis makes with its picks, and the same
+       * one `computeTotals` already makes with weather sets: one arrangement is
+       * the scene exactly as it is posed, so it multiplies nothing and there is
+       * nothing to switch on; two or more is a sweep, and then it earns its row
+       * beside the axes that also multiply. A separate on/off switch would only
+       * have added a second way to say the same thing — and a third state to get
+       * stuck in, where four arrangements are configured and the axis is
+       * silently off.
+       */
+      if (id === "layouts") {
+        const l = merged as WorkOrder["layouts"];
+        return { ...prev, layouts: { ...l, on: l.count > 1 } };
+      }
+      return { ...prev, [id]: merged };
+    });
   }, []);
 
   const setOutput = useCallback((next: Partial<OutputSpec>) => {

@@ -28,6 +28,9 @@ import {
   Image,
   Video,
   Box,
+  Blocks,
+  Dices,
+  Shuffle,
   PanelLeftClose,
   PanelLeftOpen,
   Bell,
@@ -168,6 +171,14 @@ export const iconRegistry = {
 
   // Editor rail
   scene: Boxes,
+  /** Define a space — the volume objects are arranged inside. */
+  space: Frame,
+  /** The arrangement solver, and the axis that sweeps it. */
+  arrange: Blocks,
+  /** Reroll the arrangement seed. */
+  seed: Dices,
+  /** Scatter what's in the room into a fresh arrangement. */
+  shuffle: Shuffle,
   assets: Package,
   ai: WandSparkles,
   world: Globe,

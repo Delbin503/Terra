@@ -23,6 +23,9 @@ import {
 import type { SceneApi } from "./useScene";
 import type { AssetStore } from "./useAssets";
 import type { Asset } from "./assets-data";
+import { describeSpawn, matchSpawn, parseSpawn } from "./sab-spawn";
+import { arrange, makeRule, newSeed, type Arrangeable } from "./arrange";
+import { LOOSE_SPREAD, expandVolume } from "./scene-volume";
 
 /**
  * AiAgentPanel — the conversational agent, docked full-height on the left.
@@ -57,10 +60,21 @@ const MODELS = [
 /** Seeded near the cap so the limit warning is visible in this build. */
 const USAGE = { used: 17, limit: 20 };
 
+/**
+ * What the composer is carrying into the next message.
+ *
+ * `auto` marks the two chips the panel adds ON THE USER'S BEHALF — the object
+ * they have selected in the viewport, and the space they have armed. Both are
+ * context they can already see on screen, so putting them in the composer is
+ * telling them what the agent will assume rather than asking them to say it
+ * again. The flag is what lets an "x" mean "not this time" instead of being
+ * undone by the next render.
+ */
 type Attachment =
-  | { id: string; kind: "node"; node: NodeRef }
-  | { id: string; kind: "image"; name: string; seed: number }
-  | { id: string; kind: "mention"; label: string };
+  | { id: string; kind: "node"; node: NodeRef; auto?: boolean }
+  | { id: string; kind: "space"; volumeId: string; label: string; auto?: boolean }
+  | { id: string; kind: "image"; name: string; seed: number; auto?: never }
+  | { id: string; kind: "mention"; label: string; auto?: never };
 
 /** Two steps down each channel — enough to read as darker without going muddy. */
 function darken(hex: string): string {
@@ -68,6 +82,10 @@ function darken(hex: string): string {
   const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => Math.round(c * 0.68));
   return `#${ch.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
 }
+
+/** The example the composer offers while a space is armed. It is a real
+ *  request — typing it verbatim builds the room it describes. */
+const SPACE_PROMPT = "Add in door, chair, two people and a car in this confined space";
 
 export function AiAgentPanel({
   scene,
@@ -124,6 +142,48 @@ export function AiAgentPanel({
     }),
     [scene.objects, scene.selected, projectName]
   );
+
+  /**
+   * Chips the panel adds itself, and the one the user waved away.
+   *
+   * `dismissed` is cleared at the top of each effect run — the effect only runs
+   * when the selection or the armed space actually CHANGES, so clearing it there
+   * means an "x" holds for as long as that thing stays selected and lets the
+   * chip come back the next time it is picked up again.
+   */
+  const dismissed = useRef<string | null>(null);
+  const selectedId = scene.selectedId;
+  // The SELECTED space, not merely the active one. Containment follows the
+  // selection now, so "add a chair in this confined space" has to mean the same
+  // room a drop would land in — otherwise the agent and the drag would disagree
+  // about which space "this" is.
+  const armedVolumeId = scene.selectedVolumeId;
+  const sceneRef = useRef(scene);
+  sceneRef.current = scene;
+
+  useEffect(() => {
+    dismissed.current = null;
+    const live = sceneRef.current;
+    const object = live.objects.find((o) => o.id === selectedId) ?? null;
+    const volume = live.volumes.find((v) => v.id === armedVolumeId) ?? null;
+
+    setAttached((prev) => {
+      const manual = prev.filter((a) => !a.auto);
+      const auto: Attachment[] = [];
+      // The space comes first: it is the wider context, and it is the one that
+      // changes what the composer offers to write.
+      if (volume) {
+        auto.push({ id: `auto-space`, kind: "space", volumeId: volume.id, label: volume.name, auto: true });
+      }
+      if (object && !manual.some((a) => a.kind === "node" && a.node.id === object.id)) {
+        auto.push({ id: `auto-node`, kind: "node", node: nodeRef(object), auto: true });
+      }
+      return [...auto, ...manual];
+    });
+    // Only the two ids. Depending on `scene` would re-add a dismissed chip on
+    // every unrelated edit — a rename, a drag, anything.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, armedVolumeId]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -223,6 +283,109 @@ export function AiAgentPanel({
     return () => scene.update(sel.id, before);
   };
 
+  /**
+   * BUILD WHAT THE SENTENCE ASKED FOR, INSIDE THE ARMED SPACE.
+   *
+   * The one thing in this panel that really changes the scene. Everything else
+   * here is a script; this reads a list of nouns, places one object per item,
+   * and hands the lot to the same `arrange()` the Space panel and the
+   * Arrangement axis use — so a room the agent builds and a room the Scatter
+   * button builds are the same kind of room.
+   *
+   * It honours containment the way the Scatter button does: with the fence down
+   * the objects still cluster on the space but are free to land outside it.
+   *
+   * Returns null when the sentence wasn't a spawn request, which is how `send`
+   * decides whether this is the right answer at all.
+   */
+  const spawnIntoSpace = (text: string): boolean => {
+    const volume = scene.selectedVolume;
+    if (!volume) return false;
+    const requests = parseSpawn(text);
+    if (requests.length === 0) return false;
+
+    const matches = matchSpawn(requests, store.assets);
+    const before = scene.objects.map((o) => o.id);
+
+    // Place first, arrange second. Every object needs an id before the solver
+    // can be told to keep them apart, and `add` is the only thing that mints
+    // one — so this is two passes over the same list rather than one.
+    const created: { id: string; name: string }[] = [];
+    matches.forEach((m) => {
+      for (let i = 0; i < m.count; i++) {
+        const id = scene.add(m.name, "mesh", volume.center, m.asset?.modelUrl);
+        created.push({ id, name: m.name });
+      }
+    });
+
+    /**
+     * The solver is given the objects we just MINTED, not a re-read of the scene.
+     *
+     * `scene.add` is a state setter: `scene.objects` in this closure is still the
+     * list from before the first call, so filtering it for "what's new" returns
+     * nothing and the whole room silently stacks up at the volume's centre. Every
+     * one of these arrives from `makeSceneObject` at unit scale and no rotation,
+     * so describing them here is stating what they are, not guessing.
+     */
+    const movable: Arrangeable[] = created.map((c) => ({
+      id: c.id,
+      position: volume.center,
+      rotationDeg: [0, 0, 0],
+      scale: [1, 1, 1],
+    }));
+    const region = volume.contain ? volume : expandVolume(volume, LOOSE_SPREAD);
+    const result = arrange(
+      {
+        volume,
+        region,
+        movable,
+        // Everything that was already in the room is something to place around.
+        fixed: scene.objects.filter(
+          (o) => before.includes(o.id) && o.source !== "camera" && o.source !== "environment"
+        ),
+        rules: movable.map((o) => makeRule(o.id)),
+      },
+      newSeed()
+    );
+    scene.applyPlacements(result.placements);
+
+    const nodes: NodeRef[] = created.map((c) => ({ id: c.id, name: c.name, type: "mesh" }));
+    const standIns = matches.filter((m) => !m.asset);
+    const summary = `Placed ${created.length} ${created.length === 1 ? "object" : "objects"} in ${volume.name}`;
+
+    applyOps([
+      {
+        op: "add",
+        turn: {
+          role: "card",
+          card: {
+            kind: "task",
+            label: summary,
+            icon: "arrange",
+            status: "done",
+            nodes,
+            detail: [
+              `${describeSpawn(matches)} — arranged inside ${volume.name}.`,
+              standIns.length > 0 &&
+                `No ${standIns.map((m) => m.label).join(" or ")} in your library, so ${
+                  standIns.length === 1 ? "it is" : "they are"
+                } standing in as placeholder meshes.`,
+              !volume.contain &&
+                "Containment is off, so some of them landed outside the space.",
+              result.unplaced.length > 0 &&
+                `${result.unplaced.length} couldn't be fitted — widen the space or lower the clearance.`,
+            ]
+              .filter(Boolean)
+              .join(" "),
+            // One undo for one sentence: the whole room the agent just built.
+            revert: () => created.forEach((c) => scene.remove(c.id)),
+          },
+        },
+      },
+    ]);
+    return true;
+  };
+
   const send = (raw?: string) => {
     const text = (raw ?? input).trim();
     if (!text || busy) return;
@@ -237,10 +400,33 @@ export function AiAgentPanel({
     const mentions = attached.filter((a) => a.kind === "mention");
     if (mentions.length)
       parts.push({ kind: "md", text: mentions.map((m) => `\`@${m.label}\``).join(" ") });
+    const space = attached.find((a) => a.kind === "space");
+    if (space && space.kind === "space") parts.push({ kind: "md", text: `\`${space.label}\`` });
 
     applyOps([{ op: "add", turn: { role: "user", parts } }]);
     setInput("");
-    setAttached([]);
+    // Manual attachments were consumed by the message they were attached to.
+    // The automatic ones describe what is STILL selected and still armed, so
+    // clearing them would be the panel forgetting something it can see.
+    setAttached((prev) => prev.filter((a) => a.auto));
+
+    /**
+     * A LIST OF THINGS "IN THIS SPACE" IS ANSWERED BY BUILDING IT.
+     *
+     * Checked before the single-object add flow below, because that flow asks a
+     * question — library or fresh mesh? — and asking it four times for one
+     * sentence is not an answer. It only fires when a space is armed; without
+     * one there is nowhere to put anything and the ordinary flow is right.
+     */
+    if (scene.selectedVolume) {
+      run([{ after: 0, ops: [{ op: "add", turn: { role: "thinking" } }] }]);
+      const built = spawnIntoSpace(text);
+      if (built) {
+        applyOps([{ op: "drop-thinking" }]);
+        return;
+      }
+      applyOps([{ op: "drop-thinking" }]);
+    }
 
     // "add a chair" is a placement request, not a scripted plan — answer it with
     // the interactive fork (library vs. new mesh) instead of prose.
@@ -313,6 +499,9 @@ export function AiAgentPanel({
   const nearLimit = USAGE.used / USAGE.limit >= 0.75;
   const empty = turns.length === 0;
 
+  /** The worked example, offered only while there is a space to put things in. */
+  const spacePrompt = attached.some((a) => a.kind === "space") ? SPACE_PROMPT : null;
+
   /* The composer is pinned under the transcript, so the dock shell takes it
      as a footer rather than as the last child of a scrolling body. */
   const footer = (
@@ -323,7 +512,14 @@ export function AiAgentPanel({
               <AttachmentChip
                 key={a.id}
                 item={a}
-                onRemove={() => setAttached((prev) => prev.filter((x) => x.id !== a.id))}
+                onRemove={() => {
+                  // A dismissed auto chip must not reappear on the next render.
+                  // The effect that adds it only runs when the selection or the
+                  // armed space changes, so simply removing it is enough — the
+                  // ref is what stops a re-add if something else re-triggers it.
+                  if (a.auto) dismissed.current = a.id;
+                  setAttached((prev) => prev.filter((x) => x.id !== a.id));
+                }}
               />
             ))}
           </div>
@@ -346,7 +542,11 @@ export function AiAgentPanel({
                 send();
               }
             }}
-            placeholder="Ask AI anything…"
+            /* The placeholder is the offer. With a space armed it spells out a
+               request that actually works — typing it verbatim builds the room
+               it describes — because "Ask AI anything" in front of a box you
+               just drew tells you nothing about what the box is for. */
+            placeholder={spacePrompt ?? "Ask AI anything…"}
             className="type-body max-h-28 w-full resize-none bg-transparent px-3 pb-1 pt-2.5 text-content outline-none placeholder:text-content-subtle focus-visible:ring-0 focus-visible:ring-offset-0"
           />
 
@@ -785,12 +985,30 @@ function EmptyState({
 
 /* -------------------------------------------------------------- attachments */
 
+/** What the chip is called, for the remove button's label. */
+function chipLabel(item: Attachment): string {
+  switch (item.kind) {
+    case "node":
+      return item.node.name;
+    case "space":
+    case "mention":
+      return item.label;
+    default:
+      return item.name;
+  }
+}
+
 function AttachmentChip({ item, onRemove }: { item: Attachment; onRemove: () => void }) {
   const inner =
     item.kind === "node" ? (
       <>
         <Icon name={typeIcon[item.node.type]} size={12} className="text-content-subtle" />
         <span className="type-label truncate">{item.node.name}</span>
+      </>
+    ) : item.kind === "space" ? (
+      <>
+        <Icon name="space" size={12} className="text-accent" />
+        <span className="type-label truncate">{item.label}</span>
       </>
     ) : item.kind === "mention" ? (
       <>
@@ -815,7 +1033,7 @@ function AttachmentChip({ item, onRemove }: { item: Attachment; onRemove: () => 
       <button
         type="button"
         onClick={onRemove}
-        aria-label={`Remove ${item.kind === "node" ? item.node.name : item.kind === "mention" ? item.label : item.name}`}
+        aria-label={`Remove ${chipLabel(item)}`}
         className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-content-subtle transition-colors hover:bg-glass/25 hover:text-content"
       >
         <Icon name="close" size={11} />
