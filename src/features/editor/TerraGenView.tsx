@@ -27,7 +27,7 @@ import { DispatchReview, orderChanges } from "./terragen-budget";
 import { AssetLibrary } from "./AssetLibrary";
 import type { Asset } from "./assets-data";
 import type { AssetStore } from "./useAssets";
-import { canTakeRole } from "./scene-types";
+import { isContentObject } from "./scene-types";
 import type { SceneApi } from "./useScene";
 import type { WorkOrderStore } from "./useWorkOrder";
 import {
@@ -534,7 +534,9 @@ export function TerraGenView({
              live on the scene rather than on the order, so they are counted
              here and handed over. */
           changes={orderChanges(order, {
-            objects: scene.objects.filter((o) => canTakeRole(o.source)).length,
+            // Containers aren't things in the frame — counting a group and the
+            // four crates inside it as five objects overstates the scene.
+            objects: scene.objects.filter((o) => isContentObject(o)).length,
             weatherSets,
           })}
           onCancel={() => setReviewing(false)}

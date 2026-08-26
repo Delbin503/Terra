@@ -32,10 +32,13 @@ import { ObjectPropertiesPanel, type SettingKey } from "./ObjectPropertiesPanel"
 import { SettingControl } from "./SettingControl";
 import { ObjectToolbar, type EditTab } from "./ObjectToolbar";
 import { ObjectTitle } from "./ObjectTitle";
+import { MarqueeSelect } from "./MarqueeSelect";
+import { GroupNameBar } from "./GroupNameBar";
+import { ContextMenu, IS_MAC, MOD, type MenuItem } from "./ContextMenu";
 import { ObjectInfoPanel } from "./ObjectInfoPanel";
 import { SceneLayersPanel } from "./SceneLayersPanel";
 import { PanelDock, DOCK_WIDTH } from "./panel-dock";
-import { SOURCE_LABEL, type SceneObject } from "./scene-types";
+import { objectTypeLabel, type SceneObject } from "./scene-types";
 import { CameraPreview } from "./CameraPreview";
 import { TerraGenView } from "./TerraGenView";
 import { useScene } from "./useScene";
@@ -145,6 +148,20 @@ export function EditorView({
    * the old floating panels so hard to reason about.
    */
   const [drawingSpace, setDrawingSpace] = useState(false);
+  /**
+   * The group whose name has never been typed.
+   *
+   * Carries the id it belongs to — not just a boolean — so a group made while
+   * the previous naming bar is still up can't be renamed by it, and the count so
+   * the bar can say what was just made. Cleared on commit or dismiss: a group
+   * you come back to later is renamed from the title or the layers panel like
+   * anything else.
+   */
+  const [namingGroup, setNamingGroup] = useState<{ id: string; name: string; count: number } | null>(
+    null
+  );
+  /** Where the marquee selection's menu was asked for, if it is open. */
+  const [marqueeMenu, setMarqueeMenu] = useState<{ x: number; y: number } | null>(null);
   /** Which of the focused space's three tiles is lit, if any. */
   const [volumeTab, setVolumeTab] = useState<VolumeTab | null>(null);
   /** Which row of the space inspector is open — and therefore which gizmo. */
@@ -580,6 +597,126 @@ export function EditorView({
 
   const selected = scene.selected;
   const focusedVolume = scene.selectedVolume;
+  const marquee = scene.selectedObjects;
+
+  /**
+   * Right-click over a marquee selection opens its menu.
+   *
+   * Bound to the CANVAS rather than to a React `onContextMenu` on a wrapper: the
+   * wrapper spans the whole editor, so a right-click on the layers panel or the
+   * inspector — both of which have menus of their own, or deliberately none —
+   * would have opened this one on top of them.
+   */
+  useEffect(() => {
+    if (marquee.length < 2) return;
+    const dom = cameraRef.current?.dom;
+    if (!dom) return;
+    const onMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      setMarqueeMenu({ x: e.clientX, y: e.clientY });
+    };
+    dom.addEventListener("contextmenu", onMenu);
+    return () => dom.removeEventListener("contextmenu", onMenu);
+  }, [marquee.length]);
+
+  // The menu belongs to the selection. Losing the selection — a click on empty
+  // space, a delete, a group — has to take the menu with it.
+  useEffect(() => {
+    if (marquee.length < 2) setMarqueeMenu(null);
+  }, [marquee.length]);
+
+  /**
+   * Collapse the current marquee into a group and hand it to the user to name.
+   *
+   * The default name is what the group would be called if they never typed
+   * anything, and it counts the groups that exist rather than the times this ran
+   * — otherwise deleting "Group 2" and grouping again would produce a second
+   * "Group 3" and no "Group 2".
+   */
+  const groupMarquee = () => {
+    const n = scene.objects.filter((o) => o.group).length + 1;
+    const count = marquee.length;
+    const fallback = `Group ${n}`;
+    const id = scene.group(marquee.map((o) => o.id), fallback);
+    if (id) setNamingGroup({ id, name: fallback, count });
+  };
+
+  /**
+   * The keys the marquee menu advertises.
+   *
+   * A menu that prints ⌘G beside an item and then does nothing when ⌘G is
+   * pressed is worse than a menu with no shortcut column. Bound at the window,
+   * because the selection was made in the viewport and nothing there holds
+   * focus — and skipped while a field does, where these are letters.
+   *
+   * ⇧⌘G is here rather than with the layers shortcuts because ungrouping is the
+   * inverse of the gesture that lives on this bar, and the two should be one
+   * keystroke apart in one place.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      const mod = IS_MAC ? e.metaKey : e.ctrlKey;
+      const key = e.key.toLowerCase();
+
+      if (mod && e.shiftKey && key === "g" && selected?.group) {
+        e.preventDefault();
+        scene.ungroup(selected.id);
+        return;
+      }
+      if (marquee.length < 2) return;
+      const ids = marquee.map((o) => o.id);
+      if (mod && key === "g") {
+        e.preventDefault();
+        groupMarquee();
+      } else if (mod && key === "c") {
+        e.preventDefault();
+        scene.copyMany(ids);
+      } else if (mod && key === "d") {
+        e.preventDefault();
+        scene.duplicateMany(ids);
+      } else if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        scene.removeMany(ids);
+      } else if (e.key === "Escape") {
+        scene.selectMany([]);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marquee, selected, scene]);
+
+  const marqueeItems: MenuItem[] = [
+    {
+      icon: "group-add",
+      label: `Group ${marquee.length} Objects`,
+      shortcut: `${MOD}G`,
+      run: groupMarquee,
+    },
+    { icon: "copy", label: "Copy Objects", shortcut: `${MOD}C`, run: () => scene.copyMany(marquee.map((o) => o.id)) },
+    {
+      icon: "paste",
+      label: "Paste Object",
+      shortcut: `${MOD}V`,
+      run: () => scene.paste(),
+      disabled: !scene.canPaste,
+    },
+    {
+      icon: "duplicate",
+      label: "Duplicate Objects",
+      shortcut: `${MOD}D`,
+      run: () => scene.duplicateMany(marquee.map((o) => o.id)),
+    },
+    {
+      icon: "trash",
+      label: `Delete ${marquee.length} Objects`,
+      shortcut: IS_MAC ? "⌫" : "Del",
+      run: () => scene.removeMany(marquee.map((o) => o.id)),
+      danger: true,
+    },
+  ];
 
   /**
    * Escape backs out of define mode.
@@ -971,17 +1108,24 @@ export function EditorView({
           />
         </div>
 
+        {/* Box select. Off while a space is being drawn — that gesture is also a
+            drag on the ground, and two things reading the same drag is one of
+            them getting it wrong. */}
+        <MarqueeSelect scene={scene} cameraRef={cameraRef} enabled={!drawingSpace} />
+
         {selected && (
           <ObjectTitle
             name={selected.name}
             dark={titleDark}
             role={selected.role}
-            typeLabel={SOURCE_LABEL[selected.source]}
+            typeLabel={objectTypeLabel(selected)}
             description={selected.description}
             insetLeft={leftInset}
             onRename={(name) => scene.update(selected.id, { name })}
             onBack={deselect}
-            onViewInfo={() => setInfoOpen(true)}
+            /* No info panel for a group — it has no file, no format and no tags,
+               so the ⓘ would open a page of blanks. */
+            onViewInfo={selected.group ? undefined : () => setInfoOpen(true)}
             onDelete={() => scene.remove(selected.id)}
           />
         )}
@@ -1192,6 +1336,68 @@ export function EditorView({
         </PanelDock>
       </div>
 
+      {/* WHAT A MARQUEE SELECTION LOOKS LIKE.
+          There is no title and no toolbar, because neither has a meaning for
+          eleven objects — a name field would have to rename all of them and a
+          Texture tab would have to paint all of them, which is what the GROUP
+          this bar offers to make is for. So the selection says how big it is and
+          offers the two things you can do with it as a set. */}
+      {marquee.length > 1 && !marqueeMenu && (
+        <div
+          data-ui="marquee-selection-bar"
+          className="pointer-events-none fixed bottom-6 left-1/2 z-30 -translate-x-1/2"
+          style={{ marginLeft: leftInset / 2 }}
+        >
+          <GlassBar ui="marquee-selection" shape="pill" className="pointer-events-auto h-11 gap-2.5 px-4">
+            <Icon name="group-add" size={16} className="shrink-0 text-content-muted" />
+            <span className="type-body text-content">{marquee.length} objects selected</span>
+            <button
+              type="button"
+              data-ui="marquee-group"
+              onClick={groupMarquee}
+              className="type-caption-strong ml-1 shrink-0 rounded-md border border-brand/50 bg-brand/15 px-2.5 py-1 text-brand-on-glass transition-colors hover:bg-brand/25"
+            >
+              Group
+            </button>
+            <button
+              type="button"
+              data-ui="marquee-clear"
+              aria-label="Clear selection"
+              onClick={() => scene.selectMany([])}
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-content-muted transition-colors hover:bg-glass/15 hover:text-content"
+            >
+              <Icon name="close" size={13} />
+            </button>
+          </GlassBar>
+        </div>
+      )}
+
+      {/* Naming, straight after grouping — see `GroupNameBar` for why this is a
+          bar and not the title's own rename. */}
+      {namingGroup && selected?.id === namingGroup.id && (
+        <GroupNameBar
+          name={namingGroup.name}
+          count={namingGroup.count}
+          insetLeft={leftInset}
+          onCommit={(name) => {
+            scene.update(namingGroup.id, { name });
+            setNamingGroup(null);
+          }}
+          onDismiss={() => setNamingGroup(null)}
+        />
+      )}
+
+      {marqueeMenu && marquee.length > 1 && (
+        <ContextMenu
+          ui="marquee-menu"
+          title={`${marquee.length} objects`}
+          items={marqueeItems}
+          x={marqueeMenu.x}
+          y={marqueeMenu.y}
+          onClose={() => setMarqueeMenu(null)}
+        />
+      )}
+
       {/* Define mode has to say so.
           The Space panel used to carry this sentence, and taking the panel away
           left a mode with no evidence it was on: the viewport looked exactly as
@@ -1257,9 +1463,14 @@ export function EditorView({
       )}
       {focusedVolume && volumeSetting && !volumeDragging && (
         <VolumeSettingControl
+          scene={scene}
           volume={focusedVolume}
           setting={volumeSetting}
+          seed={volumeSeed}
+          report={volumeReport}
           patch={(next) => scene.updateVolume(focusedVolume.id, next)}
+          onSeed={setVolumeSeed}
+          onReport={setVolumeReport}
           onClose={() => setVolumeSetting(null)}
         />
       )}
@@ -1274,11 +1485,9 @@ export function EditorView({
             tab={volumeTab}
             active={volumeSetting}
             seed={volumeSeed}
-            report={volumeReport}
             /* Toggling, like the object list: clicking the open row closes its
                control and disarms its gizmo, leaving the space selected. */
             onSelect={(k) => setVolumeSetting((cur) => (cur === k ? null : k))}
-            onSeed={setVolumeSeed}
             onReport={setVolumeReport}
           />
         </div>

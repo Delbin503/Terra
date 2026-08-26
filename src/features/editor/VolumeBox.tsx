@@ -275,8 +275,6 @@ type Grip =
   | { kind: "face"; axis: 0 | 2; sign: -1 | 1 }
   | { kind: "corner"; sx: -1 | 1; sz: -1 | 1 }
   | { kind: "height" }
-  /** One arm of the three-way translate gizmo. */
-  | { kind: "axis"; axis: 0 | 1 | 2 }
   /** The ring that turns the room about its own centre. */
   | { kind: "yaw" };
 
@@ -346,12 +344,15 @@ export function VolumeHandles({
 
   return (
     <>
-      {/* The translate gizmo and the turn ring stand in WORLD space, unturned.
-          Move reads world X/Y/Z in the panel and the arrows have to agree with
-          it; a ring that rotated with the thing it rotates would chase the
-          pointer round as you dragged it. Only the resize grips belong to the
-          room's own frame, which is why they alone sit in the turned group. */}
-      {gizmo === "move" && <TranslateGizmo volume={volume} onResize={onResize} onDragging={onDragging} />}
+      {/* The turn ring stands in WORLD space, unturned: a ring that rotated
+          with the thing it rotates would chase the pointer round as you dragged
+          it. Only the resize grips belong to the room's own frame, which is why
+          they alone sit in the turned group.
+
+          MOVE HAS NO HANDLES HERE. It is the editor's own `TransformControls`,
+          mounted by `SceneCanvas` on a proxy at the room's centre — see
+          `VolumeMoveGizmo`. This component still renders for `move` because the
+          dimension readout above the box belongs to every gizmo. */}
       {gizmo === "rotate" && <YawRing volume={volume} onResize={onResize} onDragging={onDragging} />}
     <group
       position={[volume.center[0], 0, volume.center[2]]}
@@ -374,74 +375,6 @@ export function VolumeHandles({
       <VolumeReadout volume={volume} />
     </group>
     </>
-  );
-}
-
-/**
- * The line an arm travels along, drawn back to the volume's centre.
- *
- * A child of the cone, so it inherits the cone's rotation and needs no axis
- * maths of its own — it simply runs back down the local −Y the cone points
- * along.
- */
-function ArmStalk({ axis, reach, color }: { axis: 0 | 1 | 2; reach: number; color: string }) {
-  void axis;
-  return (
-    <mesh position={[0, -reach / 2, 0]} raycast={() => null} renderOrder={5}>
-      <cylinderGeometry args={[reach * 0.014, reach * 0.014, reach, 8]} />
-      <meshBasicMaterial color={color} depthTest={false} />
-    </mesh>
-  );
-}
-
-/* ------------------------------------------------------------- translate */
-
-/**
- * Reach of each arm, as a fraction of the room's shorter side.
- *
- * Kept well under a half. At 0.62 the arrows on an 8 m room reached almost to
- * its walls and read as a compass rose laid over the floor rather than as a
- * handle attached to its centre — the gizmo has to look like it belongs to the
- * middle of the box, not like it measures it.
- */
-const ARM = 0.3;
-
-/**
- * The three-way translate gizmo — one arm per world axis, at the floor centre.
- *
- * World axes, not the room's own: the Move fields in the inspector read world
- * X / Y / Z, and a gizmo that disagreed with the numbers beside it would be a
- * gizmo you stop trusting.
- */
-function TranslateGizmo({
-  volume,
-  onResize,
-  onDragging,
-}: {
-  volume: SceneVolume;
-  onResize: (patch: Partial<SceneVolume>) => void;
-  onDragging?: (dragging: boolean) => void;
-}) {
-  const reach = Math.max(0.9, Math.min(volume.size[0], volume.size[2]) * ARM);
-  const at: Vec3 = [volume.center[0], volume.center[1], volume.center[2]];
-  return (
-    <group>
-      {([0, 1, 2] as const).map((axis) => (
-        <VolumeGrip
-          key={axis}
-          volume={volume}
-          at={[
-            at[0] + (axis === 0 ? reach : 0),
-            at[1] + (axis === 1 ? reach : 0),
-            at[2] + (axis === 2 ? reach : 0),
-          ]}
-          grip={{ kind: "axis", axis }}
-          reach={reach}
-          onResize={onResize}
-          onDragging={onDragging}
-        />
-      ))}
-    </group>
   );
 }
 
@@ -527,7 +460,7 @@ function VolumeGrip({
   const resolve = (ray: Ray): Vector3 | null => {
     // The Y arm slides up and down, so it needs the same viewer-facing vertical
     // plane the height grip uses. Everything else lives on the floor.
-    if (grip.kind === "height" || (grip.kind === "axis" && grip.axis === 1)) {
+    if (grip.kind === "height") {
       // A vertical plane through the box, turned to face the viewer — so
       // dragging up is dragging up from wherever you happen to be orbiting.
       normal.set(camera.position.x - volume.center[0], 0, camera.position.z - volume.center[2]);
@@ -593,18 +526,6 @@ function VolumeGrip({
       return;
     }
 
-    if (grip.kind === "axis") {
-      // One axis moves; the other two keep the value they started the drag
-      // with. Grab-relative, so the room doesn't jump its own centre onto the
-      // cursor the instant you touch an arm.
-      const next = [...base.center] as Vec3;
-      const from = grip.axis === 0 ? grab.current[0] : grip.axis === 1 ? grab.current[3] : grab.current[2];
-      const to = grip.axis === 0 ? world.x : grip.axis === 1 ? world.y : world.z;
-      next[grip.axis] = base.center[grip.axis] + (to - from);
-      onResize({ center: next });
-      return;
-    }
-
     if (grip.kind === "yaw") {
       // The angle the pointer stands at around the centre, minus the angle it
       // stood at when grabbed — so the handle stays under the cursor instead of
@@ -635,31 +556,16 @@ function VolumeGrip({
   };
 
   const lit = dragging || hover;
-  // The translate arms wear the standard axis colours — the same red/green/blue
-  // every other transform in this editor uses — so an arm's direction is
-  // readable without moving it. Everything else stays the volume's own indigo.
-  const ink: string =
-    grip.kind === "axis"
-      ? [AXIS.X, AXIS.Y, AXIS.Z][grip.axis].css
-      : grip.kind === "yaw"
-        ? AXIS.Y.css
-        : VOLUME.handle;
+  // The turn ring wears the Y axis's own green — the same green every other
+  // rotation in this editor turns about. The resize grips stay the volume's
+  // indigo, because a face is the room's, not an axis's.
+  const ink: string = grip.kind === "yaw" ? AXIS.Y.css : VOLUME.handle;
 
   return (
     <mesh
       position={at}
-      // A ring reads as a turn only when it lies in the plane it turns in, and
-      // an arm has to point down its own axis — a cylinder is built along Y, so
-      // X and Z arms are that cylinder tipped a quarter turn.
-      rotation={
-        grip.kind === "yaw"
-          ? [Math.PI / 2, 0, 0]
-          : grip.kind === "axis" && grip.axis === 0
-            ? [0, 0, -Math.PI / 2]
-            : grip.kind === "axis" && grip.axis === 2
-              ? [Math.PI / 2, 0, 0]
-              : [0, 0, 0]
-      }
+      // A ring reads as a turn only when it lies in the plane it turns in.
+      rotation={grip.kind === "yaw" ? [Math.PI / 2, 0, 0] : [0, 0, 0]}
       renderOrder={6}
       onPointerOver={(e) => {
         e.stopPropagation();
@@ -695,17 +601,9 @@ function VolumeGrip({
       }}
     >
       {/* Each gesture gets its own shape, so what a grip does is legible before
-          you touch it: a cube pushes a face, a ball lifts, a flat pad slides,
-          a ring turns. */}
-      {grip.kind === "axis" && (
-        <ArmStalk axis={grip.axis} reach={reach} color={ink} />
-      )}
+          you touch it: a cube pushes a face, a ball lifts, a ring turns. */}
       {grip.kind === "height" ? (
         <sphereGeometry args={[size * 0.7, 16, 12]} />
-      ) : grip.kind === "axis" ? (
-        // A cone on a stalk, both in one mesh's worth of hit area: the cone is
-        // the grab target and the stalk is the line it travels.
-        <coneGeometry args={[size * 0.62, size * 1.9, 14]} />
       ) : grip.kind === "yaw" ? (
         // A ring, not a band. At twice this tube the green swallowed the corner
         // of the room it was drawn around.

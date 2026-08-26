@@ -87,6 +87,8 @@ import {
   ClipboardPaste,
   CopyPlus,
   Group,
+  Ungroup,
+  BoxSelect,
   ListFilter,
   GripHorizontal,
   Crown,
@@ -227,6 +229,10 @@ export const iconRegistry = {
   // Scene layers (tree rows + their context menu)
   /** a container object — children nest inside it */
   group: Group,
+  /** collapse a selection into a container */
+  "group-add": BoxSelect,
+  /** dissolve a container, keeping its contents */
+  ungroup: Ungroup,
   /** the object is rendered in the viewport */
   visible: Eye,
   /** the object is excluded from the viewport */

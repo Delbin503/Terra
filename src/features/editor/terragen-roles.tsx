@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui";
 import { Pill } from "./ui";
-import { canTakeRole, ROLE_BADGE, ROLE_CHIP, ROLE_DOT, ROLE_HINT, type ObjectRole } from "./scene-types";
+import { isContentObject, ROLE_BADGE, ROLE_CHIP, ROLE_DOT, ROLE_HINT, type ObjectRole } from "./scene-types";
 import type { SceneApi } from "./useScene";
 import type { SceneRoles } from "./work-order";
 import { Cost, Group, Note, PickerBar } from "./terragen-parts";
@@ -39,7 +39,7 @@ export function RolesSection({
   const [picked, setPicked] = useState<string[]>([]);
 
   const assignable = useMemo(
-    () => scene.objects.filter((o) => canTakeRole(o.source)),
+    () => scene.objects.filter((o) => isContentObject(o)),
     [scene.objects]
   );
 

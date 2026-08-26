@@ -4,7 +4,7 @@ import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui";
 import { NumberInput } from "./ui";
 import { AssetThumb } from "./AssetThumb";
-import { FactorCard } from "./controls-ui";
+import { CountField } from "./controls-ui";
 import type { Asset } from "./assets-data";
 import {
   ANNOTATIONS,
@@ -18,7 +18,7 @@ import type { WorkOrderStore } from "./useWorkOrder";
 import { Cost, Group, Note, InSceneChip, ChipCheck } from "./terragen-parts";
 import { arrange, makeRule, newSeed, seedFor } from "./arrange";
 import { describeVolume } from "./scene-volume";
-import { canTakeRole } from "./scene-types";
+import { isContentObject } from "./scene-types";
 import type { SceneApi } from "./useScene";
 
 /**
@@ -220,13 +220,13 @@ function ArrangementEditor({ order, store, scene }: EditorProps) {
   const movable = useMemo(
     () =>
       scene.objects.filter(
-        (o) => canTakeRole(o.source) && o.role !== "master" && !o.locked && !o.hidden
+        (o) => isContentObject(o) && o.role !== "master" && !o.locked && !o.hidden
       ),
     [scene.objects]
   );
 
   const fixed = useMemo(
-    () => scene.objects.filter((o) => canTakeRole(o.source) && !movable.includes(o)),
+    () => scene.objects.filter((o) => isContentObject(o) && !movable.includes(o)),
     [scene.objects, movable]
   );
 
@@ -273,13 +273,15 @@ function ArrangementEditor({ order, store, scene }: EditorProps) {
         {/* The count IS the switch. At 1 the axis multiplies nothing and the
             run renders the room as posed; from 2 it becomes a sweep. See
             `useWorkOrder.patch` for why there is no separate on/off. */}
-        <FactorCard
+        <CountField
           label="Arrangements"
+          /* `terragen-arrangements`, NOT `terragen-arrangement-count`: the
+             `terragen-arrangement-*` prefix belongs to the preview chips below,
+             and a stepper sitting inside it would answer their selector. */
+          ui="terragen-arrangements"
           value={l.count}
           min={1}
           max={24}
-          step={1}
-          precision={0}
           onChange={(n) => store.patch("layouts", { count: n })}
         />
       </Group>

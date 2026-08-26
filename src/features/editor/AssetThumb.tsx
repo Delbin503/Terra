@@ -1,5 +1,5 @@
 import type { AssetType } from "./assets-data";
-import { THUMB } from "./scene-palette";
+import { THUMB, VOLUME } from "./scene-palette";
 import { PlaceholderImage } from "./PlaceholderImage";
 
 const shift = (h: number, by: number) => (h + by) % 360;
@@ -151,5 +151,56 @@ function MeshMotif() {
         <polygon points="74,58 86,44 86,72 74,86" fill={line} fillOpacity="0.05" />
       </g>
     </>
+  );
+}
+
+/**
+ * The Space tile's artwork.
+ *
+ * NOT AN `AssetThumb`. A space has no file, no seed and no photograph — there
+ * is nothing to preview — so it gets the same treatment the camera rig does:
+ * a diagram of what the thing IS. Same studio backdrop and the same line
+ * weights as `MeshMotif`, in the volume's own indigo rather than white, because
+ * that is the colour the box will be the moment it lands in the viewport.
+ */
+export function SpaceThumb() {
+  const line = "hsl(0 0% 100%)";
+  return (
+    <svg
+      viewBox="0 0 120 120"
+      preserveAspectRatio="xMidYMid slice"
+      className="h-full w-full"
+      role="img"
+    >
+      <defs>
+        <linearGradient id="space-sky" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="hsl(248 34% 30%)" />
+          <stop offset="1" stopColor="hsl(248 28% 16%)" />
+        </linearGradient>
+      </defs>
+      <rect width="120" height="120" fill="url(#space-sky)" />
+      <rect width="120" height="120" fill="#000" opacity={THUMB.meshBackdrop} />
+
+      {/* the ground it is drawn on */}
+      <g stroke={line} strokeOpacity="0.12" strokeWidth="0.8">
+        <line x1="0" y1="88" x2="120" y2="88" />
+        <line x1="0" y1="102" x2="120" y2="102" />
+        <line x1="0" y1="116" x2="120" y2="116" />
+      </g>
+
+      {/* the footprint, and the room standing on it */}
+      <polygon points="24,84 60,68 96,84 60,100" fill={VOLUME.floor} fillOpacity="0.22" />
+      <g stroke={VOLUME.edge} strokeWidth="1.6" fill="none" strokeLinejoin="round">
+        <polygon points="24,84 60,68 96,84 60,100" strokeOpacity="0.9" />
+        <polygon points="24,48 60,32 96,48 60,64" strokeOpacity="0.55" />
+        <path d="M24 84V48M96 84V48M60 100V64" strokeOpacity="0.5" />
+      </g>
+
+      {/* two things inside it — the whole point of a room */}
+      <g fill={line} fillOpacity="0.5">
+        <rect x="46" y="74" width="11" height="9" rx="1.5" />
+        <rect x="64" y="79" width="8" height="7" rx="1.5" fillOpacity="0.35" />
+      </g>
+    </svg>
   );
 }

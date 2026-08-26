@@ -4,6 +4,7 @@ import { GlassPanel, GlassGhostButton } from "@/components/glass";
 import { Button } from "@/components/ui";
 import { Icon, type IconName } from "@/components/icons";
 import { AssetCard } from "./AssetCard";
+import { SpaceThumb } from "./AssetThumb";
 import { AssetActionMenu, type MenuAnchor } from "./AssetActionMenu";
 import { AssetDetailsPanel } from "./AssetDetailsPanel";
 import { FolderPicker } from "./FolderPicker";
@@ -1032,29 +1033,55 @@ function SortMenu({
 /**
  * The Define-a-space tile.
  *
- * Drawn as a card so it sits in the same grid as everything else, but with the
- * accent rather than a thumbnail: it makes something rather than placing
- * something that already exists, and a fake preview of an empty box would be a
- * picture of nothing.
+ * BUILT LIKE AN `AssetCard`, DELIBERATELY. It is not an Asset — no file, no
+ * thumbnail, no type — but it sits in the same grid as things that are, and a
+ * card with its own proportions, its own corner radius and a label under the
+ * picture instead of over it read as a piece of chrome that had landed in the
+ * library by mistake. Same square, same radius, same ring, same lift on hover,
+ * same badge in the top-right corner, same scrim carrying the name: the tile
+ * differs from its neighbours in what it depicts, which is the only way it
+ * should differ.
  */
 function SpaceTile({ onPick }: { onPick: () => void }) {
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       data-ui="asset-card-space"
+      aria-label="Space — define an area"
       onClick={onPick}
-      className="group flex flex-col overflow-hidden rounded-xl border border-accent/40 bg-accent/10 text-left transition-colors hover:border-accent/70 hover:bg-accent/16"
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onPick();
+        }
+      }}
+      className={cn(
+        "group relative aspect-square cursor-pointer overflow-hidden rounded-2xl text-left outline-none transition-transform",
+        "ring-1 ring-glass/10 hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-ring"
+      )}
     >
-      <span className="grid aspect-[4/3] w-full place-items-center text-accent">
-        <Icon name="space" size={34} strokeWidth={1.4} />
+      <div className="absolute inset-0">
+        <SpaceThumb />
+      </div>
+
+      {/* The same badge slot the type badge uses, saying the same kind of thing
+          the rig's "Rig" says: what this is for, not what it is made of. */}
+      <span
+        title="Utility · define an area"
+        className="absolute right-2 top-2 flex h-6 items-center gap-1 rounded-md bg-black/45 px-1.5 text-white/90 backdrop-blur-sm"
+      >
+        <Icon name="space" size={12} strokeWidth={2} />
+        <span className="type-caption-strong leading-none">Utility</span>
       </span>
-      <span className="border-t border-accent/25 px-2.5 py-2">
-        <span className="type-body-strong block truncate text-content">Space</span>
-        <span className="type-caption block truncate text-content-subtle">
-          Define an area · Utility
+
+      <span className="absolute inset-x-0 bottom-0 scrim-strong p-2 pt-6">
+        <span className="type-label block truncate text-white">Space</span>
+        <span className="type-caption mt-0.5 hidden truncate text-white/70 group-hover:block">
+          Define an area
         </span>
       </span>
-    </button>
+    </div>
   );
 }
 

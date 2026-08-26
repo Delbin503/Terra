@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/icons";
 import { AXIS, type Axis } from "./scene-palette";
@@ -61,6 +62,122 @@ export function AxisSlider({
         {display}
       </div>
     </div>
+  );
+}
+
+/**
+ * A COUNT — stepped, or typed.
+ *
+ * NOT A SLIDER, and the difference is the kind of number. A slider is right for
+ * a factor you judge by eye: roughness, brightness, a distance you are watching
+ * change. A count of renders is not judged by eye — it is DECIDED, usually as a
+ * round number somebody already has in mind, and it multiplies the bill. On a
+ * 1–24 track each step was six pixels wide, so "I want twelve" meant dragging
+ * and squinting at the readout to see whether it had landed on 11.
+ *
+ * So: a minus, the number itself, a plus — and the number is an input, because
+ * the fastest way to ask for 16 is to type 16.
+ *
+ * WHY IT KEEPS A DRAFT. Parsing straight through to `onChange` makes an empty
+ * field impossible: clearing it to type a new number parses "" as NaN, the
+ * value snaps back to the minimum, and the digit you type next lands after a 1.
+ * The draft holds what you have typed; the value commits when it parses, and
+ * the field re-reads from the value on blur — so a field left empty or holding
+ * something senseless returns to what the order actually says.
+ */
+export function CountField({
+  label,
+  value,
+  onChange,
+  min = 1,
+  max = 99,
+  hint,
+  ui,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  min?: number;
+  max?: number;
+  hint?: string;
+  ui?: string;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  // Follow the value when it changes from somewhere else — a step button, an
+  // undo, a fresh draft order.
+  useEffect(() => setDraft(String(value)), [value]);
+
+  const clamp = (n: number) => Math.min(max, Math.max(min, Math.round(n)));
+  const name = ui ?? label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+  const step = (by: number) => onChange(clamp(value + by));
+
+  return (
+    <div>
+      <span className="type-label mb-2 block text-content-muted">{label}</span>
+      <div className="flex items-stretch gap-2">
+        <StepButton
+          ui={`${name}-down`}
+          icon="step-down"
+          label={`Decrease ${label}`}
+          disabled={value <= min}
+          onClick={() => step(-1)}
+        />
+        <label className="field-well flex min-w-0 grow items-center rounded-lg border px-2.5 py-1.5">
+          <input
+            aria-label={label}
+            data-ui={`${name}-input`}
+            value={draft}
+            inputMode="numeric"
+            onChange={(e) => {
+              const raw = e.target.value.replace(/[^0-9]/g, "");
+              setDraft(raw);
+              const n = parseInt(raw, 10);
+              if (Number.isFinite(n)) onChange(clamp(n));
+            }}
+            onBlur={() => setDraft(String(value))}
+            className="type-numeric min-w-0 grow bg-transparent text-center text-content outline-none"
+          />
+        </label>
+        <StepButton
+          ui={`${name}-up`}
+          icon="step-up"
+          label={`Increase ${label}`}
+          disabled={value >= max}
+          onClick={() => step(1)}
+        />
+      </div>
+      {hint && <p className="type-caption mt-1.5 text-content-subtle">{hint}</p>}
+    </div>
+  );
+}
+
+/** One end of a stepper. Square, so the pair reads as brackets around the
+ *  number rather than as two buttons that happen to sit beside it. */
+function StepButton({
+  ui,
+  icon,
+  label,
+  disabled,
+  onClick,
+}: {
+  ui: string;
+  icon: IconName;
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-ui={ui}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="grid w-10 shrink-0 place-items-center rounded-lg border border-glass/15 bg-glass/8 text-content-muted transition-colors hover:border-glass/30 hover:text-content disabled:opacity-35 disabled:hover:border-glass/15 disabled:hover:text-content-muted"
+    >
+      <Icon name={icon} size={15} />
+    </button>
   );
 }
 

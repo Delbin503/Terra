@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { GlassPanel, GlassGhostButton } from "@/components/glass";
+import { ContextMenu, IS_MAC, MOD, type MenuItem } from "./ContextMenu";
 import { DockPanel } from "./panel-dock";
 import { Button } from "@/components/ui";
 import { Icon, type IconName } from "@/components/icons";
@@ -52,10 +52,6 @@ const ALL_TYPES: AssetType[] = ["mesh", "skybox", "environment", "image", "video
  *  enough that a 300px panel still fits a name at depth 4. */
 const INDENT = 14;
 
-/** The editor's content line and bottom gutter — see EditorView's rail comment. */
-const IS_MAC =
-  typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
-const MOD = IS_MAC ? "⌘" : "Ctrl+";
 
 export function SceneLayersPanel({
   scene,
@@ -171,6 +167,7 @@ export function SceneLayersPanel({
       const o = object(id);
       if (o) scene.setRole(id, o.role === role ? "none" : role);
     },
+    ungroup: (id: string) => scene.ungroup(id),
     remove: (id: string) => scene.remove(id),
   };
 
@@ -414,13 +411,24 @@ function LayerRow({
   onContextMenu: (x: number, y: number) => void;
 }) {
   const o = node.object;
-  const isGroup = node.children.length > 0;
+  /**
+   * A CONTAINER, whether or not it currently contains anything.
+   *
+   * It used to be `children.length > 0`, which was the only test available while
+   * nothing created groups: a row with children under it was a group by
+   * definition. Now that grouping is real the two questions have come apart — an
+   * emptied group is still a group, and it must keep its own icon and its own
+   * disclosure slot rather than turning into a mesh row the moment its last
+   * child is dragged out or deleted.
+   */
+  const isGroup = o.group === true || node.children.length > 0;
+  const canOpen = node.children.length > 0;
 
   return (
     <div
       role="treeitem"
       aria-selected={selected}
-      aria-expanded={isGroup ? !collapsed : undefined}
+      aria-expanded={canOpen ? !collapsed : undefined}
       data-ui={`scene-layer-${o.id}`}
       onClick={onSelect}
       /* Double-click renames — the gesture every layers panel uses, and the
@@ -447,7 +455,7 @@ function LayerRow({
     >
       {/* Disclosure — a fixed slot even when there's nothing to disclose, so
           names line up down the column instead of stepping in and out. */}
-      {isGroup ? (
+      {canOpen ? (
         <button
           type="button"
           aria-label={collapsed ? `Expand ${o.name}` : `Collapse ${o.name}`}
@@ -599,20 +607,11 @@ function RenameField({
 
 /* ----------------------------------------------------------- context menu */
 
-interface MenuItem {
-  icon: IconName;
-  label: string;
-  /** the key that does the same thing, when there is one */
-  shortcut?: string;
-  run: () => void;
-  disabled?: boolean;
-  danger?: boolean;
-}
-
 /**
  * The row's right-click menu — the object operations that have nowhere else to
- * live. Rendered fixed at the cursor and clamped to the viewport so a row near
- * the bottom of the panel doesn't open a menu off-screen.
+ * live. The menu CHROME is `ContextMenu`, shared with the viewport's marquee
+ * menu; what is left here is the item list, which is the only part that is
+ * actually about layers.
  */
 function LayerContextMenu({
   object,
@@ -639,6 +638,7 @@ function LayerContextMenu({
     toggleHidden: (id: string) => void;
     toggleLocked: (id: string) => void;
     setRole: (id: string, role: ObjectRole) => void;
+    ungroup: (id: string) => void;
     remove: (id: string) => void;
   };
 }) {
@@ -648,128 +648,107 @@ function LayerContextMenu({
    * selected would be a menu that acts on something you can't see from where
    * you clicked.
    */
-  const items: MenuItem[] = object === null
-    ? ([
-        {
-          icon: "paste",
-          label: "Paste Object",
-          shortcut: `${MOD}V`,
-          run: () => actions.paste(),
-          disabled: !canPaste,
-        },
-        { icon: "assets", label: "Browse Assets", run: onBrowseAssets },
-      ] as MenuItem[])
-    : buildItems(object);
-
-  function buildItems(o: SceneObject): MenuItem[] {
-  const object = o;
-  const id = object.id;
-  return [
-    { icon: "edit", label: "Rename", shortcut: "F2", run: () => actions.rename(id) },
-    { icon: "info", label: "View Info", shortcut: "I", run: () => actions.viewInfo(id) },
-    { icon: "copy", label: "Copy Object", shortcut: `${MOD}C`, run: () => actions.copy(id) },
-    {
-      icon: "paste",
-      label: "Paste Object",
-      shortcut: `${MOD}V`,
-      run: () => actions.paste(),
-      disabled: !canPaste,
-    },
-    {
-      icon: "duplicate",
-      label: "Duplicate Object",
-      shortcut: `${MOD}D`,
-      run: () => actions.duplicate(id),
-    },
-    {
-      icon: object.hidden ? "visible" : "hidden",
-      label: object.hidden ? "Show Object" : "Hide Object",
-      shortcut: "⇧H",
-      run: () => actions.toggleHidden(id),
-    },
-    {
-      icon: object.locked ? "unlock" : "lock",
-      label: object.locked ? "Unlock Object" : "Lock Object",
-      run: () => actions.toggleLocked(id),
-    },
-    // Master only. Distractor and Background are set where they're reasoned
-    // about — the role step in the Work Order, where you're deciding what the
-    // dataset contains — and three role rows made this menu long enough that
-    // the operations people actually right-click for were below the fold.
-    // Cameras and HDRIs are skipped entirely: neither can take a role.
-    ...(canTakeRole(object.source)
+  const items: MenuItem[] =
+    object === null
       ? ([
           {
-            icon: "master",
-            label: `${object.role === "master" ? "Unmark" : "Mark"} as Master Object`,
-            shortcut: `${MOD}M`,
-            run: () => actions.setRole(id, "master"),
+            icon: "paste",
+            label: "Paste Object",
+            shortcut: `${MOD}V`,
+            run: () => actions.paste(),
+            disabled: !canPaste,
           },
+          { icon: "assets", label: "Browse Assets", run: onBrowseAssets },
         ] as MenuItem[])
-      : []),
-    {
-      icon: "trash",
-      label: "Delete Object",
-      shortcut: IS_MAC ? "⌫" : "Del",
-      run: () => actions.remove(id),
-      danger: true,
-    },
-  ];
+      : buildItems(object);
+
+  function buildItems(o: SceneObject): MenuItem[] {
+    const id = o.id;
+    const noun = o.group ? "Group" : "Object";
+    return [
+      { icon: "edit", label: "Rename", shortcut: "F2", run: () => actions.rename(id) },
+      // A group has no asset behind it — no file, no format, no tags — so there
+      // is no info panel for the ⓘ to open.
+      ...(o.group
+        ? []
+        : ([
+            { icon: "info", label: "View Info", shortcut: "I", run: () => actions.viewInfo(id) },
+          ] as MenuItem[])),
+      { icon: "copy", label: `Copy ${noun}`, shortcut: `${MOD}C`, run: () => actions.copy(id) },
+      {
+        icon: "paste",
+        label: "Paste Object",
+        shortcut: `${MOD}V`,
+        run: () => actions.paste(),
+        disabled: !canPaste,
+      },
+      {
+        icon: "duplicate",
+        label: `Duplicate ${noun}`,
+        shortcut: `${MOD}D`,
+        run: () => actions.duplicate(id),
+      },
+      // Ungroup sits with the other structural operations rather than beside
+      // Delete: dissolving a group keeps everything that was in it, and a row
+      // next to the red one reads like it destroys something.
+      ...(o.group
+        ? ([
+            {
+              icon: "ungroup",
+              label: "Ungroup",
+              shortcut: `⇧${MOD}G`,
+              run: () => actions.ungroup(id),
+            },
+          ] as MenuItem[])
+        : []),
+      {
+        icon: o.hidden ? "visible" : "hidden",
+        label: o.hidden ? `Show ${noun}` : `Hide ${noun}`,
+        shortcut: "⇧H",
+        run: () => actions.toggleHidden(id),
+      },
+      {
+        icon: o.locked ? "unlock" : "lock",
+        label: o.locked ? `Unlock ${noun}` : `Lock ${noun}`,
+        run: () => actions.toggleLocked(id),
+      },
+      // Master only. Distractor and Background are set where they're reasoned
+      // about — the role step in the Work Order, where you're deciding what the
+      // dataset contains — and three role rows made this menu long enough that
+      // the operations people actually right-click for were below the fold.
+      // Cameras and HDRIs are skipped entirely: neither can take a role.
+      // A GROUP CAN. The rig frames whatever the master is, and a group's
+      // position is the centre of what it holds, so "these eleven crates are the
+      // subject" is a sentence the capture plan can actually execute.
+      ...(canTakeRole(o.source)
+        ? ([
+            {
+              icon: "master",
+              label: `${o.role === "master" ? "Unmark" : "Mark"} as Master ${noun}`,
+              shortcut: `${MOD}M`,
+              run: () => actions.setRole(id, "master"),
+            },
+          ] as MenuItem[])
+        : []),
+      {
+        icon: "trash",
+        label: `Delete ${noun}`,
+        shortcut: IS_MAC ? "⌫" : "Del",
+        run: () => actions.remove(id),
+        danger: true,
+      },
+    ];
   }
 
-  // Height tracks the row count so the clamp doesn't reserve space that isn't
-  // used — the same approach as the asset card's ⋮ menu.
-  const height = items.length * 34 + 20;
-  const left = Math.min(Math.max(x, 8), window.innerWidth - 248);
-  const top = Math.min(Math.max(y, 8), window.innerHeight - height - 8);
-
-  /**
-   * PORTALLED TO THE BODY, and it has to be.
-   *
-   * The menu is `position: fixed`, but the panel it was rendered inside carries
-   * `backdrop-filter` — which makes that panel the CONTAINING BLOCK for fixed
-   * descendants. So `left: 639px` was measured from the panel's left edge, not
-   * the viewport's, and the menu landed at x≈1207 on a 903px screen; the dock's
-   * two `overflow: auto` ancestors then clipped whatever was left. It opened
-   * every time and was never once visible.
-   */
-  return createPortal(
-    <>
-      <div className="pointer-events-auto fixed inset-0 z-40" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
-      <GlassPanel
-        ui="scene-layer-menu"
-        thickness="overlay"
-        role="menu"
-        style={{ left, top }}
-        className="pointer-events-auto fixed z-50 w-60 !rounded-2xl p-1.5"
-      >
-        <p className="type-eyebrow truncate px-2.5 pb-1.5 pt-1 text-content-subtle">Setting</p>
-        {items.map((it) => (
-          <button
-            key={it.label}
-            type="button"
-            role="menuitem"
-            disabled={it.disabled}
-            data-ui={`scene-layer-action-${it.label.toLowerCase().replace(/\s+/g, "-")}`}
-            onClick={() => {
-              it.run();
-              onClose();
-            }}
-            className={cn(
-              "type-body flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors disabled:opacity-35 disabled:hover:bg-transparent",
-              it.danger
-                ? "mt-1 border-t border-glass/10 pt-2 text-danger hover:bg-danger/10"
-                : "text-content-muted hover:bg-glass/10 hover:text-content"
-            )}
-          >
-            <Icon name={it.icon} size={15} className="shrink-0" />
-            <span className="min-w-0 flex-1 truncate text-left">{it.label}</span>
-            <kbd className="type-caption shrink-0 font-sans text-content-subtle">{it.shortcut}</kbd>
-          </button>
-        ))}
-      </GlassPanel>
-    </>,
-    document.body
+  return (
+    <ContextMenu
+      ui="scene-layer-menu"
+      title={object?.group ? "Group" : "Setting"}
+      items={items}
+      x={x}
+      y={y}
+      onClose={onClose}
+    />
   );
 }
 

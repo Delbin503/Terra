@@ -13,6 +13,7 @@ import {
   type SceneVolume,
   type Vec3,
 } from "./scene-volume";
+import { isContentObject } from "./scene-types";
 import type { VolumeGizmo } from "./VolumeBox";
 import type { SceneApi } from "./useScene";
 
@@ -30,14 +31,23 @@ import type { SceneApi } from "./useScene";
  * second title component that stops matching.
  */
 
-export type VolumeTab = "objects" | "containment" | "contents";
+export type VolumeTab = "objects" | "contents";
 
-/** The first tile is "Objects" for the same reason an object's is: it is where
- *  the transform lives, and a space and a mesh should keep theirs in the same
- *  place under the same word. */
+/**
+ * The first tile is "Objects" for the same reason an object's is: it is where
+ * the transform lives, and a space and a mesh should keep theirs in the same
+ * place under the same word.
+ *
+ * THERE IS NO CONTAINMENT TILE. It held three settings and only one of them was
+ * ever a decision: "keep inside" is the rule the room exists to enforce, and it
+ * belongs beside the count of what is currently inside — so it moved into
+ * Contents, which is the panel that answers the question it changes. Walls and
+ * edge margin kept their defaults; they described the drawing rather than the
+ * rule, and a tile carrying one live control and two garnishes is a tile that
+ * makes the room look more configurable than it is.
+ */
 const TABS: { id: VolumeTab; icon: IconName; label: string }[] = [
   { id: "objects", icon: "input-3d", label: "Objects" },
-  { id: "containment", icon: "space", label: "Containment" },
   { id: "contents", icon: "scene", label: "Contents" },
 ];
 
@@ -77,7 +87,15 @@ export function VolumeToolbar({
           onClick={() => onTab(t.id)}
           className={cn(
             "type-label glass glass-interactive flex min-w-[92px] flex-col items-center gap-1 !rounded-2xl px-4 py-2.5",
-            tab === t.id ? "text-content" : "text-content-muted"
+            // The SAME lit state an object's tiles use — `glass-role` tints the
+            // pane itself rather than laying a background colour over the glass.
+            // Ink alone was the difference between muted and full-strength
+            // white on a photographic backdrop, which is no difference at all:
+            // you could not tell which panel the bottom-right column belonged to
+            // without opening one and watching it change.
+            tab === t.id
+              ? "glass-role glass-role-brand text-brand-on-glass"
+              : "text-content-muted hover:text-content"
           )}
         >
           <Icon name={t.icon} size={18} />
@@ -91,7 +109,7 @@ export function VolumeToolbar({
 /* ======================================================== the inspector === */
 
 /** One editable thing about a space — the unit a row names and a control edits. */
-export type VolumeSetting = "move" | "rotate" | "size" | "contain" | "walls" | "margin";
+export type VolumeSetting = "move" | "rotate" | "size" | "contain" | "seed" | "scatter";
 
 /** Which gizmo each setting arms. Absent leaves the box bare. Named
  *  `VOLUME_GIZMO` rather than `SETTING_GIZMO` because EditorView already has one
@@ -112,16 +130,43 @@ const ROWS: {
   { key: "move", tab: "objects", icon: "move", label: "Move" },
   { key: "rotate", tab: "objects", icon: "rotate", label: "Rotate" },
   { key: "size", tab: "objects", icon: "scale", label: "Size" },
-  { key: "contain", tab: "containment", icon: "space", label: "Keep inside" },
-  { key: "walls", tab: "containment", icon: "grid", label: "Show walls" },
-  { key: "margin", tab: "containment", icon: "adjust", label: "Edge margin" },
+  // Contents is a settings list like any other now. It used to be the one panel
+  // in this corner that laid its controls out inside itself — a toggle, a seed
+  // field and a button stacked in the bottom-right box — which made it look
+  // like a different piece of software from the Objects list beside it, and
+  // meant clicking a thing in Contents was the only click in the editor that
+  // did NOT open the centre control everything else opens.
+  { key: "contain", tab: "contents", icon: "space", label: "Keep inside" },
+  { key: "seed", tab: "contents", icon: "seed", label: "Seed" },
+  { key: "scatter", tab: "contents", icon: "shuffle", label: "Scatter" },
 ];
 
 const deg = (v: number) => `${Math.round(((v % 360) + 360) % 360)}°`;
 
+/** What the room holds, counted once for the rows and the warnings alike. */
+function contentsOf(scene: SceneApi, v: SceneVolume) {
+  const outside = v.contain ? scene.outsideVolume : [];
+  // Contents means the things IN the room, not the names for them: a group and
+  // its members in one list would scatter its members twice.
+  const containable = scene.objects.filter(isContentObject);
+  const inside = v.contain ? containable.filter((o) => !outside.includes(o)) : containable;
+  return {
+    outside,
+    inside,
+    oversized: inside.filter((o) => isOversized(v, o)),
+    // What a scatter would actually move: the master anchors every camera in the
+    // order, and locked or hidden objects are where somebody put them.
+    movable: inside.filter((o) => o.role !== "master" && !o.locked && !o.hidden),
+  };
+}
+
 /** The one-line readout each row carries on its right, exactly as the object
  *  properties list does — the value, not a repeat of the label. */
-function summarize(v: SceneVolume, key: VolumeSetting): string {
+function summarize(
+  v: SceneVolume,
+  key: VolumeSetting,
+  ctx: { seed: number; movable: number }
+): string {
   switch (key) {
     case "move":
       return v.center.map((n) => n.toFixed(1)).join(", ");
@@ -131,24 +176,27 @@ function summarize(v: SceneVolume, key: VolumeSetting): string {
       return v.size.map((n) => n.toFixed(1)).join(" × ");
     case "contain":
       return v.contain ? "On" : "Off";
-    case "walls":
-      return v.showWalls ? "On" : "Off";
-    case "margin":
-      return `${v.margin.toFixed(2)} m`;
+    case "seed":
+      return String(ctx.seed);
+    case "scatter":
+      return `${ctx.movable} movable`;
   }
 }
 
 /**
  * The bottom-right list for the focused space.
  *
- * A LIST OF ROWS, NOT A STACK OF FORMS. It held three forms at once, which made
- * it the only panel in this corner that didn't look like `ObjectPropertiesPanel`
- * — and, more to the point, gave the viewport nothing to key a gizmo off. Picking
- * a row is what arms the handles, the same bargain an object makes: Position
- * lights the translate arrows, Rotation lights the ring.
+ * A LIST OF ROWS, NOTHING ELSE. Picking a row is what opens its control over
+ * the bottom-centre toolbar and, where there is one, arms its gizmo — the same
+ * bargain an object makes: Move lights the translate arrows, Size lights the
+ * face grips. Both tabs work this way now; Contents used to hold its controls
+ * inline and was the odd one out.
  *
- * Contents is not a settings list and doesn't pretend to be one — it is a report
- * with two buttons, the way the camera POV is a picture rather than a form.
+ * The exception is the two WARNINGS under the Contents rows. They are not
+ * settings and cannot be rows: nothing opens, and they only exist while
+ * something is wrong — a face dragged in over a sofa, or a sofa too big for the
+ * room it is in. A warning that reported a problem and offered no way out of it
+ * would be worse than the clutter of showing it here.
  */
 export function VolumeInspectorPanel({
   scene,
@@ -156,22 +204,32 @@ export function VolumeInspectorPanel({
   tab,
   active,
   seed,
-  report,
   onSelect,
-  onSeed,
   onReport,
 }: {
   scene: SceneApi;
   volume: SceneVolume;
   tab: VolumeTab;
   active: VolumeSetting | null;
+  /** the seed the Scatter control will use — shown on the Seed row */
   seed: number;
-  report: string | null;
   onSelect: (k: VolumeSetting) => void;
-  onSeed: (n: number) => void;
+  /** clearing the scatter report once the strays have been dealt with */
   onReport: (s: string | null) => void;
 }) {
   const rows = ROWS.filter((r) => r.tab === tab);
+  const { inside, outside, oversized, movable } = contentsOf(scene, v);
+
+  const bringInside = () => {
+    scene.applyPlacements(
+      outside.map((o) => ({
+        id: o.id,
+        position: clampIntoVolume(v, o.position, halfExtent(o)),
+        rotationDeg: o.rotationDeg,
+      }))
+    );
+    onReport(null);
+  };
 
   return (
     /* Position comes from the inspector column in EditorView, not from here —
@@ -184,40 +242,68 @@ export function VolumeInspectorPanel({
     >
       <PanelHeader className="px-3 py-2.5">
         <PanelEyebrow>{TABS.find((t) => t.id === tab)?.label}</PanelEyebrow>
+        {/* The count belongs to the header, not to a row: it is what the panel
+            is ABOUT, and a row would have to open something. */}
+        {tab === "contents" && (
+          <span className="type-caption text-content-subtle">
+            {inside.length} {v.contain ? "inside" : "in reach"}
+          </span>
+        )}
       </PanelHeader>
 
-      <PanelBody className={tab === "contents" ? "p-3" : "p-2"}>
-        {tab === "contents" ? (
-          <Contents
-            scene={scene}
-            volume={v}
-            seed={seed}
-            report={report}
-            onSeed={onSeed}
-            onReport={onReport}
-          />
-        ) : (
-          rows.map((r) => (
+      <PanelBody className="p-2">
+        {rows.map((r) => (
+          <button
+            key={r.key}
+            type="button"
+            data-ui={`volume-prop-${r.key}`}
+            onClick={() => onSelect(r.key)}
+            className={cn(
+              "type-body group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 transition-colors",
+              active === r.key
+                ? "bg-glass/14 text-content"
+                : "text-content-muted hover:bg-glass/8 hover:text-content"
+            )}
+          >
+            {active === r.key && (
+              <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-brand" />
+            )}
+            <Icon name={r.icon} size={15} />
+            <span className="flex-1 text-left">{r.label}</span>
+            <span className="type-numeric-sm text-content-subtle">
+              {summarize(v, r.key, { seed, movable: movable.length })}
+            </span>
+          </button>
+        ))}
+
+        {tab === "contents" && outside.length > 0 && (
+          <div
+            data-ui="volume-outside"
+            className="mt-2 rounded-xl border border-warning/40 bg-warning-soft/30 px-2.5 py-2"
+          >
+            <p className="type-caption text-warning">
+              {outside.length} {outside.length === 1 ? "object sits" : "objects sit"} outside.
+              Nothing was moved.
+            </p>
             <button
-              key={r.key}
               type="button"
-              data-ui={`volume-prop-${r.key}`}
-              onClick={() => onSelect(r.key)}
-              className={cn(
-                "type-body group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 transition-colors",
-                active === r.key
-                  ? "bg-glass/14 text-content"
-                  : "text-content-muted hover:bg-glass/8 hover:text-content"
-              )}
+              data-ui="volume-bring-inside"
+              onClick={bringInside}
+              className="type-caption-strong mt-1.5 text-content underline-offset-2 hover:underline"
             >
-              {active === r.key && (
-                <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-brand" />
-              )}
-              <Icon name={r.icon} size={15} />
-              <span className="flex-1 text-left">{r.label}</span>
-              <span className="type-numeric-sm text-content-subtle">{summarize(v, r.key)}</span>
+              Bring {outside.length === 1 ? "it" : "them"} inside →
             </button>
-          ))
+          </div>
+        )}
+
+        {tab === "contents" && oversized.length > 0 && (
+          <div className="mt-2">
+            <Note tone="warn">
+              {oversized.map((o) => o.name).join(", ")} {oversized.length === 1 ? "is" : "are"}{" "}
+              bigger than this space, so {oversized.length === 1 ? "it centres" : "they centre"}{" "}
+              instead of fitting.
+            </Note>
+          </div>
         )}
       </PanelBody>
     </Panel>
@@ -231,8 +317,8 @@ const CONTROL_LABEL: Record<VolumeSetting, string> = {
   rotate: "Rotate",
   size: "Size",
   contain: "Keep Objects Inside",
-  walls: "Show Walls",
-  margin: "Edge Margin",
+  seed: "Arrangement Seed",
+  scatter: "Scatter Contents",
 };
 
 /**
@@ -244,14 +330,25 @@ const CONTROL_LABEL: Record<VolumeSetting, string> = {
  * around a model you are watching change, and a room's number does not.
  */
 export function VolumeSettingControl({
+  scene,
   volume: v,
   setting,
+  seed,
+  report,
   patch,
+  onSeed,
+  onReport,
   onClose,
 }: {
+  /** Contents acts on the scene — a scatter moves what is in the room. */
+  scene: SceneApi;
   volume: SceneVolume;
   setting: VolumeSetting;
+  seed: number;
+  report: string | null;
   patch: (next: Partial<SceneVolume>) => void;
+  onSeed: (n: number) => void;
+  onReport: (s: string | null) => void;
   onClose: () => void;
 }) {
   const setVec = (key: "size" | "center", axis: 0 | 1 | 2, raw: string) => {
@@ -333,48 +430,121 @@ export function VolumeSettingControl({
             on={v.contain}
             hint={
               v.contain
-                ? "While this space is selected, anything you place lands inside it."
+                ? "Anything you place while this space is selected lands inside it."
                 : "Off — the box still measures the room and still feeds the Arrangement axis."
             }
             onToggle={() => patch({ contain: !v.contain })}
           />
         )}
 
-        {setting === "walls" && (
-          <ToggleRow
-            label="Show walls"
-            on={v.showWalls}
-            hint="Draws the four sides. It changes the picture, not the containment."
-            onToggle={() => patch({ showWalls: !v.showWalls })}
-          />
+        {setting === "seed" && (
+          <>
+            <div className="flex items-stretch gap-2">
+              <label className="field-well flex min-w-0 grow items-center gap-2 rounded-lg border px-2.5 py-1.5">
+                <input
+                  aria-label="Arrangement seed"
+                  value={seed}
+                  inputMode="numeric"
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value.replace(/\D/g, ""), 10);
+                    onSeed(Number.isFinite(n) ? n : 0);
+                  }}
+                  className="type-numeric min-w-0 grow bg-transparent text-content outline-none"
+                />
+              </label>
+              <button
+                type="button"
+                data-ui="volume-reseed"
+                aria-label="New seed"
+                title="New seed"
+                onClick={() => onSeed(newSeed())}
+                className="grid w-10 shrink-0 place-items-center rounded-lg border border-glass/15 bg-glass/8 text-content-muted transition-colors hover:border-glass/30 hover:text-content"
+              >
+                <Icon name="seed" size={16} />
+              </button>
+            </div>
+            <p className="type-caption mt-1.5 text-content-subtle">
+              The same seed rebuilds the same arrangement, here and on the render farm.
+            </p>
+          </>
         )}
 
-        {setting === "margin" && (
-          <div className="flex items-center gap-2">
-            <input
-              type="range"
-              aria-label="Edge margin"
-              min={0}
-              max={1}
-              step={0.01}
-              value={v.margin}
-              onChange={(e) => patch({ margin: parseFloat(e.target.value) })}
-              className="h-1 flex-1 cursor-pointer accent-brand"
-            />
-            <NumberInput
-              bordered
-              className="w-14 shrink-0"
-              aria-label="Edge margin in metres"
-              value={v.margin}
-              onChange={(e) => {
-                const n = parseFloat(e.target.value);
-                if (Number.isFinite(n)) patch({ margin: Math.max(0, n) });
-              }}
-            />
-          </div>
+        {setting === "scatter" && (
+          <ScatterControl
+            scene={scene}
+            volume={v}
+            seed={seed}
+            report={report}
+            onReport={onReport}
+          />
         )}
       </Panel>
     </div>
+  );
+}
+
+/**
+ * SCATTER — one button and what it just did.
+ *
+ * The report is not a toast. A scatter can half-succeed — twelve chairs into a
+ * space with room for nine — and the number that came back is the reason you
+ * would widen the room, so it stays on screen next to the button that would be
+ * pressed again.
+ */
+function ScatterControl({
+  scene,
+  volume: v,
+  seed,
+  report,
+  onReport,
+}: {
+  scene: SceneApi;
+  volume: SceneVolume;
+  seed: number;
+  report: string | null;
+  onReport: (s: string | null) => void;
+}) {
+  const { inside, movable } = contentsOf(scene, v);
+
+  const scatter = () => {
+    if (movable.length === 0) {
+      onReport("Nothing to scatter — every object here is the master, locked or hidden.");
+      return;
+    }
+    const fixed = inside.filter((o) => !movable.includes(o));
+    // Containment off means the room stops being a fence: the objects still
+    // cluster on it, but they are allowed to land outside.
+    const region = v.contain ? v : expandVolume(v, LOOSE_SPREAD);
+    const result = arrange(
+      { volume: v, region, movable, fixed, rules: movable.map((o) => makeRule(o.id)) },
+      seed
+    );
+    scene.applyPlacements(result.placements);
+    const where = v.contain ? "" : " — some outside, since containment is off";
+    onReport(
+      result.unplaced.length === 0
+        ? `Placed ${result.placements.length} ${
+            result.placements.length === 1 ? "object" : "objects"
+          }${where}.`
+        : `Placed ${result.placements.length} of ${movable.length}. No room left for ${result.unplaced.length} — widen the space or lower the clearance.`
+    );
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        data-ui="volume-scatter"
+        onClick={scatter}
+        className="type-body-strong flex w-full items-center justify-center gap-2 rounded-lg border border-glass/15 bg-glass/8 py-2 text-content transition-colors hover:border-glass/30 hover:bg-glass/14"
+      >
+        <Icon name="shuffle" size={15} />
+        Scatter {movable.length} {movable.length === 1 ? "object" : "objects"}
+      </button>
+      <p className="type-caption mt-1.5 text-content-subtle">
+        {report ?? "Rearranges everything movable in the room, from the seed above."}
+      </p>
+    </>
   );
 }
 
@@ -433,138 +603,3 @@ function ToggleRow({
     </div>
   );
 }
-
-/* -------------------------------------------------------------- contents */
-
-function Contents({
-  scene,
-  volume: v,
-  seed,
-  report,
-  onSeed,
-  onReport,
-}: {
-  scene: SceneApi;
-  volume: SceneVolume;
-  seed: number;
-  report: string | null;
-  onSeed: (n: number) => void;
-  onReport: (s: string | null) => void;
-}) {
-  const outside = v.contain ? scene.outsideVolume : [];
-  const containable = scene.objects.filter(
-    (o) => o.source !== "camera" && o.source !== "environment" && o.source !== "skybox"
-  );
-  const inside = v.contain ? containable.filter((o) => !outside.includes(o)) : containable;
-  const oversized = inside.filter((o) => isOversized(v, o));
-
-  const scatter = () => {
-    const movable = inside.filter((o) => o.role !== "master" && !o.locked && !o.hidden);
-    const fixed = inside.filter((o) => !movable.includes(o));
-    if (movable.length === 0) {
-      onReport("Nothing to scatter — every object here is the master, locked or hidden.");
-      return;
-    }
-    const region = v.contain ? v : expandVolume(v, LOOSE_SPREAD);
-    const result = arrange(
-      { volume: v, region, movable, fixed, rules: movable.map((o) => makeRule(o.id)) },
-      seed
-    );
-    scene.applyPlacements(result.placements);
-    const where = v.contain ? "" : " — some outside, since containment is off";
-    onReport(
-      result.unplaced.length === 0
-        ? `Placed ${result.placements.length} ${
-            result.placements.length === 1 ? "object" : "objects"
-          }${where}.`
-        : `Placed ${result.placements.length} of ${movable.length}. No room left for ${result.unplaced.length} — widen the space or lower the clearance.`
-    );
-  };
-
-  const bringInside = () => {
-    scene.applyPlacements(
-      outside.map((o) => ({
-        id: o.id,
-        position: clampIntoVolume(v, o.position, halfExtent(o)),
-        rotationDeg: o.rotationDeg,
-      }))
-    );
-    onReport(null);
-  };
-
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="type-body text-content-muted">
-        {inside.length} {inside.length === 1 ? "object" : "objects"}{" "}
-        {v.contain ? "inside" : "in reach"}
-      </p>
-
-      {outside.length > 0 && (
-        <div
-          data-ui="volume-outside"
-          className="rounded-xl border border-warning/40 bg-warning-soft/30 px-2.5 py-2"
-        >
-          <p className="type-caption text-warning">
-            {outside.length} {outside.length === 1 ? "object sits" : "objects sit"} outside.
-            Nothing was moved.
-          </p>
-          <button
-            type="button"
-            data-ui="volume-bring-inside"
-            onClick={bringInside}
-            className="type-caption-strong mt-1.5 text-content underline-offset-2 hover:underline"
-          >
-            Bring {outside.length === 1 ? "it" : "them"} inside →
-          </button>
-        </div>
-      )}
-
-      {oversized.length > 0 && (
-        <Note tone="warn">
-          {oversized.map((o) => o.name).join(", ")} {oversized.length === 1 ? "is" : "are"} bigger
-          than this space, so {oversized.length === 1 ? "it centres" : "they centre"} instead of
-          fitting.
-        </Note>
-      )}
-
-      <div className="flex items-stretch gap-2">
-        <label className="field-well flex min-w-0 grow items-center gap-2 rounded-lg border px-2.5 py-1.5">
-          <span className="type-caption shrink-0 text-content-subtle">Seed</span>
-          <input
-            aria-label="Arrangement seed"
-            value={seed}
-            inputMode="numeric"
-            onChange={(e) => {
-              const n = parseInt(e.target.value.replace(/\D/g, ""), 10);
-              onSeed(Number.isFinite(n) ? n : 0);
-            }}
-            className="type-numeric min-w-0 grow bg-transparent text-content outline-none"
-          />
-        </label>
-        <button
-          type="button"
-          data-ui="volume-reseed"
-          aria-label="New seed"
-          title="New seed"
-          onClick={() => onSeed(newSeed())}
-          className="grid w-10 shrink-0 place-items-center rounded-lg border border-glass/15 bg-glass/8 text-content-muted transition-colors hover:border-glass/30 hover:text-content"
-        >
-          <Icon name="seed" size={16} />
-        </button>
-      </div>
-
-      <button
-        type="button"
-        data-ui="volume-scatter"
-        onClick={scatter}
-        className="type-body-strong flex w-full items-center justify-center gap-2 rounded-lg border border-glass/15 bg-glass/8 py-2 text-content transition-colors hover:border-glass/30 hover:bg-glass/14"
-      >
-        <Icon name="shuffle" size={15} />
-        Scatter contents
-      </button>
-
-      {report && <p className="type-caption text-content-subtle">{report}</p>}
-    </div>
-  );
-}
-

@@ -6,9 +6,17 @@ import {
   makeSceneObject,
   nextObjectId,
   type ObjectRole,
+  makeGroup,
   type SceneObject,
 } from "./scene-types";
 import { subtreeIds } from "./scene-tree";
+import {
+  centreOf,
+  materialPart,
+  posesDiffer,
+  reparentPose,
+  type GroupPose,
+} from "./group-transform";
 import {
   clampIntoVolume,
   halfExtent,
@@ -56,6 +64,16 @@ const COPY_OFFSET: Vec3 = [0.6, 0, 0.6];
  * internal shape instead of hanging the copies off the original's children. A
  * parent OUTSIDE the set is kept as-is, which is what puts a duplicated child
  * back in the same group as the thing it was copied from.
+ *
+ * EVERY CLONE IS NUDGED, not just the root. It used to be the root alone, which
+ * was indistinguishable from nudging all of them while a copy was a single
+ * object with nothing under it. It stopped being indistinguishable the moment
+ * groups existed: offsetting a group's origin and leaving its contents where
+ * they were produced a copy whose gizmo stood half a metre from the things it
+ * moved. The set travels as a set.
+ *
+ * `ids` comes back so callers can find the clone of a particular original —
+ * which top-level members to hold after a bulk duplicate, for instance.
  */
 function cloneSubtree(source: SceneObject[], rootId: string) {
   const idMap = new Map(source.map((o) => [o.id, nextObjectId()]));
@@ -68,16 +86,13 @@ function cloneSubtree(source: SceneObject[], rootId: string) {
     // more clutter is the whole reason you'd duplicate it.
     role: isMaster(o) ? ("none" as const) : o.role,
     name: o.id === rootId ? `${o.name} copy` : o.name,
-    position:
-      o.id === rootId
-        ? ([
-            o.position[0] + COPY_OFFSET[0],
-            o.position[1] + COPY_OFFSET[1],
-            o.position[2] + COPY_OFFSET[2],
-          ] as Vec3)
-        : o.position,
+    position: [
+      o.position[0] + COPY_OFFSET[0],
+      o.position[1] + COPY_OFFSET[1],
+      o.position[2] + COPY_OFFSET[2],
+    ] as Vec3,
   }));
-  return { clones, rootId: idMap.get(rootId)! };
+  return { clones, rootId: idMap.get(rootId)!, ids: idMap };
 }
 
 /**
@@ -88,8 +103,11 @@ function cloneSubtree(source: SceneObject[], rootId: string) {
  * the whole time. An HDRI or skybox is exempt because it is the world, not a
  * thing in it; a sky pushed inside a living room is a nonsense.
  */
-const isContainable = (source: AssetType) =>
-  source !== "camera" && source !== "environment" && source !== "skybox";
+const isContainable = (o: { source: AssetType; group?: true }) =>
+  // A group is not a thing in the room, it is a name for some things in it. Its
+  // contents are each clamped on their own; clamping the container as well would
+  // move all of them to keep a centroid inside a wall it was never against.
+  !o.group && o.source !== "camera" && o.source !== "environment" && o.source !== "skybox";
 
 /** Everything undo has to put back. */
 interface Snapshot {
@@ -154,6 +172,22 @@ export function useScene() {
   const [objects, setObjects] = useState<SceneObject[]>(seed.objects);
   const [rigs, setRigs] = useState<CameraRig[]>(seed.rigs);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * A MARQUEE SELECTION — several objects held at once, with no focus.
+   *
+   * Deliberately a SECOND piece of state rather than turning `selectedId` into a
+   * list. One selected object opens focus mode: a title over the viewport, a fly
+   * -in, a bottom toolbar, an inspector column, a gizmo. None of that has a
+   * meaning for eleven objects, and the thirty-odd call sites that read
+   * `scene.selected` would each have had to decide what "the selected object"
+   * meant when there were eleven of them.
+   *
+   * So the two are mutually exclusive and each keeps its own vocabulary: exactly
+   * one of them is non-empty, `select` clears this and `selectMany` clears that,
+   * and a multi-selection's whole UI is the outlines in the viewport plus the
+   * one menu that acts on all of them.
+   */
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   /**
    * The volumes drawn in the scene, and which one is armed.
    *
@@ -447,14 +481,45 @@ export function useScene() {
     setSelectedVolumeId(id);
     if (id) {
       setSelectedId(null);
+      setSelectedIds([]);
       setActiveVolumeId(id);
     }
   }, []);
 
-  /** Select an object. Clears any focused volume, for the reason above. */
+  /** Select an object. Clears any focused volume and any marquee, for the
+   *  reason above: three things claiming the same chrome is three titles over
+   *  one viewport. */
   const selectObject = useCallback((id: string | null) => {
     setSelectedId(id);
-    if (id) setSelectedVolumeId(null);
+    if (id) {
+      setSelectedVolumeId(null);
+      setSelectedIds([]);
+    }
+  }, []);
+
+  /**
+   * Hold several objects at once.
+   *
+   * ONE OBJECT IS NOT A MULTI-SELECTION. A marquee that happened to catch a
+   * single chair should behave exactly like clicking that chair — focus mode,
+   * gizmo, inspector — otherwise the editor has two different states for the
+   * same fact, and the user has to know which gesture produced the one they are
+   * in before they know what they can do.
+   */
+  const selectMany = useCallback((ids: string[]) => {
+    if (ids.length === 0) {
+      setSelectedIds([]);
+      return;
+    }
+    if (ids.length === 1) {
+      setSelectedIds([]);
+      setSelectedId(ids[0]);
+      setSelectedVolumeId(null);
+      return;
+    }
+    setSelectedIds(ids);
+    setSelectedId(null);
+    setSelectedVolumeId(null);
   }, []);
 
   /* --------------------------------------------------------------- objects */
@@ -477,7 +542,7 @@ export function useScene() {
       const obj = makeSceneObject(name, source, position, modelUrl);
       const vol = containRef.current;
       const placed =
-        vol && isContainable(source)
+        vol && isContainable(obj)
           ? { ...obj, position: clampIntoVolume(vol, obj.position, halfExtent(obj)) }
           : obj;
       setObjects((prev) => [...prev, placed]);
@@ -559,7 +624,7 @@ export function useScene() {
        */
       const vol = containRef.current;
       const next: Partial<SceneObject> =
-        vol && patch.position && isContainable(target.source)
+        vol && patch.position && isContainable(target)
           ? {
               ...patch,
               position: clampIntoVolume(vol, patch.position, halfExtent({
@@ -567,6 +632,48 @@ export function useScene() {
               })),
             }
           : patch;
+
+      /**
+       * A GROUP EDIT IS AN EDIT TO ITS CONTENTS.
+       *
+       * Here rather than in a `updateGroup` of its own, because everything that
+       * can move an object funnels through this function — the gizmo, the
+       * numeric rows, the layers tree, an undo — and a group whose contents only
+       * followed along on SOME of those routes would be a group that quietly
+       * came apart.
+       *
+       * Two kinds of patch cascade, and only two. A transform re-places every
+       * descendant (`group-transform.ts` does the arithmetic). A material paints
+       * them. A rename, a lock, a role or a description stops at the container,
+       * which is the whole point of having one.
+       */
+      if (target.group) {
+        const before: GroupPose = {
+          position: target.position,
+          rotationDeg: target.rotationDeg,
+          scale: target.scale,
+        };
+        const after: GroupPose = {
+          position: next.position ?? target.position,
+          rotationDeg: next.rotationDeg ?? target.rotationDeg,
+          scale: next.scale ?? target.scale,
+        };
+        const moved = posesDiffer(before, after);
+        const paint = materialPart(next);
+        if (moved || paint) {
+          const kids = new Set(subtreeIds(prev, id));
+          kids.delete(id);
+          return prev.map((o) => {
+            if (o.id === id) return { ...o, ...next };
+            if (!kids.has(o.id)) return o;
+            return {
+              ...o,
+              ...(moved ? reparentPose(o, before, after) : null),
+              ...(paint ?? null),
+            };
+          });
+        }
+      }
 
       const partnerId =
         target.rigId && next.position
@@ -644,6 +751,7 @@ export function useScene() {
       return prev.filter((o) => !doomed.has(o.id));
     });
     setSelectedId((cur) => (cur && gone.includes(cur) ? null : cur));
+    setSelectedIds((cur) => (cur.length === 0 ? cur : cur.filter((id) => !gone.includes(id))));
   }, []);
 
   /**
@@ -656,6 +764,25 @@ export function useScene() {
       const ids = new Set(subtreeIds(objects, id));
       const snapshot = objects.filter((o) => ids.has(o.id));
       if (snapshot.length > 0) setClipboard({ rootId: id, objects: snapshot });
+    },
+    [objects]
+  );
+
+  /**
+   * Copy a whole marquee selection.
+   *
+   * It reuses the single-object clipboard by nominating the FIRST id as the
+   * root and carrying the rest alongside. `cloneSubtree` re-points `parentId`
+   * within whatever set it is handed, so a paste rebuilds the selection's own
+   * shape — the only thing the root is used for is which clone gets the " copy"
+   * suffix and the nudge, and one nudged member of a set that all moved together
+   * is what tells you the paste landed.
+   */
+  const copyMany = useCallback(
+    (ids: string[]) => {
+      const all = new Set(ids.flatMap((id) => subtreeIds(objects, id)));
+      const snapshot = objects.filter((o) => all.has(o.id));
+      if (snapshot.length > 0) setClipboard({ rootId: ids[0], objects: snapshot });
     },
     [objects]
   );
@@ -721,6 +848,129 @@ export function useScene() {
       return rootId;
     },
     [objects, rigs]
+  );
+
+  /* ---------------------------------------------------------------- groups */
+
+  /**
+   * COLLAPSE A SELECTION INTO A CONTAINER.
+   *
+   * The group is a new object standing at the centre of the box the selection
+   * occupies, and each member gets its `parentId` pointed at it. Nothing moves:
+   * grouping is a statement about what belongs together, and a gesture that
+   * rearranged the scene as a side effect of naming part of it would be the
+   * worst possible way to find out what grouping does.
+   *
+   * ONLY THE TOP OF EACH SUBTREE JOINS. Passing a chair and the group it is
+   * already inside would otherwise reparent the chair out of that group and into
+   * the new one — the selection would lose a level of the very structure the
+   * user is building. So a member whose ancestor is also in the set is dropped
+   * here, and its existing parent carries it along.
+   *
+   * A rig is skipped for the same reason it is skipped everywhere else: both its
+   * cameras are one instrument, and a group is not where a capture plan lives.
+   */
+  const group = useCallback(
+    (ids: string[], name: string): string | null => {
+      const chosen = new Set(ids);
+      const members = objects.filter((o) => chosen.has(o.id) && !o.rigId);
+      const tops = members.filter((o) => {
+        let cur = o.parentId;
+        const seen = new Set<string>([o.id]);
+        while (cur && !seen.has(cur)) {
+          if (chosen.has(cur)) return false;
+          seen.add(cur);
+          cur = objects.find((x) => x.id === cur)?.parentId;
+        }
+        return true;
+      });
+      if (tops.length < 2) return null;
+
+      const g = makeGroup(name, centreOf(tops));
+      // The group inherits the parent the selection shared, if they shared one:
+      // grouping two chairs that both sat in "Dining set" should nest inside it
+      // rather than pulling them out to the root.
+      const parents = new Set(tops.map((o) => o.parentId ?? null));
+      if (parents.size === 1) {
+        const only = [...parents][0];
+        if (only) g.parentId = only;
+      }
+
+      const joining = new Set(tops.map((o) => o.id));
+      setObjects((prev) => [
+        ...prev.map((o) => (joining.has(o.id) ? { ...o, parentId: g.id } : o)),
+        g,
+      ]);
+      setSelectedIds([]);
+      setSelectedId(g.id);
+      setSelectedVolumeId(null);
+      return g.id;
+    },
+    [objects]
+  );
+
+  /**
+   * Dissolve a group, keeping what was in it.
+   *
+   * The children are handed to the group's own parent rather than to the root,
+   * so ungrouping one level of a nest does not empty the whole thing onto the
+   * floor. Contents keep their world positions — the group's transform was
+   * already resolved onto them by every edit that touched it, so there is
+   * nothing left to bake.
+   */
+  const ungroup = useCallback((id: string) => {
+    setObjects((prev) => {
+      const g = prev.find((o) => o.id === id);
+      if (!g?.group) return prev;
+      return prev
+        .map((o) => (o.parentId === id ? { ...o, parentId: g.parentId } : o))
+        .filter((o) => o.id !== id);
+    });
+    setSelectedId((cur) => (cur === id ? null : cur));
+  }, []);
+
+  /**
+   * Delete everything in a marquee selection, as ONE step.
+   *
+   * Not a loop over `remove`: eleven objects deleted with one keystroke must come
+   * back with one undo, and each intermediate state would be a scene that never
+   * existed as far as the user is concerned.
+   */
+  const removeMany = useCallback((ids: string[]) => {
+    setObjects((prev) => {
+      const doomed = new Set(ids.flatMap((id) => subtreeIds(prev, id)));
+      // Deleting one camera of a rig takes its partner, as it does singly.
+      for (const o of prev) if (o.rigId && doomed.has(o.id)) {
+        for (const p of prev) if (p.rigId === o.rigId) doomed.add(p.id);
+      }
+      const rigsGone = new Set(prev.filter((o) => doomed.has(o.id) && o.rigId).map((o) => o.rigId!));
+      if (rigsGone.size > 0) setRigs((rs) => rs.filter((r) => !rigsGone.has(r.id)));
+      return prev.filter((o) => !doomed.has(o.id));
+    });
+    setSelectedIds([]);
+    setSelectedId(null);
+  }, []);
+
+  /** Duplicate a whole selection in one step, and hold the copies. */
+  const duplicateMany = useCallback(
+    (ids: string[]): string[] => {
+      const all = new Set(ids.flatMap((id) => subtreeIds(objects, id)));
+      const source = objects.filter((o) => all.has(o.id));
+      if (source.length === 0) return [];
+      const { clones, ids: map } = cloneSubtree(source, ids[0]);
+      setObjects((prev) => [...prev, ...clones]);
+      // The copies are what you are now holding — the same courtesy the single
+      // duplicate does by selecting what it made. Tops are read off the SOURCE
+      // (a clone's `parentId` has already been re-pointed to a new id, so asking
+      // whether it is in the old set would always say no).
+      const fresh = source
+        .filter((o) => !o.parentId || !all.has(o.parentId))
+        .map((o) => map.get(o.id)!);
+      setSelectedIds(fresh.length > 1 ? fresh : []);
+      setSelectedId(fresh.length === 1 ? fresh[0] : null);
+      return fresh;
+    },
+    [objects]
   );
 
   /**
@@ -845,6 +1095,18 @@ export function useScene() {
     [objects]
   );
 
+  /**
+   * The objects a marquee is holding.
+   *
+   * Filtered against the live scene rather than trusted: a delete, an undo or a
+   * group can remove something the marquee caught, and a menu that then offered
+   * to duplicate eleven objects when nine were left would be counting ghosts.
+   */
+  const selectedObjects = useMemo(
+    () => (selectedIds.length === 0 ? [] : objects.filter((o) => selectedIds.includes(o.id))),
+    [objects, selectedIds]
+  );
+
   /** The volume wearing the editor's focus chrome, or null. */
   const selectedVolume = useMemo(
     () => volumes.find((v) => v.id === selectedVolumeId) ?? null,
@@ -869,7 +1131,7 @@ export function useScene() {
     if (!activeVolume) return [];
     return objects.filter(
       (o) =>
-        isContainable(o.source) &&
+        isContainable(o) &&
         !o.hidden &&
         // A LOCKED object is where somebody put it, deliberately. Counting it
         // as stray would have "Bring them inside" promise to move something the
@@ -921,7 +1183,17 @@ export function useScene() {
         commit(`rig:${rigId}:${Object.keys(patch).join(",")}`), updateRig(rigId, patch)
       ),
       remove: (...a: Parameters<typeof remove>) => (commit(), remove(...a)),
+      removeMany: (...a: Parameters<typeof removeMany>) => (commit(), removeMany(...a)),
       duplicate: (...a: Parameters<typeof duplicate>) => (commit(), duplicate(...a)),
+      duplicateMany: (...a: Parameters<typeof duplicateMany>) => (
+        commit(), duplicateMany(...a)
+      ),
+      // Grouping and ungrouping are edits to the scene graph, so they are
+      // undoable like any other. Nothing about them is cosmetic: `parentId`
+      // decides what delete takes, what a transform carries and what the tree
+      // shows.
+      group: (...a: Parameters<typeof group>) => (commit(), group(...a)),
+      ungroup: (...a: Parameters<typeof ungroup>) => (commit(), ungroup(...a)),
       paste: (...a: Parameters<typeof paste>) => (commit(), paste(...a)),
       setBranchFlag: (...a: Parameters<typeof setBranchFlag>) => (commit(), setBranchFlag(...a)),
       setRole: (...a: Parameters<typeof setRole>) => (commit(), setRole(...a)),
@@ -940,9 +1212,9 @@ export function useScene() {
       ),
     }),
     [
-      commit, add, addCameraRig, update, updateOne, updateRig, remove, duplicate, paste,
-      setBranchFlag, setRole, reframeRig, addVolume, updateVolume, removeVolume,
-      applyPlacements,
+      commit, add, addCameraRig, update, updateOne, updateRig, remove, removeMany,
+      duplicate, duplicateMany, group, ungroup, paste, setBranchFlag, setRole,
+      reframeRig, addVolume, updateVolume, removeVolume, applyPlacements,
     ]
   );
 
@@ -950,6 +1222,8 @@ export function useScene() {
     objects,
     rigs,
     selectedId,
+    selectedIds,
+    selectedObjects,
     selected,
     master,
     distractors,
@@ -969,8 +1243,10 @@ export function useScene() {
     // Selection is NOT tracked. Clicking around the scene isn't an edit, and a
     // history full of look-at-this steps buries the edits you actually want back.
     select: selectObject,
+    selectMany,
     ...tracked,
     copy,
+    copyMany,
     canPaste: clipboard !== null,
     undo,
     redo,

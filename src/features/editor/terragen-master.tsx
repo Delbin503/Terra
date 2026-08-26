@@ -11,6 +11,7 @@ import {
   ROLE_DOT,
   ROLE_LABEL,
   canTakeRole,
+  isContentObject,
   isMaster,
   type ObjectRole,
 } from "./scene-types";
@@ -90,9 +91,16 @@ export function MasterSection({
    *  sections — two open lists in a 400px column is a scroll, not a comparison. */
   const [openSwaps, setOpenSwaps] = useState<string | null>(null);
 
-  /** Content objects only — a camera can't be a master and has no role. */
+  /**
+   * Content objects only — a camera can't be a master and has no role.
+   *
+   * Groups are out of this LIST while still being promotable from the viewport:
+   * every row here carries a swap list, and a group has no asset to swap for
+   * another. The Master card above reads whatever holds the role, so a group
+   * that is the master still shows up there by name.
+   */
   const contents = useMemo(
-    () => scene.objects.filter((o) => canTakeRole(o.source)),
+    () => scene.objects.filter((o) => isContentObject(o)),
     [scene.objects]
   );
 

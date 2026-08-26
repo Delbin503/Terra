@@ -113,6 +113,22 @@ export const isMaster = (o: { role: ObjectRole }) => o.role === "master";
 export const canTakeRole = (source: AssetType) =>
   source !== "camera" && source !== "environment" && source !== "skybox";
 
+/**
+ * AN OBJECT WITH A BODY.
+ *
+ * The question almost every list in TerraGen is really asking: can the solver
+ * place this, can a run swap it, does it count toward the objects in the scene?
+ * `canTakeRole` alone stopped being the right test when groups arrived — a group
+ * passes it (it can be the master, and the rig frames the centre of what it
+ * holds) but it has no footprint, no asset behind it and no material of its own.
+ *
+ * A list that included both a group and its contents would act on everything
+ * inside it twice: the arrangement solver would place the group — which moves
+ * its contents — and then place each of those contents again.
+ */
+export const isContentObject = (o: { source: AssetType; group?: true }) =>
+  !o.group && canTakeRole(o.source);
+
 /** A 3D object placed in the viewport. Transform is stored UI-friendly:
  *  position in metres, rotation in degrees, scale as multipliers. */
 export interface SceneObject {
@@ -137,11 +153,29 @@ export interface SceneObject {
   role: ObjectRole;
   /**
    * The container this object sits inside, if any — the single field the layers
-   * tree nests on. Nothing creates groups yet; the field exists so that when
-   * grouping ships, the panel, the search and the context menu already handle
-   * arbitrary depth instead of needing a second pass.
+   * tree nests on. Written by `group()`; read by the tree, the search, delete,
+   * copy and the group transform.
    */
   parentId?: string;
+  /**
+   * THIS OBJECT IS A CONTAINER, not a thing.
+   *
+   * A group is a SceneObject on purpose rather than a fourth kind of scene
+   * entity: `parentId` has to point at something, the layers tree already nests
+   * on it, and every operation a group needs — rename, delete, copy, transform,
+   * a dataset role — is an operation objects already have. A parallel
+   * `groups: SceneGroup[]` list would have meant teaching all of that a second
+   * vocabulary.
+   *
+   * What it does NOT have is geometry. `SceneWorld` skips it, so its `source`
+   * (a `mesh`, for want of a member that means nothing) never draws — it exists
+   * only to satisfy the type, which is why every label goes through
+   * `objectTypeLabel` rather than reading `SOURCE_LABEL` directly.
+   *
+   * Its transform is real, though: position is where the group IS, and moving it
+   * carries its contents (see `group-transform.ts`).
+   */
+  group?: true;
   /**
    * A stand-in for something still being generated. It occupies the spot in the
    * scene — so "place into scene" can answer immediately instead of after the
@@ -174,6 +208,15 @@ export interface SceneObject {
   specular: number;
   normal: number;
 }
+
+/**
+ * What to CALL this object — the title badge, the info panel, the layer row.
+ *
+ * A group has no source worth naming, so it cannot go through `SOURCE_LABEL`:
+ * that map is about where an asset came from, and a group came from a selection.
+ */
+export const objectTypeLabel = (o: { source: AssetType; group?: true }) =>
+  o.group ? "Group" : SOURCE_LABEL[o.source];
 
 /** Human-readable label for an object's source type (title badge, info panel). */
 export const SOURCE_LABEL: Record<AssetType, string> = {
@@ -241,6 +284,40 @@ export function makeCameraRig(
     };
   };
   return [build("start", startPos), build("end", endPos)];
+}
+
+/**
+ * A GROUP — the container a multi-selection collapses into.
+ *
+ * Its position is handed in rather than defaulted: a group belongs at the centre
+ * of what it holds, and that is the caller's arithmetic (see `useScene.group`).
+ * Everything else is the inert minimum — a group is not shaded, so its material
+ * fields exist only because the type says they must, and they become meaningful
+ * the moment somebody edits the Texture panel with the group selected, which
+ * writes through to its contents.
+ */
+export function makeGroup(name: string, position: [number, number, number]): SceneObject {
+  counter += 1;
+  return {
+    id: `grp-${counter}`,
+    name,
+    group: true,
+    // No AssetType means "container", and inventing one would put a member into
+    // the asset library's vocabulary that the library can never hold.
+    source: "mesh",
+    shape: "capsule",
+    position,
+    rotationDeg: [0, 0, 0],
+    scale: [1, 1, 1],
+    role: "none",
+    description:
+      "A group. Moving, turning or scaling it carries everything inside; a texture set here paints all of them.",
+    color: OBJECT_COLORS[0],
+    metalness: 0.1,
+    roughness: 0.8,
+    specular: 0.5,
+    normal: 1,
+  };
 }
 
 export function makeSceneObject(

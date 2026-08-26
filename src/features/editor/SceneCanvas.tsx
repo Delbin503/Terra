@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Line, OrbitControls, GizmoHelper, Html, TransformControls } from "@react-three/drei";
-import { Mesh, Plane, Vector3, type Camera, type Group, type Object3D, type Ray } from "three";
+import { Mesh, Object3D, Plane, Vector3, type Camera, type Group, type Ray } from "three";
 
 /** Reused by the rig handles' orbit plane — allocating per pointer event would
  *  churn a Vector3 every frame of a drag. */
@@ -14,6 +14,9 @@ import { distance } from "./camera-rig";
 import { CAMERA_RIG, READOUT } from "./scene-palette";
 import type { SceneApi } from "./useScene";
 import { VolumeBox, VolumeDraw, VolumeHandles, type VolumeGizmo } from "./VolumeBox";
+import { subtreeIds } from "./scene-tree";
+import { radiusOf } from "./group-transform";
+import type { SceneObject } from "./scene-types";
 import { contactWalls, type SceneVolume, type Vec3 } from "./scene-volume";
 
 const R2D = 180 / Math.PI;
@@ -36,6 +39,7 @@ export function SceneWorld({
   scene,
   register,
   selectedId,
+  litIds,
   onSelect,
   interactive = true,
   hideId,
@@ -45,6 +49,17 @@ export function SceneWorld({
   scene: SceneApi;
   register?: (id: string, mesh: Object3D | null) => void;
   selectedId?: string | null;
+  /**
+   * Everything else wearing the selected outline: a marquee's catch, and the
+   * contents of a selected group.
+   *
+   * A GROUP HAS NO BODY TO OUTLINE. Selecting one has to show you what you
+   * picked up, and the only thing there is to show is what is inside it — so the
+   * children light instead, which also happens to be exactly what a marquee
+   * needs. One prop, because they are the same statement: "these are the objects
+   * this selection is about."
+   */
+  litIds?: readonly string[];
   onSelect?: (id: string) => void;
   interactive?: boolean;
   hideId?: string;
@@ -90,6 +105,11 @@ export function SceneWorld({
         })}
 
       {scene.objects
+        // A group is a name for some objects, not an object. It has a transform
+        // and it has a gizmo, but there is nothing to draw at its centre — a
+        // placeholder mesh there would be a solid you could not delete without
+        // deleting everything it stands for.
+        .filter((o) => !o.group)
         .filter((o) => o.id !== hideId && !hideIds?.includes(o.id) && !o.hidden)
         .filter((o) => !(hideCameras && o.source === "camera"))
         .map((o) =>
@@ -106,7 +126,9 @@ export function SceneWorld({
             <SceneObjectMesh
               key={o.id}
               object={o}
-              selected={interactive && o.id === selectedId}
+              selected={
+                interactive && (o.id === selectedId || litIds?.includes(o.id) === true)
+              }
               onSelect={sel}
               register={reg}
             />
@@ -129,6 +151,16 @@ function warmColor(w: number): string {
 export interface CameraHandle {
   camera: Camera;
   dom: HTMLElement;
+  /**
+   * Turn orbiting off, and on again.
+   *
+   * Handed out because the MARQUEE lives outside this canvas — it is a rectangle
+   * drawn in DOM over the viewport, not a thing in the scene — and a box drag
+   * that also spun the camera would be unusable. Exposing the one verb it needs
+   * is smaller than moving the whole gesture in here, and it is the same verb
+   * the grips inside the canvas already use on `state.controls`.
+   */
+  setOrbit: (enabled: boolean) => void;
 }
 
 /**
@@ -253,9 +285,17 @@ function ViewProbe({
 /** Captures the live camera + canvas element so the DOM drop handler can raycast. */
 function CameraGrabber({ cameraRef }: { cameraRef: React.MutableRefObject<CameraHandle | null> }) {
   const { camera, gl } = useThree();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const controls = useThree((s) => s.controls as any);
   useEffect(() => {
-    cameraRef.current = { camera, dom: gl.domElement };
-  }, [camera, gl, cameraRef]);
+    cameraRef.current = {
+      camera,
+      dom: gl.domElement,
+      setOrbit: (enabled: boolean) => {
+        if (controls) controls.enabled = enabled;
+      },
+    };
+  }, [camera, gl, controls, cameraRef]);
   return null;
 }
 
@@ -423,6 +463,160 @@ function GizmoReadout({
         />
       </Html>
     </group>
+  );
+}
+
+/**
+ * A GROUP'S TRANSFORM GIZMO.
+ *
+ * Same problem the volume has and the same answer: `TransformControls` needs an
+ * `Object3D` to attach to, and a group has no mesh — it is a row in a list and a
+ * position. So it drives a proxy standing at the group's centre, and each step
+ * of the drag writes the proxy's transform back through `scene.update`, which is
+ * where the arithmetic that carries the contents lives (`group-transform.ts`).
+ *
+ * It honours `mode` rather than hard-coding translate, because all three
+ * transforms mean something for a group: move the set, turn the set, scale the
+ * set. The Object tab's three rows arm it exactly as they do for a mesh.
+ */
+function GroupGizmo({
+  group,
+  mode,
+  onChange,
+  onGrab,
+}: {
+  group: SceneObject;
+  mode: "translate" | "rotate" | "scale";
+  onChange: (patch: Partial<SceneObject>) => void;
+  onGrab: (holding: boolean) => void;
+}) {
+  const proxy = useMemo(() => new Object3D(), []);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const gizmoRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const controls = useThree((s) => s.controls as any);
+  const dragging = useRef(false);
+
+  // Follow the group whenever something else moves it — the numeric rows, an
+  // undo, a parent group being dragged. Skipped mid-drag: the proxy is the
+  // source of the truth then, and writing the round-tripped value back would be
+  // the gizmo arguing with itself a frame late.
+  useEffect(() => {
+    if (dragging.current) return;
+    proxy.position.set(group.position[0], group.position[1], group.position[2]);
+    proxy.rotation.set(
+      group.rotationDeg[0] / R2D,
+      group.rotationDeg[1] / R2D,
+      group.rotationDeg[2] / R2D
+    );
+    proxy.scale.set(group.scale[0], group.scale[1], group.scale[2]);
+  }, [proxy, group.position, group.rotationDeg, group.scale]);
+
+  return (
+    <>
+      <primitive object={proxy} />
+      <TransformControls
+        ref={gizmoRef}
+        object={proxy}
+        mode={mode}
+        onObjectChange={() =>
+          onChange({
+            position: [proxy.position.x, proxy.position.y, proxy.position.z],
+            rotationDeg: [
+              proxy.rotation.x * R2D,
+              proxy.rotation.y * R2D,
+              proxy.rotation.z * R2D,
+            ],
+            scale: [proxy.scale.x, proxy.scale.y, proxy.scale.z],
+          })
+        }
+        onMouseDown={() => {
+          dragging.current = true;
+          onGrab(true);
+          if (controls) controls.enabled = false;
+        }}
+        onMouseUp={() => {
+          dragging.current = false;
+          onGrab(false);
+          if (controls) controls.enabled = true;
+        }}
+      />
+      <UnrealGizmoSkin key={mode} gizmoRef={gizmoRef} />
+      <GizmoReadout gizmoRef={gizmoRef} />
+    </>
+  );
+}
+
+/**
+ * THE SPACE'S MOVE GIZMO — the object one, on a room.
+ *
+ * It used to be three cones on stalks, hand-drawn in `VolumeBox`. They pointed
+ * the right way and dragged the right distance, and they were still wrong: the
+ * arrowheads were a different shape and a different size from the ones on every
+ * mesh in the scene, they had no plane handles and no screen-space handle, they
+ * did not scale with the camera the way `TransformControls` does, and they wore
+ * none of the Unreal skin the rest of the editor is dressed in. Two move gizmos
+ * in one viewport is one of them looking like a bug.
+ *
+ * So the room borrows the real one. `TransformControls` cannot be pointed at a
+ * volume — a volume is arithmetic, not an `Object3D` — so it drives a PROXY
+ * that stands at the room's centre, and every step of the drag copies that
+ * proxy's position back onto the volume through the same `onResize` a face grip
+ * uses. The skin and the numeric readout come along unchanged, because they are
+ * the same two components the object gizmo mounts.
+ */
+function VolumeMoveGizmo({
+  volume,
+  onResize,
+}: {
+  volume: SceneVolume;
+  onResize: (patch: Partial<SceneVolume>) => void;
+}) {
+  // Created once and mounted with `primitive`, not looked up through a ref:
+  // `TransformControls` needs its target on the FIRST render, and a ref is null
+  // until after one.
+  const proxy = useMemo(() => new Object3D(), []);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const gizmoRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const controls = useThree((s) => s.controls as any);
+  const dragging = useRef(false);
+
+  /**
+   * Follow the room when something ELSE moves it — the Move panel's numeric
+   * rows, an undo, a face drag that shifts the centre.
+   *
+   * Skipped mid-drag on purpose: during a drag the proxy is the source of the
+   * truth and the volume is downstream of it, so writing the round-tripped
+   * value back would be the gizmo fighting itself a frame late.
+   */
+  useEffect(() => {
+    if (dragging.current) return;
+    proxy.position.set(volume.center[0], volume.center[1], volume.center[2]);
+  }, [proxy, volume.center]);
+
+  return (
+    <>
+      <primitive object={proxy} />
+      <TransformControls
+        ref={gizmoRef}
+        object={proxy}
+        mode="translate"
+        onObjectChange={() =>
+          onResize({ center: [proxy.position.x, proxy.position.y, proxy.position.z] })
+        }
+        onMouseDown={() => {
+          dragging.current = true;
+          if (controls) controls.enabled = false;
+        }}
+        onMouseUp={() => {
+          dragging.current = false;
+          if (controls) controls.enabled = true;
+        }}
+      />
+      <UnrealGizmoSkin gizmoRef={gizmoRef} />
+      <GizmoReadout gizmoRef={gizmoRef} />
+    </>
   );
 }
 
@@ -1277,6 +1471,25 @@ export function SceneCanvas({
    */
   const guideHides = cameraGuide?.kind === "distance" ? cameraGuide.hides : undefined;
 
+  /**
+   * The selected group, if the selection IS one.
+   *
+   * A group never registers a mesh, so `selMesh` is null for it and the ordinary
+   * gizmo path below stays switched off — which is what lets the two gizmos
+   * coexist without either testing for the other.
+   */
+  const selectedGroup = scene.selected?.group ? scene.selected : null;
+
+  /**
+   * Which objects wear the selected outline besides the selection itself: a
+   * marquee's catch, or the contents of a selected group.
+   */
+  const litIds = useMemo(() => {
+    if (scene.selectedIds.length > 0) return scene.selectedIds;
+    if (!selectedGroup) return undefined;
+    return subtreeIds(scene.objects, selectedGroup.id).filter((id) => id !== selectedGroup.id);
+  }, [scene.selectedIds, scene.objects, selectedGroup]);
+
   const selMesh = scene.selectedId ? meshes[scene.selectedId] : null;
   // Gizmo (and its readout/skin) only exist while Object settings is open — and
   // never on a locked object, which is the whole point of the lock: still
@@ -1309,6 +1522,16 @@ export function SceneCanvas({
   const rig = sel?.rigId ? scene.rigs.find((r) => r.id === sel.rigId) : undefined;
   let focusCenter: [number, number, number] | null = sel ? sel.position : null;
   let focusRadius = sel ? 0.7 * Math.max(...sel.scale) : 0;
+  // A group is framed on WHAT IT HOLDS. Its own scale is 1 until somebody
+  // changes it, so the ordinary radius would fly the camera to within a metre
+  // of the centre of a twelve-metre set and frame the empty air between the
+  // objects rather than the objects.
+  if (sel?.group) {
+    const kids = new Set(subtreeIds(scene.objects, sel.id));
+    kids.delete(sel.id);
+    const contents = scene.objects.filter((o) => kids.has(o.id) && !o.group);
+    if (contents.length > 0) focusRadius = Math.max(1, radiusOf(contents, sel.position));
+  }
   if (sel && rig) {
     const { start, end } = scene.rigCameras(rig);
     if (start && end) {
@@ -1337,9 +1560,23 @@ export function SceneCanvas({
         scene={scene}
         register={register}
         selectedId={scene.selectedId}
+        litIds={litIds}
         onSelect={scene.select}
         hideIds={guideHides}
       />
+
+      {/* A selected group gets the same three transforms a mesh gets. Locked
+          stops it, as it stops a mesh: the lock is the one flag that means
+          "listed, selectable, and not to be moved". */}
+      {selectedGroup && showGizmo && !selectedGroup.locked && (
+        <GroupGizmo
+          key={selectedGroup.id}
+          group={selectedGroup}
+          mode={gizmoMode}
+          onChange={(patch) => scene.update(selectedGroup.id, patch)}
+          onGrab={setTransforming}
+        />
+      )}
 
       {/* The volumes, and the affordances that change them.
           Drawn AFTER the world so their translucent faces composite over the
@@ -1372,6 +1609,16 @@ export function SceneCanvas({
           gizmo={volumeEdit.gizmo}
           onResize={volumeEdit.onResize}
           onDragging={volumeEdit.onDragging}
+        />
+      )}
+      {/* Move is the editor's own transform gizmo, not a handle set of the
+          room's own. Keyed on the volume so a different room gets a fresh
+          proxy rather than one that starts at the last room's centre. */}
+      {volumeEdit?.gizmo === "move" && !volumeEdit.drawing && scene.selectedVolume && (
+        <VolumeMoveGizmo
+          key={scene.selectedVolume.id}
+          volume={scene.selectedVolume}
+          onResize={volumeEdit.onResize}
         />
       )}
       {volumeEdit?.drawing && (
