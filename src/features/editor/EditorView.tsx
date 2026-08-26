@@ -22,6 +22,7 @@ import {
   VolumeInspectorPanel,
   VolumeSettingControl,
   VolumeToolbar,
+  VolumeWarning,
   type VolumeSetting,
   type VolumeTab,
 } from "./VolumeInspector";
@@ -1432,17 +1433,22 @@ export function EditorView({
       )}
       {focusedVolume && volumeSetting && !volumeDragging && (
         <VolumeSettingControl
-          scene={scene}
           volume={focusedVolume}
           setting={volumeSetting}
           seed={volumeSeed}
-          report={volumeReport}
           patch={(next) => scene.updateVolume(focusedVolume.id, next)}
           onSeed={setVolumeSeed}
-          onReport={setVolumeReport}
           onClose={() => setVolumeSetting(null)}
         />
       )}
+      {/* Bottom-left: what is wrong with this room. Shown for as long as the
+          space is focused rather than only while Contents is open — it is a
+          problem with the room, and the room is fixed with the grips in the
+          viewport. It stands aside for a grip drag like everything else. */}
+      {focusedVolume && !volumeDragging && (
+        <VolumeWarning scene={scene} volume={focusedVolume} insetLeft={leftInset} />
+      )}
+
       {focusedVolume && volumeTab && !volumeDragging && (
         <div
           data-ui="volume-inspector-column"
@@ -1454,6 +1460,7 @@ export function EditorView({
             tab={volumeTab}
             active={volumeSetting}
             seed={volumeSeed}
+            report={volumeReport}
             /* Toggling, like the object list: clicking the open row closes its
                control and disarms its gizmo, leaving the space selected. */
             onSelect={(k) => setVolumeSetting((cur) => (cur === k ? null : k))}

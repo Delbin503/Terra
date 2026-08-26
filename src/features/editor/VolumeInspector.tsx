@@ -109,7 +109,7 @@ export function VolumeToolbar({
 /* ======================================================== the inspector === */
 
 /** One editable thing about a space — the unit a row names and a control edits. */
-export type VolumeSetting = "move" | "rotate" | "size" | "contain" | "seed" | "scatter";
+export type VolumeSetting = "move" | "rotate" | "size" | "contain" | "seed";
 
 /** Which gizmo each setting arms. Absent leaves the box bare. Named
  *  `VOLUME_GIZMO` rather than `SETTING_GIZMO` because EditorView already has one
@@ -138,7 +138,10 @@ const ROWS: {
   // did NOT open the centre control everything else opens.
   { key: "contain", tab: "contents", icon: "space", label: "Keep inside" },
   { key: "seed", tab: "contents", icon: "seed", label: "Seed" },
-  { key: "scatter", tab: "contents", icon: "shuffle", label: "Scatter" },
+  // NO SCATTER ROW. Every other row here names a setting and opens a control
+  // that edits it; scatter is a verb that happens the moment you ask for it, and
+  // dressing it as a setting put a control in the way of a button. It is the
+  // button at the foot of this panel instead.
 ];
 
 const deg = (v: number) => `${Math.round(((v % 360) + 360) % 360)}°`;
@@ -162,11 +165,7 @@ function contentsOf(scene: SceneApi, v: SceneVolume) {
 
 /** The one-line readout each row carries on its right, exactly as the object
  *  properties list does — the value, not a repeat of the label. */
-function summarize(
-  v: SceneVolume,
-  key: VolumeSetting,
-  ctx: { seed: number; movable: number }
-): string {
+function summarize(v: SceneVolume, key: VolumeSetting, ctx: { seed: number }): string {
   switch (key) {
     case "move":
       return v.center.map((n) => n.toFixed(1)).join(", ");
@@ -178,8 +177,6 @@ function summarize(
       return v.contain ? "On" : "Off";
     case "seed":
       return String(ctx.seed);
-    case "scatter":
-      return `${ctx.movable} movable`;
   }
 }
 
@@ -192,11 +189,9 @@ function summarize(
  * face grips. Both tabs work this way now; Contents used to hold its controls
  * inline and was the odd one out.
  *
- * The exception is the two WARNINGS under the Contents rows. They are not
- * settings and cannot be rows: nothing opens, and they only exist while
- * something is wrong — a face dragged in over a sofa, or a sofa too big for the
- * room it is in. A warning that reported a problem and offered no way out of it
- * would be worse than the clutter of showing it here.
+ * Two things are not rows. The strays WARNING, because it only exists while
+ * something is wrong and it carries the button that puts it right; and the
+ * SCATTER button at the foot, because it is a verb rather than a setting.
  */
 export function VolumeInspectorPanel({
   scene,
@@ -204,6 +199,7 @@ export function VolumeInspectorPanel({
   tab,
   active,
   seed,
+  report,
   onSelect,
   onReport,
 }: {
@@ -211,14 +207,46 @@ export function VolumeInspectorPanel({
   volume: SceneVolume;
   tab: VolumeTab;
   active: VolumeSetting | null;
-  /** the seed the Scatter control will use — shown on the Seed row */
+  /** the seed the Scatter button will use — shown on the Seed row */
   seed: number;
+  /** what the last scatter did, under the button that did it */
+  report: string | null;
   onSelect: (k: VolumeSetting) => void;
-  /** clearing the scatter report once the strays have been dealt with */
   onReport: (s: string | null) => void;
 }) {
   const rows = ROWS.filter((r) => r.tab === tab);
-  const { inside, outside, oversized, movable } = contentsOf(scene, v);
+  const { inside, outside, movable } = contentsOf(scene, v);
+
+  /**
+   * REARRANGE WHAT IS IN THE ROOM.
+   *
+   * Back in the panel rather than behind a row: it is one button with one
+   * outcome, and the centre control it briefly lived in was a panel whose only
+   * content was that button.
+   */
+  const scatter = () => {
+    if (movable.length === 0) {
+      onReport("Nothing to scatter — every object here is the master, locked or hidden.");
+      return;
+    }
+    const fixed = inside.filter((o) => !movable.includes(o));
+    // Containment off means the room stops being a fence: the objects still
+    // cluster on it, but they are allowed to land outside.
+    const region = v.contain ? v : expandVolume(v, LOOSE_SPREAD);
+    const result = arrange(
+      { volume: v, region, movable, fixed, rules: movable.map((o) => makeRule(o.id)) },
+      seed
+    );
+    scene.applyPlacements(result.placements);
+    const where = v.contain ? "" : " — some outside, since containment is off";
+    onReport(
+      result.unplaced.length === 0
+        ? `Placed ${result.placements.length} ${
+            result.placements.length === 1 ? "object" : "objects"
+          }${where}.`
+        : `Placed ${result.placements.length} of ${movable.length}. No room left for ${result.unplaced.length} — widen the space or lower the clearance.`
+    );
+  };
 
   const bringInside = () => {
     scene.applyPlacements(
@@ -271,7 +299,7 @@ export function VolumeInspectorPanel({
             <Icon name={r.icon} size={15} />
             <span className="flex-1 text-left">{r.label}</span>
             <span className="type-numeric-sm text-content-subtle">
-              {summarize(v, r.key, { seed, movable: movable.length })}
+              {summarize(v, r.key, { seed })}
             </span>
           </button>
         ))}
@@ -296,17 +324,79 @@ export function VolumeInspectorPanel({
           </div>
         )}
 
-        {tab === "contents" && oversized.length > 0 && (
-          <div className="mt-2">
-            <Note tone="warn">
-              {oversized.map((o) => o.name).join(", ")} {oversized.length === 1 ? "is" : "are"}{" "}
-              bigger than this space, so {oversized.length === 1 ? "it centres" : "they centre"}{" "}
-              instead of fitting.
-            </Note>
+        {/* The oversized warning is NOT here — it is the bottom-left notice
+            (see `VolumeWarning`). It names every object it is about, so in a
+            320px column it ran to four lines and pushed the button that fixes
+            the problem off the bottom of the panel. And unlike the strays above
+            it, there is no action to offer: an object bigger than the room is a
+            fact about the room, answered by widening it. */}
+
+        {/* Scatter is the panel's ACTION, so it sits at the foot of it, full
+            width, the way the primary button of any panel does. */}
+        {tab === "contents" && (
+          <div className="mt-2 border-t border-glass/10 px-0.5 pt-2.5">
+            <button
+              type="button"
+              data-ui="volume-scatter"
+              disabled={movable.length === 0}
+              onClick={scatter}
+              className="type-body-strong flex w-full items-center justify-center gap-2 rounded-lg border border-glass/15 bg-glass/8 py-2 text-content transition-colors hover:border-glass/30 hover:bg-glass/14 disabled:opacity-40 disabled:hover:border-glass/15 disabled:hover:bg-glass/8"
+            >
+              <Icon name="shuffle" size={15} />
+              Scatter {movable.length} {movable.length === 1 ? "Object" : "Objects"}
+            </button>
+            <p className="type-caption mt-1.5 text-content-subtle">
+              {report ?? "Rearranges everything movable in the room, from the seed above."}
+            </p>
           </div>
         )}
       </PanelBody>
     </Panel>
+  );
+}
+
+/* ======================================================== the warning ==== */
+
+/**
+ * WHAT IS WRONG WITH THE ROOM, IN THE BOTTOM-LEFT CORNER.
+ *
+ * It was a note inside the Contents panel and it did not fit there — literally.
+ * The message names every object it is about, so seven chairs ran to four lines
+ * inside a 320px column and pushed the panel's own controls out of reach; and it
+ * is a fact about the SPACE rather than a setting of it, so it kept company with
+ * rows it had nothing to do with.
+ *
+ * The corner is the one part of the viewport nothing else claims: the title sits
+ * above it, the toolbar is centred, the inspector is opposite. And a problem
+ * with the room should be visible while you fix the room — which is done with
+ * the size grips in the viewport, not in the panel this used to live in.
+ */
+export function VolumeWarning({
+  scene,
+  volume: v,
+  insetLeft = 0,
+}: {
+  scene: SceneApi;
+  volume: SceneVolume;
+  insetLeft?: number;
+}) {
+  const { oversized } = contentsOf(scene, v);
+  if (oversized.length === 0) return null;
+
+  const names = oversized.map((o) => o.name).join(", ");
+  const many = oversized.length > 1;
+
+  return (
+    <div
+      data-ui="volume-warning"
+      className="pointer-events-none fixed bottom-6 z-30 w-[min(360px,42vw)] transition-[left] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+      style={{ left: insetLeft + 16 }}
+    >
+      <Note tone="warn">
+        {names} {many ? "are" : "is"} bigger than this space, so {many ? "they centre" : "it centres"}{" "}
+        instead of fitting.
+      </Note>
+    </div>
   );
 }
 
@@ -318,7 +408,6 @@ const CONTROL_LABEL: Record<VolumeSetting, string> = {
   size: "Size",
   contain: "Keep Objects Inside",
   seed: "Arrangement Seed",
-  scatter: "Scatter Contents",
 };
 
 /**
@@ -330,25 +419,18 @@ const CONTROL_LABEL: Record<VolumeSetting, string> = {
  * around a model you are watching change, and a room's number does not.
  */
 export function VolumeSettingControl({
-  scene,
   volume: v,
   setting,
   seed,
-  report,
   patch,
   onSeed,
-  onReport,
   onClose,
 }: {
-  /** Contents acts on the scene — a scatter moves what is in the room. */
-  scene: SceneApi;
   volume: SceneVolume;
   setting: VolumeSetting;
   seed: number;
-  report: string | null;
   patch: (next: Partial<SceneVolume>) => void;
   onSeed: (n: number) => void;
-  onReport: (s: string | null) => void;
   onClose: () => void;
 }) {
   const setVec = (key: "size" | "center", axis: 0 | 1 | 2, raw: string) => {
@@ -469,82 +551,8 @@ export function VolumeSettingControl({
           </>
         )}
 
-        {setting === "scatter" && (
-          <ScatterControl
-            scene={scene}
-            volume={v}
-            seed={seed}
-            report={report}
-            onReport={onReport}
-          />
-        )}
       </Panel>
     </div>
-  );
-}
-
-/**
- * SCATTER — one button and what it just did.
- *
- * The report is not a toast. A scatter can half-succeed — twelve chairs into a
- * space with room for nine — and the number that came back is the reason you
- * would widen the room, so it stays on screen next to the button that would be
- * pressed again.
- */
-function ScatterControl({
-  scene,
-  volume: v,
-  seed,
-  report,
-  onReport,
-}: {
-  scene: SceneApi;
-  volume: SceneVolume;
-  seed: number;
-  report: string | null;
-  onReport: (s: string | null) => void;
-}) {
-  const { inside, movable } = contentsOf(scene, v);
-
-  const scatter = () => {
-    if (movable.length === 0) {
-      onReport("Nothing to scatter — every object here is the master, locked or hidden.");
-      return;
-    }
-    const fixed = inside.filter((o) => !movable.includes(o));
-    // Containment off means the room stops being a fence: the objects still
-    // cluster on it, but they are allowed to land outside.
-    const region = v.contain ? v : expandVolume(v, LOOSE_SPREAD);
-    const result = arrange(
-      { volume: v, region, movable, fixed, rules: movable.map((o) => makeRule(o.id)) },
-      seed
-    );
-    scene.applyPlacements(result.placements);
-    const where = v.contain ? "" : " — some outside, since containment is off";
-    onReport(
-      result.unplaced.length === 0
-        ? `Placed ${result.placements.length} ${
-            result.placements.length === 1 ? "object" : "objects"
-          }${where}.`
-        : `Placed ${result.placements.length} of ${movable.length}. No room left for ${result.unplaced.length} — widen the space or lower the clearance.`
-    );
-  };
-
-  return (
-    <>
-      <button
-        type="button"
-        data-ui="volume-scatter"
-        onClick={scatter}
-        className="type-body-strong flex w-full items-center justify-center gap-2 rounded-lg border border-glass/15 bg-glass/8 py-2 text-content transition-colors hover:border-glass/30 hover:bg-glass/14"
-      >
-        <Icon name="shuffle" size={15} />
-        Scatter {movable.length} {movable.length === 1 ? "object" : "objects"}
-      </button>
-      <p className="type-caption mt-1.5 text-content-subtle">
-        {report ?? "Rearranges everything movable in the room, from the seed above."}
-      </p>
-    </>
   );
 }
 
