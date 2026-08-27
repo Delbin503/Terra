@@ -93,28 +93,35 @@ function BudgetBody({
         </span>
         <span
           data-ui="terragen-total-frames"
-          className="type-display mt-2 block text-4xl tabular-nums text-brand"
+          /* text-3xl, not 4xl. At the larger size the frame count was taller
+             than the dialog's own title and read as the screen's headline
+             rather than as one of three figures on it. */
+          className="type-display mt-2 block text-3xl tabular-nums text-brand"
         >
           {formatCount(totals.frames)}
         </span>
       </div>
 
       {/* --------------------------------------------------------- what it costs */}
-      {/* TWO ROWS OF THE SAME SHAPE, AND NO METER.
+      {/* TWO CELLS OF THE SAME SHAPE, AND NO METER.
           The meter drew this run's share of the balance, and on a normal order
           that share is a fraction of a percent — it rendered as a six-pixel dot
           with an empty track beside it, which reads as a broken progress bar
           rather than as "barely anything". The line under the number already
           does the meter's job in figures nobody has to measure by eye.
-          Archive gets the same shape rather than a cramped detail line: once
-          neither is pretending to be a gauge, the two ARE the same kind of
-          fact — a headline number and a sentence saying what it is made of —
-          and stacked they read as "this is what it costs, this is what you
-          get". */}
+
+          SIDE BY SIDE, not stacked. These are two independent answers to "what
+          does pressing the button cost me" — credits out of the balance, bytes
+          onto the disk — and one is not read before the other. Stacked, the
+          block ran to three bands under the headline and the whole screen was a
+          column of figures to scan down; paired, the eye takes both at once and
+          the section is one object. Each cell stacks internally (label, figure,
+          working) so a half-width column doesn't have to fit a label and a
+          number on one baseline. */}
       <div
         data-ui="dispatch-cost"
         className={cn(
-          "mb-5 divide-y overflow-hidden rounded-2xl border",
+          "mb-5 grid grid-cols-2 divide-x overflow-hidden rounded-2xl border",
           affordable
             ? "divide-glass/10 border-glass/10 bg-glass/5"
             : "divide-danger/25 border-danger/45 bg-danger-soft/25"
@@ -262,12 +269,16 @@ function BudgetBody({
 }
 
 /**
- * One cost, as a headline number over the line that explains it.
+ * One cost, as a label over a figure over the line that explains it.
  *
- * A ROW, NOT A TILE. Side-by-side tiles made credits and archive size look like
- * peers to be compared, when one is money leaving the account and the other is
- * a file you will download. Stacked, each gets a full-width number and its own
- * sentence.
+ * PAIRED WITH ITS SIBLING, not stacked above it. The worry with putting these
+ * beside each other used to be that it invites a comparison that means nothing
+ * — credits are money leaving the account, megabytes are a file you download.
+ * What settles it is that neither is read for its size relative to the other:
+ * you check the credits against your balance and the archive against your disk,
+ * both once, and having to travel down the panel to do the second was the
+ * actual cost of stacking them. The internal stack keeps each figure sitting on
+ * its own sentence, which is what the full-width version was really providing.
  */
 function CostRow({
   icon,
@@ -288,27 +299,31 @@ function CostRow({
   tone?: "default" | "danger";
 }) {
   return (
-    <div className="px-4 py-3.5">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="type-body-lg-strong flex items-center gap-2 text-content">
-          <Icon
-            name={icon}
-            size={17}
-            className={cn("shrink-0", tone === "danger" ? "text-danger" : "text-brand")}
-          />
-          {label}
-        </span>
-        <span
-          data-ui={ui}
-          className={cn(
-            "font-display text-xl font-semibold tabular-nums",
-            tone === "danger" ? "text-danger" : "text-content"
-          )}
-        >
-          {value}
-          {unit && <span className="type-body-strong ml-1 text-content-muted">{unit}</span>}
-        </span>
-      </div>
+    <div className="min-w-0 px-4 py-3.5">
+      {/* Label above, figure below — the pair is half a dialog wide now, and
+          "Archive" opposite "72 MB" on one baseline left neither room to
+          breathe nor anywhere for the over-balance sentence to go. */}
+      <span className="type-body-strong flex items-center gap-1.5 text-content">
+        <Icon
+          name={icon}
+          size={15}
+          className={cn("shrink-0", tone === "danger" ? "text-danger" : "text-brand")}
+        />
+        {label}
+      </span>
+      <span
+        data-ui={ui}
+        className={cn(
+          /* text-lg. At text-xl these two figures were within a hair of the
+             frame count above them, so all three competed to be the number
+             you read first. */
+          "font-display mt-0.5 block text-lg font-semibold tabular-nums",
+          tone === "danger" ? "text-danger" : "text-content"
+        )}
+      >
+        {value}
+        {unit && <span className="type-body ml-1 text-content-muted">{unit}</span>}
+      </span>
       <p className="type-body-dense mt-0.5 text-content-subtle">{note}</p>
     </div>
   );

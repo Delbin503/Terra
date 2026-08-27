@@ -15,7 +15,7 @@ import {
   type WorkOrder,
 } from "./work-order";
 import type { WorkOrderStore } from "./useWorkOrder";
-import { Cost, Group, Note, InSceneChip, ChipCheck } from "./terragen-parts";
+import { Cost, Group, Note, InSceneChip, MultiSelectField } from "./terragen-parts";
 import { arrange, makeRule, newSeed, seedFor } from "./arrange";
 import { describeVolume } from "./scene-volume";
 import { isContentObject } from "./scene-types";
@@ -363,8 +363,17 @@ function OutputEditor({ order, store }: EditorProps) {
   const o = order.output;
   const perFrame = ANNOTATIONS.filter((a) => a.scope === "frame");
   const perVideo = ANNOTATIONS.filter((a) => a.scope === "video");
-  /** The resolution form, folded away until asked for. */
-  const [configuring, setConfiguring] = useState(false);
+  /**
+   * WHICH FIELD IS OPEN — one at a time, across all four.
+   *
+   * Output is pinned above Dispatch inside a capped scroller, and four fields
+   * each free to be open at once could stack to more than the cap: the section
+   * would then scroll internally while the button it exists to be read before
+   * sat below it. An accordion keeps the section's open height to one field's
+   * worth no matter which one you are in.
+   */
+  const [openField, setOpenField] = useState<string | null>(null);
+  const toggle = (id: string) => setOpenField((cur) => (cur === id ? null : id));
 
   return (
     <div data-ui="terragen-editor-output">
@@ -373,27 +382,56 @@ function OutputEditor({ order, store }: EditorProps) {
         what comes back in the archive.
       </Cost>
 
-      {/* TYPES AND ANNOTATIONS AS ROWS OF CHIPS, NOT COLUMNS OF ROWS. Nine
-          full-width checkboxes made Output the tallest section in the dock —
-          and it is the one pinned above Dispatch, so it was pushing the button
-          it exists to be read before off the bottom of the panel. */}
+      {/* FOUR FIELDS OF ONE SHAPE — a labelled row that opens into its choices.
+          Types and annotations were rows of chips, which solved the height
+          problem (nine full-width checkboxes had made this the tallest section
+          in the dock) at the cost of running two type steps below every other
+          field in every other section, and of abbreviating labels to fit inside
+          a pill. A closed field is one row whatever it contains, so this is
+          shorter still — and inside, each option is a full-size row carrying
+          the note that used to be a tooltip. */}
       <Group title="Dataset type">
-        <div className="flex flex-wrap gap-1.5">
-          <ChipCheck
-            label="Static images"
-            checked={o.images}
-            onChange={() => store.setOutput({ images: !o.images })}
-          />
-          <ChipCheck label="Video" checked={false} disabled comingSoon onChange={() => {}} />
-        </div>
+        <MultiSelectField
+          ui="dataset-type"
+          /* `input-2d` is the Image glyph. `capture` — the Orbit glyph — is
+             what the Output SECTION header already wears, and repeating a
+             section's own icon on a field inside it names nothing. */
+          icon="input-2d"
+          label="Dataset type"
+          open={openField === "types"}
+          onToggleOpen={() => toggle("types")}
+          options={[
+            {
+              id: "images",
+              label: "Static images",
+              note: "One frame per camera sample",
+              checked: o.images,
+            },
+            {
+              id: "video",
+              label: "Video",
+              note: "Continuous capture along the rig path",
+              checked: false,
+              disabled: true,
+              comingSoon: true,
+            },
+          ]}
+          onToggle={(id) => id === "images" && store.setOutput({ images: !o.images })}
+        />
       </Group>
 
       <Group title="Image configuration" hint={`${o.resolution.width}×${o.resolution.height}`}>
+        {/* SINGLE-SELECT, so it stays its own control rather than becoming a
+            MultiSelectField with the checkboxes lying about being independent.
+            A frame has one resolution; picking a second would mean unpicking
+            the first, which is a different gesture with a different affordance.
+            Same trigger row and the same in-place expansion as its three
+            neighbours, so the section still reads as four of one thing. */}
         <button
           type="button"
-          aria-expanded={configuring}
+          aria-expanded={openField === "resolution"}
           data-ui="terragen-output-configure"
-          onClick={() => setConfiguring((c) => !c)}
+          onClick={() => toggle("resolution")}
           className="flex w-full items-center gap-2.5 rounded-xl border border-glass/12 bg-glass/6 px-2.5 py-2 text-left transition-colors hover:border-glass/25"
         >
           <Icon name="settings" size={14} className="shrink-0 text-brand" />
@@ -408,12 +446,12 @@ function OutputEditor({ order, store }: EditorProps) {
             size={14}
             className={cn(
               "shrink-0 text-content-subtle transition-transform",
-              configuring && "rotate-180"
+              openField === "resolution" && "rotate-180"
             )}
           />
         </button>
 
-        {configuring && (
+        {openField === "resolution" && (
           <div className="mt-2 rounded-xl border border-glass/12 bg-glass/6 p-2.5">
             <div className="grid grid-cols-2 gap-1.5">
               {RESOLUTION_PRESETS.map((r) => {
@@ -426,7 +464,10 @@ function OutputEditor({ order, store }: EditorProps) {
                     data-ui={`terragen-res-${r.width}`}
                     onClick={() => store.setOutput({ resolution: { width: r.width, height: r.height } })}
                     className={cn(
-                      "type-caption-strong rounded-lg border px-2 py-1.5 text-left transition-colors",
+                      /* type-body-dense, not caption-strong: these are option
+                         rows inside an open field, and the options in the
+                         fields beside them are read at body size. */
+                      "type-body-dense rounded-lg border px-2 py-1.5 text-left transition-colors",
                       on
                         ? "border-brand bg-brand/12 text-content"
                         : "border-glass/12 bg-glass/6 text-content-muted hover:text-content"
@@ -459,7 +500,7 @@ function OutputEditor({ order, store }: EditorProps) {
                   })
                 }
               />
-              <span className="type-caption shrink-0 text-content-subtle">×</span>
+              <span className="type-body-dense shrink-0 text-content-subtle">×</span>
               <NumberInput
                 bordered
                 className="min-w-0 flex-1 text-left"
@@ -476,7 +517,7 @@ function OutputEditor({ order, store }: EditorProps) {
                 }
               />
             </div>
-            <p className="type-caption mt-2 text-content-subtle">
+            <p className="type-body-dense mt-2 text-content-subtle">
               Bigger frames don't change the frame count — they change the archive. The dispatch
               review sizes it at whatever you set here.
             </p>
@@ -485,35 +526,50 @@ function OutputEditor({ order, store }: EditorProps) {
       </Group>
 
       <Group title="Per-frame annotations" hint="applies to images">
-        <div className="flex flex-wrap gap-1.5">
-          {perFrame.map((a) => (
-            <ChipCheck
-              key={a.id}
-              label={shortAnnotation(a.label)}
-              title={a.note ? `${a.label} — ${a.note}` : a.label}
-              comingSoon={a.comingSoon}
-              disabled={a.comingSoon || !o.images}
-              checked={o.annotations[a.id]}
-              onChange={() => store.toggleAnnotation(a.id)}
-            />
-          ))}
-        </div>
+        <MultiSelectField
+          ui="per-frame"
+          icon="tag"
+          label="Per-frame annotations"
+          open={openField === "frame"}
+          onToggleOpen={() => toggle("frame")}
+          /* The gate that blocks Dispatch on zero annotations is the reason
+             this says so plainly: without the images type there is nothing for
+             a per-frame annotation to be attached to, and a field full of
+             greyed rows with no explanation reads as broken. */
+          disabledNote={o.images ? undefined : "Needs the Static images type"}
+          options={perFrame.map((a) => ({
+            id: a.id,
+            /* The full phrase, not the chip's abbreviation. "Object Detection
+               — AABB" fits a row; it never fit a pill, which is why the long
+               form had been demoted to a `title` attribute. */
+            label: a.label,
+            note: a.note,
+            checked: o.annotations[a.id],
+            disabled: a.comingSoon || !o.images,
+            comingSoon: a.comingSoon,
+          }))}
+          onToggle={(id) => store.toggleAnnotation(id as (typeof perFrame)[number]["id"])}
+        />
       </Group>
 
       <Group title="Per-video annotations" hint="needs the Video type">
-        <div className="flex flex-wrap gap-1.5">
-          {perVideo.map((a) => (
-            <ChipCheck
-              key={a.id}
-              label={shortAnnotation(a.label)}
-              title={a.label}
-              comingSoon
-              disabled
-              checked={false}
-              onChange={() => {}}
-            />
-          ))}
-        </div>
+        <MultiSelectField
+          ui="per-video"
+          icon="video"
+          label="Per-video annotations"
+          open={openField === "video"}
+          onToggleOpen={() => toggle("video")}
+          disabledNote="Needs the Video type"
+          options={perVideo.map((a) => ({
+            id: a.id,
+            label: a.label,
+            note: a.note,
+            checked: false,
+            disabled: true,
+            comingSoon: true,
+          }))}
+          onToggle={() => {}}
+        />
       </Group>
 
       {/* A fact, not a toggle — MAT runs as a post-render step either way. */}
@@ -524,7 +580,7 @@ function OutputEditor({ order, store }: EditorProps) {
         </span>
       </div>
 
-      <p className="type-caption mt-3 flex items-center gap-1.5 text-content-subtle">
+      <p className="type-body-dense mt-3 flex items-center gap-1.5 text-content-subtle">
         <Icon name="info" size={13} className="shrink-0" />
         <span>Frames, archive size and credits are shown in the dispatch review.</span>
       </p>
@@ -541,8 +597,3 @@ function clampPx(raw: string, fallback: number): number {
   return Math.min(RESOLUTION_LIMITS.max, Math.max(RESOLUTION_LIMITS.min, n));
 }
 
-/** "Object Detection — AABB" is a row label, not a chip label. The full phrase
- *  survives as the chip's title and its accessible name. */
-function shortAnnotation(label: string): string {
-  return label.replace("Object Detection — ", "");
-}

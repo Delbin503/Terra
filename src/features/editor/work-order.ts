@@ -622,6 +622,16 @@ export interface Totals {
  */
 const CREDITS_PER_FRAME = 0.125;
 const CREDITS_PER_SUBSET = 7;
+
+/**
+ * What a run of this shape is charged.
+ *
+ * Split out of `computeTotals` so the seeded run history can be priced at the
+ * SAME rate the review charges, without a second copy of the constants living
+ * in another module and drifting from these two.
+ */
+export const creditsFor = (frames: number, subsets: number) =>
+  Math.round(frames * CREDITS_PER_FRAME + subsets * CREDITS_PER_SUBSET);
 const BYTES_PER_FRAME = 0.5 * 1024 * 1024;
 /** What `BYTES_PER_FRAME` is a frame OF. A 4K frame is four of these. */
 const BASE_PIXELS = 1920 * 1080;
@@ -687,7 +697,7 @@ export function computeTotals(
     framesPerSubset: perSubset,
     subsets,
     frames,
-    credits: Math.round(frames * CREDITS_PER_FRAME + subsets * CREDITS_PER_SUBSET),
+    credits: creditsFor(frames, subsets),
     // Scaled by frame size: the archive is the one estimate the resolution
     // actually changes, and a 4K run that reported 1080p bytes would understate
     // it fourfold.

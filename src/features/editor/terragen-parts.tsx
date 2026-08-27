@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { Icon } from "@/components/icons";
+import { Icon, type IconName } from "@/components/icons";
 import { Pill, SearchInput } from "./ui";
 import { AssetThumb } from "./AssetThumb";
 import type { Asset } from "./assets-data";
@@ -338,59 +338,6 @@ export function Check({
   );
 }
 
-/**
- * Checkbox as a CHIP — the same statement as `Check`, laid out inline.
- *
- * Annotations and dataset types are short labels with a binary state, and a
- * full-width row each turned seven of them into a 300px column that pushed the
- * rest of the Output section off the panel. Wrapped chips say the same thing in
- * a third of the height, and the set reads as a set rather than as a form.
- */
-export function ChipCheck({
-  label,
-  title,
-  checked,
-  disabled,
-  comingSoon,
-  onChange,
-}: {
-  label: string;
-  /** the long form, on hover — chips carry the short one */
-  title?: string;
-  checked: boolean;
-  disabled?: boolean;
-  comingSoon?: boolean;
-  onChange: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={checked}
-      aria-label={title ?? label}
-      title={comingSoon ? `${title ?? label} — coming soon` : title ?? label}
-      disabled={disabled}
-      data-ui={`terragen-chip-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
-      onClick={onChange}
-      className={cn(
-        "type-caption-strong flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 transition-colors",
-        checked ? "border-brand bg-brand/12 text-content" : "border-glass/12 bg-glass/6 text-content-muted",
-        disabled ? "cursor-not-allowed opacity-45" : "hover:border-glass/30 hover:text-content"
-      )}
-    >
-      <span
-        className={cn(
-          "grid h-3.5 w-3.5 shrink-0 place-items-center rounded-[4px] border",
-          checked ? "border-brand bg-brand text-brand-foreground" : "border-glass/25"
-        )}
-      >
-        {checked && <Icon name="check" size={9} strokeWidth={3} />}
-      </span>
-      <span className="truncate">{label}</span>
-    </button>
-  );
-}
-
 /** Segmented control — a small set of mutually exclusive choices. */
 export function Segmented<T extends string>({
   value,
@@ -418,6 +365,150 @@ export function Segmented<T extends string>({
           {o.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * A MULTI-SELECT FIELD — a labelled row that opens into its own checkbox list.
+ *
+ * WHY THIS REPLACED THE CHIP ROWS. Chips were the answer to height: nine
+ * full-width checkboxes made Output the tallest section in the dock, and it is
+ * the one pinned above Dispatch. But they paid for it in type — a chip's label
+ * has to fit inside a pill, so it ran at `type-caption-strong`, two steps under
+ * the `type-body-strong` every other field in every other section uses. Output
+ * ended up the one panel whose contents were visibly smaller than its
+ * neighbours', and the annotation labels had to be abbreviated to fit
+ * ("Object Detection — AABB" → "AABB") with the full phrase surviving only as a
+ * tooltip.
+ *
+ * A closed field is ONE row regardless of how many options it holds, so this is
+ * shorter than the chips were, not taller — and the options inside it are rows
+ * again, at full size, with their explanatory notes visible rather than hovered
+ * for.
+ *
+ * IT OPENS IN PLACE, not into a floating layer. The Output section sits in a
+ * `max-h-[48vh] overflow-y-auto` container: an absolutely-positioned menu would
+ * be clipped by that scroller the moment the field near the bottom was opened.
+ * Expanding in place is also what the Frame resolution field beside it already
+ * does, so the four fields in the section behave identically.
+ */
+export function MultiSelectField({
+  icon,
+  label,
+  options,
+  open,
+  onToggleOpen,
+  onToggle,
+  ui,
+  /** shown instead of the count when nothing can be picked yet */
+  disabledNote,
+}: {
+  icon: IconName;
+  label: string;
+  options: {
+    id: string;
+    label: string;
+    /** the sentence under the label — what the chips could only put on hover */
+    note?: string;
+    checked: boolean;
+    disabled?: boolean;
+    comingSoon?: boolean;
+  }[];
+  open: boolean;
+  onToggleOpen: () => void;
+  onToggle: (id: string) => void;
+  ui: string;
+  disabledNote?: string;
+}) {
+  const chosen = options.filter((o) => o.checked);
+  const selectable = options.filter((o) => !o.disabled);
+  /* THE SUMMARY NAMES THE CHOICES WHILE IT CAN. "2 of 5 selected" is a fact
+     about the form; "Bounding boxes, Segmentation" is a fact about the run —
+     and the run is what someone re-reads this field to check. The count takes
+     over once the list of names would no longer fit on the line. */
+  const summary = disabledNote
+    ? disabledNote
+    : chosen.length === 0
+      ? "None selected"
+      : chosen.length <= 2
+        ? chosen.map((o) => o.label).join(", ")
+        : `${chosen.length} of ${selectable.length} selected`;
+
+  return (
+    <div data-ui={`terragen-multiselect-${ui}`}>
+      <button
+        type="button"
+        aria-expanded={open}
+        data-ui={`terragen-multiselect-${ui}-trigger`}
+        onClick={onToggleOpen}
+        className="flex w-full items-center gap-2.5 rounded-xl border border-glass/12 bg-glass/6 px-2.5 py-2 text-left transition-colors hover:border-glass/25"
+      >
+        <Icon name={icon} size={14} className="shrink-0 text-brand" />
+        <span className="min-w-0 grow">
+          <span className="type-body-strong block truncate text-content">{label}</span>
+          <span className="type-caption block truncate text-content-subtle">{summary}</span>
+        </span>
+        {chosen.length > 0 && !disabledNote && (
+          <Pill ui={`multiselect-${ui}-count`} tone="brand">
+            {chosen.length}
+          </Pill>
+        )}
+        <Icon
+          name="chevron-down"
+          size={14}
+          className={cn(
+            "shrink-0 text-content-subtle transition-transform",
+            open && "rotate-180"
+          )}
+        />
+      </button>
+
+      {open && (
+        <ul
+          role="group"
+          aria-label={label}
+          data-ui={`terragen-multiselect-${ui}-options`}
+          className="mt-2 space-y-1 rounded-xl border border-glass/12 bg-glass/6 p-1.5"
+        >
+          {options.map((o) => (
+            <li key={o.id}>
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={o.checked}
+                disabled={o.disabled}
+                data-ui={`terragen-option-${o.id}`}
+                onClick={() => onToggle(o.id)}
+                className={cn(
+                  "flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors",
+                  o.disabled ? "cursor-not-allowed opacity-45" : "hover:bg-glass/12"
+                )}
+              >
+                <span
+                  className={cn(
+                    "mt-px grid h-4 w-4 shrink-0 place-items-center rounded-[5px] border",
+                    o.checked ? "border-brand bg-brand text-brand-foreground" : "border-glass/25"
+                  )}
+                >
+                  {o.checked && <Icon name="check" size={10} strokeWidth={3} />}
+                </span>
+                <span className="min-w-0 grow">
+                  <span className="type-body block text-content">{o.label}</span>
+                  {o.note && (
+                    <span className="type-caption block text-content-subtle">{o.note}</span>
+                  )}
+                </span>
+                {o.comingSoon && (
+                  <Pill ui={`option-${o.id}-soon`} tone="muted">
+                    Soon
+                  </Pill>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

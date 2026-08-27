@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { creditsFor } from "./work-order";
 
 /**
  * WORK ORDER RUNS — what happened to the orders you dispatched.
@@ -34,6 +35,17 @@ export interface WorkOrderRun {
   createdAt: number;
   dataType: "Image";
   project: string;
+  /**
+   * What this run was charged, in credits.
+   *
+   * STORED, NOT RECOMPUTED. The figure the table shows has to be the figure the
+   * account was actually debited, and that was settled by the dispatch review
+   * against the order as it stood at the time. Deriving it here from `total`
+   * would re-price a two-week-old run at today's rate and quietly disagree with
+   * the receipt — and the per-subset component of the price isn't recoverable
+   * from a frame count anyway.
+   */
+  credits: number;
   /** produced so far, out of what was ordered */
   done: number;
   total: number;
@@ -134,6 +146,18 @@ const durationFor = (total: number) =>
   Math.min(MAX_DURATION, Math.max(MIN_DURATION, total * 250));
 
 /**
+ * What a run of this size cost, for the seeded history only.
+ *
+ * The fixtures predate the session, so there is no order left to read a real
+ * price off. This stands in for one — priced through `creditsFor`, the same
+ * function the dispatch review charges with, so the history can't quote a rate
+ * the review has stopped using. Assumed one subset, since a fixture has no axes
+ * to have multiplied it. Live dispatches carry the review's own figure and
+ * never come through here.
+ */
+const seededCredits = (total: number) => creditsFor(total, 1);
+
+/**
  * Rows that exist before this session does.
  *
  * A run list that starts empty can't show what a completed or failed row looks
@@ -148,6 +172,7 @@ function seedRuns(project: string): WorkOrderRun[] {
       createdAt: now - 2 * HOUR,
       dataType: "Image",
       project: "Sand Dune Project",
+      credits: seededCredits(320),
       done: 15,
       total: 320,
       unit: "Images",
@@ -162,6 +187,7 @@ function seedRuns(project: string): WorkOrderRun[] {
       createdAt: now - 5 * HOUR,
       dataType: "Image",
       project: "Project Dimist Argon Extraction",
+      credits: seededCredits(12),
       done: 10,
       total: 12,
       unit: "Images",
@@ -174,6 +200,7 @@ function seedRuns(project: string): WorkOrderRun[] {
       createdAt: now - 26 * HOUR,
       dataType: "Image",
       project: "Sand Dune Project",
+      credits: seededCredits(1200),
       done: 1200,
       total: 1200,
       unit: "Images",
@@ -186,6 +213,7 @@ function seedRuns(project: string): WorkOrderRun[] {
       createdAt: now - 27 * HOUR,
       dataType: "Image",
       project: project,
+      credits: seededCredits(1200),
       done: 1200,
       total: 1200,
       unit: "Images",
@@ -198,6 +226,7 @@ function seedRuns(project: string): WorkOrderRun[] {
       createdAt: now - 50 * HOUR,
       dataType: "Image",
       project: "Sand Dune Project",
+      credits: seededCredits(12),
       done: 0,
       total: 12,
       unit: "Images",
@@ -210,6 +239,7 @@ function seedRuns(project: string): WorkOrderRun[] {
       createdAt: now - 74 * HOUR,
       dataType: "Image",
       project: "Sand Dune Project",
+      credits: seededCredits(1200),
       done: 1200,
       total: 1200,
       unit: "Images",
@@ -223,6 +253,8 @@ function seedRuns(project: string): WorkOrderRun[] {
 export interface RunInit {
   project: string;
   total: number;
+  /** what the dispatch review charged for this order */
+  credits: number;
 }
 
 export interface WorkOrderRunStore {
@@ -277,6 +309,8 @@ export function useWorkOrderRuns(projectName: string): WorkOrderRunStore {
       createdAt: Date.now(),
       dataType: "Image",
       project: init.project,
+      // The review's own figure, not a re-derivation — see `WorkOrderRun.credits`.
+      credits: Math.max(0, Math.round(init.credits)),
       done: 0,
       total: Math.max(1, Math.round(init.total)),
       unit: "Images",
@@ -327,11 +361,23 @@ export function useWorkOrderRuns(projectName: string): WorkOrderRunStore {
   );
 }
 
-/** "Apr 26, 2025" + "14:00:20", the two lines the Date column shows. */
+/**
+ * "26.04.25" + "14:00:20", the two lines the Date column shows.
+ *
+ * FIXED FORMAT, NOT THE LOCALE'S. `toLocaleDateString` gave "Apr 26, 2025",
+ * which is the widest thing that column ever has to hold and which wraps to two
+ * lines at the widths the dialog actually gets — and its field order changes
+ * under the reader's locale, so the same table read D/M in one place and M/D in
+ * another with nothing on screen to say which. Numeric and zero-padded means
+ * every row is exactly eight characters, the column can be scanned down as
+ * digits, and the order is unambiguous. Padded by hand: `2-digit` on
+ * `toLocaleDateString` still lets the locale choose the order and the separator.
+ */
 export function formatRunDate(ms: number): { date: string; time: string } {
   const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
   return {
-    date: d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
+    date: `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${pad(d.getFullYear() % 100)}`,
     time: d.toLocaleTimeString(undefined, { hour12: false }),
   };
 }

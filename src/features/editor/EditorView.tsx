@@ -407,6 +407,23 @@ export function EditorView({
   }, [selectedId]);
 
   /**
+   * A fresh selection opens straight onto Transform — the same panel a
+   * stand-in gets the moment it starts standing in (see TerraGenView). Before
+   * this, picking an object in the viewport only lit the bottom-center tabs;
+   * the properties panel itself stayed shut until you clicked "Object", which
+   * made the corner that answers "where is this thing" one extra click behind
+   * the click that selected it.
+   *
+   * Only the transition into a new id matters, so this doesn't fight the
+   * toggle: closing the panel while the SAME object stays selected — or
+   * switching its tab to Texture or Capture — doesn't get clobbered on every
+   * render, only on the next object you pick.
+   */
+  useEffect(() => {
+    if (selectedId) setEditTab("object");
+  }, [selectedId]);
+
+  /**
    * Save.
    *
    * There is no backend yet, so what this actually does is say it happened —
@@ -1623,7 +1640,14 @@ export function EditorView({
             // number the review screen just charged for.
             const weatherSets = scene.savedWeather.filter((s) => s.inRun).length;
             const totals = computeTotals(order, assets.assets, rigState(scene).frames, weatherSets);
-            runs.add({ project: projectName, total: totals.frames });
+            // Credits travel with the row: the Work Orders table quotes what
+            // this dispatch was charged, and this is the only place that figure
+            // exists — see `WorkOrderRun.credits`.
+            runs.add({
+              project: projectName,
+              total: totals.frames,
+              credits: totals.credits,
+            });
           }}
         />
       )}

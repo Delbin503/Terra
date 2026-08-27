@@ -63,6 +63,7 @@ export function MasterSection({
   onBrowseSwaps,
   previewedSwap,
   onPreviewSwap,
+  onSelectObject,
 }: {
   scene: SceneApi;
   order: WorkOrder;
@@ -82,6 +83,15 @@ export function MasterSection({
   /** which stand-in the viewport is currently showing, if any */
   previewedSwap: { targetId: string; assetId: string } | null;
   onPreviewSwap: (targetId: string, assetId: string) => void;
+  /**
+   * Select an object and leave any stand-in drawn over it.
+   *
+   * NOT `scene.select`. A stand-in occupies its target's id, so selecting the
+   * target while one previewed was a no-op — the row was already selected and
+   * the viewport carried on showing the substitution. Going through the view's
+   * handler is what makes this row a way back to the actual object.
+   */
+  onSelectObject: (id: string) => void;
 }) {
   const master = roles.master;
   const selected = scene.selected;
@@ -117,7 +127,10 @@ export function MasterSection({
             <button
               type="button"
               data-ui="terragen-master-select"
-              onClick={() => scene.select(master.id)}
+              /* Through the view's handler, like the rows below: this is the
+                 other way to ask for the master by name, and it was equally
+                 unable to get back to it from under a stand-in. */
+              onClick={() => onSelectObject(master.id)}
               className="type-body-strong min-w-0 grow truncate text-left text-content"
             >
               {master.name}
@@ -158,7 +171,7 @@ export function MasterSection({
                 selected={selected?.id === o.id}
                 swapsOpen={openSwaps === o.id}
                 onToggleSwaps={() => setOpenSwaps((id) => (id === o.id ? null : o.id))}
-                onSelect={() => scene.select(o.id)}
+                onSelect={() => onSelectObject(o.id)}
                 onSetRole={(r) => scene.setRole(o.id, r === o.role ? "none" : r)}
                 onMakeMaster={() => scene.setRole(o.id, "master")}
                 onAddSwaps={() => onBrowseSwaps({ id: o.id, name: o.name })}

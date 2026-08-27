@@ -50,9 +50,9 @@ export function WorkOrdersDialog({
     {
       key: "date",
       label: "Date",
-      // Sorted on the timestamp, never on the rendered string: "Apr" sorts
-      // before "Jan" alphabetically, and a run log that reorders itself wrongly
-      // is worse than one that doesn't sort at all.
+      // Sorted on the timestamp, never on the rendered string: "01.12.25"
+      // sorts before "02.01.24" as text, and a run log that reorders itself
+      // wrongly is worse than one that doesn't sort at all.
       sortValue: (r) => r.createdAt,
       render: (r) => {
         const { date, time } = formatRunDate(r.createdAt);
@@ -68,7 +68,11 @@ export function WorkOrdersDialog({
       key: "type",
       label: "Data Type",
       sortValue: (r) => r.dataType,
-      render: (r) => <span className="type-body text-content">{r.dataType}</span>,
+      /* "Static Images", not "Image". The column names the DATASET TYPE the
+         order was dispatched with — the same words the Output section offers —
+         and "Image" was neither of them. It also has to stay distinguishable
+         from Video once that ships, which "Image" alone would not be. */
+      render: (r) => <span className="type-body text-content">{datasetType(r)}</span>,
     },
     {
       key: "project",
@@ -78,7 +82,7 @@ export function WorkOrdersDialog({
     },
     {
       key: "count",
-      label: "Number of Data",
+      label: "Datasets",
       sortValue: (r) => r.done / Math.max(1, r.total),
       render: (r) => (
         <div>
@@ -87,6 +91,24 @@ export function WorkOrdersDialog({
           </span>
           <StatusLabel run={r} />
         </div>
+      ),
+    },
+    {
+      /* WHAT IT COST, on the row that spent it. The dispatch review states the
+         price once, before the run exists, and then it was gone — so "which of
+         these ate my balance" could not be answered from the only screen that
+         lists the runs. Right-aligned and tabular: this is the one column
+         anyone reads down as a set of magnitudes. */
+      key: "credits",
+      label: "Credits",
+      /* `align`, not a `text-right` class: the column's className only reaches
+         the header, so styling the cells that way would have right-aligned the
+         heading over left-aligned figures. */
+      align: "right",
+      className: "w-[110px]",
+      sortValue: (r) => r.credits,
+      render: (r) => (
+        <span className="type-numeric-sm text-content">{r.credits.toLocaleString()}</span>
       ),
     },
     {
@@ -103,7 +125,7 @@ export function WorkOrdersDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         aria-describedby="work-orders-description"
-        /* Wide and capped, not centred-small: six columns of run history is a
+        /* Wide and capped, not centred-small: seven columns of run history is a
            reading surface, and at the default dialog width the project names
            wrap to three lines each. */
         className="w-[min(76rem,calc(100vw-3rem))] max-w-none p-0"
@@ -132,6 +154,11 @@ export function WorkOrdersDialog({
 }
 
 /* ------------------------------------------------------------------ parts */
+
+/** The dataset type in the words the Output section uses for it. */
+function datasetType(run: WorkOrderRun): string {
+  return run.dataType === "Image" ? "Static Images" : run.dataType;
+}
 
 /** The run's state, under its count — the mock's coloured second line. */
 function StatusLabel({ run }: { run: WorkOrderRun }) {

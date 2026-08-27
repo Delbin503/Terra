@@ -289,6 +289,33 @@ export function TerraGenView({
     : null;
 
   /**
+   * THE THING THE CORNER PANEL IS POINTED AT — a stand-in if one is
+   * previewing, otherwise whatever is plainly selected in the edit stage.
+   *
+   * Before this, the Transform panel and its Done pill only ever appeared for
+   * a swap preview: selecting the master itself, or anything else in the
+   * scene, armed the gizmo (see `showGizmo` in `EditStage`) but gave no
+   * numeric readout and no way to leave the selection except clicking empty
+   * space. A stand-in and a plain selection are the same situation — an
+   * object with handles on it, wanting its own corner panel — so they share
+   * one code path here.
+   *
+   * Cameras are left out: they already get their own guide and rig controls
+   * from the Camera Settings section (`cameraGuide`, `onFocusCamera`), and
+   * this panel's plain-object edit has no rig-aware branch to move a paired
+   * camera correctly.
+   */
+  const inspected = standIn
+    ? {
+        object: standIn.object,
+        swap: { targetId: standIn.swap.targetId, assetId: standIn.swap.assetId, target: standIn.target },
+        doneLabel: `Stop standing in for ${standIn.swap.targetName}`,
+      }
+    : scene.selected && scene.selected.source !== "camera"
+      ? { object: scene.selected, swap: null, doneLabel: `Deselect ${scene.selected.name}` }
+      : null;
+
+  /**
    * Preview a stand-in: show it, and put the user where they can adjust it.
    *
    * It selects the object it replaces — the gizmo follows the selection in this
@@ -306,6 +333,39 @@ export function TerraGenView({
     setStage("edit");
     scene.select(targetId);
   };
+
+  /**
+   * PICKING AN OBJECT PUTS THE STAND-IN AWAY.
+   *
+   * A stand-in doesn't sit BESIDE the thing it replaces — it is drawn in its
+   * place, over its id (see `standIn`). So while one was previewing there was
+   * no way back to the original: its row in the dock was already `selected`,
+   * clicking it called `scene.select` with the id it already held, nothing
+   * changed, and the panel kept reading the stand-in's offset. The only exit
+   * was the Done pill, which is not where anyone looks for "show me the actual
+   * object again".
+   *
+   * Asking for an object is therefore taken as asking for THAT object. Reached
+   * from the dock rows and from the viewport, so both gestures agree.
+   */
+  const selectObject = (id: string | null) => {
+    setSwapPreview(null);
+    setSwapSetting(null);
+    scene.select(id);
+  };
+
+  /**
+   * ...and picking anything ELSE puts it away too.
+   *
+   * The viewport can move the selection without going through `selectObject`
+   * (marquee, a click on another mesh). A stand-in left previewing then had the
+   * corner panel describing one object while the gizmo held another — and the
+   * panel's edits route into the swap offset, so the numbers on screen belonged
+   * to neither. The preview only holds while its target is what is selected.
+   */
+  useEffect(() => {
+    if (swapPreview && scene.selectedId !== swapPreview.targetId) setSwapPreview(null);
+  }, [swapPreview, scene.selectedId]);
 
   /**
    * The Arrangement axis follows whichever space is armed in the scene.
@@ -521,21 +581,22 @@ export function TerraGenView({
         onSpan={spanRig}
       />
 
-      {/* THE STAND-IN'S OWN TRANSFORM, in the corner the editor puts it in.
-          A stand-in has to be adjustable by NUMBER as well as by handle: "sits
-          40cm too low" is a figure somebody reads off a model, not something you
-          find by dragging. This is the editor's own properties panel and its own
-          setting controls, pointed at the stand-in — so the two surfaces cannot
-          drift, and every value goes into the swap's offset rather than the
-          scene. */}
-      {standIn && !preview && (
+      {/* THE SELECTED OBJECT'S OWN TRANSFORM, in the corner the editor puts it
+          in. A stand-in — or the master, or anything else picked in the edit
+          stage — has to be adjustable by NUMBER as well as by handle: "sits
+          40cm too low" is a figure somebody reads off a model, not something
+          you find by dragging. This is the editor's own properties panel and
+          its own setting controls, pointed at whatever `inspected` names — so
+          the two surfaces cannot drift, and a swap's value goes into its
+          offset while a plain selection's goes straight into the scene. */}
+      {inspected && !preview && (
         <div
-          data-ui="terragen-swap-inspector"
+          data-ui={inspected.swap ? "terragen-swap-inspector" : "terragen-object-inspector"}
           className="pointer-events-none absolute bottom-6 z-30 flex w-[320px] flex-col items-stretch gap-2.5"
           style={{ right: stageInset + 16 }}
         >
           <ObjectPropertiesPanel
-            object={standIn.object}
+            object={inspected.object}
             group="Transform"
             active={swapSetting}
             onSelect={(k) => {
@@ -547,37 +608,43 @@ export function TerraGenView({
         </div>
       )}
 
-      {standIn && !preview && swapSetting && (
+      {inspected && !preview && swapSetting && (
         <SettingControl
-          object={standIn.object}
+          object={inspected.object}
           setting={swapSetting}
           camera={null}
           onChange={(patch) => {
-            // Only the three transform fields can reach a swap: a stand-in's
-            // material belongs to the asset, not to this substitution.
-            const pose = {
-              position: patch.position ?? standIn.object.position,
-              rotationDeg: patch.rotationDeg ?? standIn.object.rotationDeg,
-              scale: patch.scale ?? standIn.object.scale,
-            };
-            store.setSwapOffset(
-              standIn.swap.targetId,
-              standIn.swap.assetId,
-              offsetFromPose(standIn.target, pose)
-            );
+            if (inspected.swap) {
+              // Only the three transform fields can reach a swap: a stand-in's
+              // material belongs to the asset, not to this substitution.
+              const pose = {
+                position: patch.position ?? inspected.object.position,
+                rotationDeg: patch.rotationDeg ?? inspected.object.rotationDeg,
+                scale: patch.scale ?? inspected.object.scale,
+              };
+              store.setSwapOffset(
+                inspected.swap.targetId,
+                inspected.swap.assetId,
+                offsetFromPose(inspected.swap.target, pose)
+              );
+            } else {
+              scene.update(inspected.object.id, patch);
+            }
           }}
           onClose={() => setSwapSetting(null)}
         />
       )}
 
-      {/* THE WAY OUT OF THE PREVIEW.
+      {/* THE WAY OUT OF THE SELECTION.
           The bar here used to name what was standing in for what and then
           explain the gesture — a sentence in the middle of the picture saying
           things the panel on the right and the highlighted row in the dock
-          already say. What is left is the one thing neither of those provides. */}
-      {standIn && !preview && (
+          already say. What is left is the one thing neither of those provides,
+          and now it closes a plain selection the same way it closes a swap
+          preview. */}
+      {inspected && !preview && (
         <div
-          data-ui="terragen-swap-preview-bar"
+          data-ui="terragen-inspector-done-bar"
           /* Bottom-LEFT, not centre. Centred it sat on the Transform panel,
              which is pinned to the right edge inside the dock's inset — and the
              two together are wider than what is left of the stage. The corner
@@ -586,15 +653,24 @@ export function TerraGenView({
         >
           <button
             type="button"
-            data-ui="terragen-swap-preview-done"
-            aria-label={`Stop standing in for ${standIn.swap.targetName}`}
+            data-ui="terragen-inspector-done"
+            aria-label={inspected.doneLabel}
             onClick={() => {
-              setSwapPreview(null);
+              if (inspected.swap) {
+                setSwapPreview(null);
+              } else {
+                scene.select(null);
+              }
               setSwapSetting(null);
             }}
             className="type-body-strong pointer-events-auto flex items-center gap-2 rounded-full border border-brand/50 bg-surface-overlay/90 px-4 py-2.5 text-content shadow-lg backdrop-blur transition-colors hover:bg-surface-overlay"
           >
-            <Icon name="retry" size={15} className="shrink-0 text-brand" />
+            {/* ONE ICON, BOTH STATES. It was a ✕ for a plain selection and a
+                ↺ for a stand-in — two glyphs for a button whose label never
+                changed, so the pill appeared to do something different
+                depending on how you had got to it. A check is what "Done"
+                means in either case: this is finished, put the handles away. */}
+            <Icon name="check" size={15} className="shrink-0 text-brand" />
             Done
           </button>
         </div>
@@ -695,6 +771,7 @@ export function TerraGenView({
         }}
         previewedSwap={swapPreview}
         onPreviewSwap={previewSwap}
+        onSelectObject={selectObject}
         onFocusCamera={focusCamera}
         onCameraEdit={setCameraEdit}
       />
@@ -1127,6 +1204,7 @@ function TerraGenDock({
   onBrowseLibrary,
   previewedSwap,
   onPreviewSwap,
+  onSelectObject,
   onFocusCamera,
   onCameraEdit,
 }: {
@@ -1135,6 +1213,8 @@ function TerraGenDock({
   previewedSwap: { targetId: string; assetId: string } | null;
   /** show this stand-in in the viewport, or put it away if it already is */
   onPreviewSwap: (targetId: string, assetId: string) => void;
+  /** select an object AND leave whatever stand-in was covering it */
+  onSelectObject: (id: string | null) => void;
   order: WorkOrder;
   store: WorkOrderStore;
   assets: Asset[];
@@ -1260,6 +1340,7 @@ function TerraGenDock({
                 onBrowseSwaps={(target) => onBrowseLibrary({ kind: "swap", target })}
                 previewedSwap={previewedSwap}
                 onPreviewSwap={onPreviewSwap}
+                onSelectObject={onSelectObject}
               />
             </Section>
 
