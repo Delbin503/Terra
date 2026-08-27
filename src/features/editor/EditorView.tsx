@@ -1433,11 +1433,14 @@ export function EditorView({
       )}
       {focusedVolume && volumeSetting && !volumeDragging && (
         <VolumeSettingControl
+          scene={scene}
           volume={focusedVolume}
           setting={volumeSetting}
           seed={volumeSeed}
+          report={volumeReport}
           patch={(next) => scene.updateVolume(focusedVolume.id, next)}
           onSeed={setVolumeSeed}
+          onReport={setVolumeReport}
           onClose={() => setVolumeSetting(null)}
         />
       )}
@@ -1460,7 +1463,6 @@ export function EditorView({
             tab={volumeTab}
             active={volumeSetting}
             seed={volumeSeed}
-            report={volumeReport}
             /* Toggling, like the object list: clicking the open row closes its
                control and disarms its gizmo, leaving the space selected. */
             onSelect={(k) => setVolumeSetting((cur) => (cur === k ? null : k))}

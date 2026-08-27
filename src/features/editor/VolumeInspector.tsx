@@ -199,7 +199,6 @@ export function VolumeInspectorPanel({
   tab,
   active,
   seed,
-  report,
   onSelect,
   onReport,
 }: {
@@ -209,44 +208,12 @@ export function VolumeInspectorPanel({
   active: VolumeSetting | null;
   /** the seed the Scatter button will use — shown on the Seed row */
   seed: number;
-  /** what the last scatter did, under the button that did it */
-  report: string | null;
   onSelect: (k: VolumeSetting) => void;
+  /** clearing a stale scatter report once the strays are dealt with */
   onReport: (s: string | null) => void;
 }) {
   const rows = ROWS.filter((r) => r.tab === tab);
-  const { inside, outside, movable } = contentsOf(scene, v);
-
-  /**
-   * REARRANGE WHAT IS IN THE ROOM.
-   *
-   * Back in the panel rather than behind a row: it is one button with one
-   * outcome, and the centre control it briefly lived in was a panel whose only
-   * content was that button.
-   */
-  const scatter = () => {
-    if (movable.length === 0) {
-      onReport("Nothing to scatter — every object here is the master, locked or hidden.");
-      return;
-    }
-    const fixed = inside.filter((o) => !movable.includes(o));
-    // Containment off means the room stops being a fence: the objects still
-    // cluster on it, but they are allowed to land outside.
-    const region = v.contain ? v : expandVolume(v, LOOSE_SPREAD);
-    const result = arrange(
-      { volume: v, region, movable, fixed, rules: movable.map((o) => makeRule(o.id)) },
-      seed
-    );
-    scene.applyPlacements(result.placements);
-    const where = v.contain ? "" : " — some outside, since containment is off";
-    onReport(
-      result.unplaced.length === 0
-        ? `Placed ${result.placements.length} ${
-            result.placements.length === 1 ? "object" : "objects"
-          }${where}.`
-        : `Placed ${result.placements.length} of ${movable.length}. No room left for ${result.unplaced.length} — widen the space or lower the clearance.`
-    );
-  };
+  const { inside, outside } = contentsOf(scene, v);
 
   const bringInside = () => {
     scene.applyPlacements(
@@ -331,25 +298,10 @@ export function VolumeInspectorPanel({
             it, there is no action to offer: an object bigger than the room is a
             fact about the room, answered by widening it. */}
 
-        {/* Scatter is the panel's ACTION, so it sits at the foot of it, full
-            width, the way the primary button of any panel does. */}
-        {tab === "contents" && (
-          <div className="mt-2 border-t border-glass/10 px-0.5 pt-2.5">
-            <button
-              type="button"
-              data-ui="volume-scatter"
-              disabled={movable.length === 0}
-              onClick={scatter}
-              className="type-body-strong flex w-full items-center justify-center gap-2 rounded-lg border border-glass/15 bg-glass/8 py-2 text-content transition-colors hover:border-glass/30 hover:bg-glass/14 disabled:opacity-40 disabled:hover:border-glass/15 disabled:hover:bg-glass/8"
-            >
-              <Icon name="shuffle" size={15} />
-              Scatter {movable.length} {movable.length === 1 ? "Object" : "Objects"}
-            </button>
-            <p className="type-caption mt-1.5 text-content-subtle">
-              {report ?? "Rearranges everything movable in the room, from the seed above."}
-            </p>
-          </div>
-        )}
+        {/* No Scatter button here. It went to the SEED control, because the
+            seed is the only input it has and the two were a setting in one
+            panel and the button that consumed it in another — you set a number
+            on the right, then travelled to the bottom of a list to spend it. */}
       </PanelBody>
     </Panel>
   );
@@ -419,18 +371,26 @@ const CONTROL_LABEL: Record<VolumeSetting, string> = {
  * around a model you are watching change, and a room's number does not.
  */
 export function VolumeSettingControl({
+  scene,
   volume: v,
   setting,
   seed,
+  report,
   patch,
   onSeed,
+  onReport,
   onClose,
 }: {
+  /** Scatter moves what is in the room, so this control reaches the scene. */
+  scene: SceneApi;
   volume: SceneVolume;
   setting: VolumeSetting;
   seed: number;
+  /** what the last scatter did — shown under the button that did it */
+  report: string | null;
   patch: (next: Partial<SceneVolume>) => void;
   onSeed: (n: number) => void;
+  onReport: (s: string | null) => void;
   onClose: () => void;
 }) {
   const setVec = (key: "size" | "center", axis: 0 | 1 | 2, raw: string) => {
@@ -548,10 +508,85 @@ export function VolumeSettingControl({
             <p className="type-caption mt-1.5 text-content-subtle">
               The same seed rebuilds the same arrangement, here and on the render farm.
             </p>
+            {/* THE BUTTON THAT SPENDS THE NUMBER, beside the number.
+                A seed is not a setting you leave somewhere and admire — it is an
+                input to exactly one action, and having them in two panels meant
+                typing a number on the right and then travelling to the bottom of
+                a list to use it. */}
+            <ScatterButton
+              scene={scene}
+              volume={v}
+              seed={seed}
+              report={report}
+              onReport={onReport}
+            />
           </>
         )}
 
       </Panel>
+    </div>
+  );
+}
+
+/**
+ * SCATTER — one button and what it just did.
+ *
+ * The report is not a toast. A scatter can half-succeed — twelve chairs into a
+ * space with room for nine — and the number that comes back is the reason you
+ * would widen the room or reroll, both of which are one click away from here.
+ */
+function ScatterButton({
+  scene,
+  volume: v,
+  seed,
+  report,
+  onReport,
+}: {
+  scene: SceneApi;
+  volume: SceneVolume;
+  seed: number;
+  report: string | null;
+  onReport: (s: string | null) => void;
+}) {
+  const { inside, movable } = contentsOf(scene, v);
+
+  const scatter = () => {
+    if (movable.length === 0) {
+      onReport("Nothing to scatter — every object here is the master, locked or hidden.");
+      return;
+    }
+    const fixed = inside.filter((o) => !movable.includes(o));
+    // Containment off means the room stops being a fence: the objects still
+    // cluster on it, but they are allowed to land outside.
+    const region = v.contain ? v : expandVolume(v, LOOSE_SPREAD);
+    const result = arrange(
+      { volume: v, region, movable, fixed, rules: movable.map((o) => makeRule(o.id)) },
+      seed
+    );
+    scene.applyPlacements(result.placements);
+    const where = v.contain ? "" : " — some outside, since containment is off";
+    onReport(
+      result.unplaced.length === 0
+        ? `Placed ${result.placements.length} ${
+            result.placements.length === 1 ? "object" : "objects"
+          }${where}.`
+        : `Placed ${result.placements.length} of ${movable.length}. No room left for ${result.unplaced.length} — widen the space or lower the clearance.`
+    );
+  };
+
+  return (
+    <div className="mt-2.5 border-t border-glass/10 pt-2.5">
+      <button
+        type="button"
+        data-ui="volume-scatter"
+        disabled={movable.length === 0}
+        onClick={scatter}
+        className="type-body-strong flex w-full items-center justify-center gap-2 rounded-lg border border-glass/15 bg-glass/8 py-2 text-content transition-colors hover:border-glass/30 hover:bg-glass/14 disabled:opacity-40 disabled:hover:border-glass/15 disabled:hover:bg-glass/8"
+      >
+        <Icon name="shuffle" size={15} />
+        Scatter {movable.length} {movable.length === 1 ? "Object" : "Objects"}
+      </button>
+      {report && <p className="type-caption mt-1.5 text-content-subtle">{report}</p>}
     </div>
   );
 }
