@@ -17,13 +17,12 @@ import {
   type WorldImage,
 } from "./world-input";
 import {
-  assignSubjects,
   regionAt,
-  seedCounts,
   segmentImage,
   type Region,
   type SegmentResult,
 } from "./segmentation";
+import { SAMPLE_IMAGE, samplePass } from "./sample-world";
 
 /**
  * IMAGE STUDIO — the pass over one reference photo before it goes into a world.
@@ -82,9 +81,6 @@ interface Group {
   /** region ids belonging to this group, in the order they were assigned */
   ids: number[];
 }
-
-/** The group name used when the user segments without typing anything. */
-const ALL_REGIONS = "Regions";
 
 /**
  * A hue per group.
@@ -162,6 +158,19 @@ export function ImageStudioDialog({
   const snap = history[at] ?? EMPTY;
 
   const [seg, setSeg] = useState<SegmentResult | null>(null);
+  /**
+   * Real region id → the composite it belongs to.
+   *
+   * A person is several regions (a shirt, a pair of legs, a face) welded into
+   * one highlight, so a click lands on a member and has to be answered by the
+   * whole figure. Without this, clicking the walker in yellow would drop her
+   * leggings out of the count and leave the rest of her lit.
+   */
+  const [memberOf, setMemberOf] = useState<Map<number, number>>(new Map());
+  /** keywords the picture has nothing for — see the notice under the row */
+  const [unknown, setUnknown] = useState<string[]>([]);
+  /** the bundled sample failed to load and this is somebody's own upload */
+  const [sampleMissing, setSampleMissing] = useState(false);
   /** what the last pass produced, as the list shows it */
   const [groups, setGroups] = useState<Group[]>([]);
   /** whether that pass was run against typed keywords */
@@ -197,12 +206,36 @@ export function ImageStudioDialog({
   );
   const [hover, setHover] = useState<number | null>(null);
 
-  /* Decode the upload once, at a size the brush can keep up with. */
+  /**
+   * Decode the picture once, at a size the brush can keep up with.
+   *
+   * ALWAYS THE SAMPLE, never the upload. Segmentation answers keywords from a
+   * written-down map of what is in one known photograph (`sample-world.ts`), so
+   * pointing the studio at somebody's own file would answer "humans" with
+   * whatever regions happened to sit where the walkers are in the sample —
+   * confident, precise, and about the wrong picture. Until there is a model
+   * behind this, the honest demo is the one picture the map describes.
+   */
   useEffect(() => {
     setSource(null);
+    setSampleMissing(false);
     if (!image) return;
     let live = true;
     const el = new Image();
+    /**
+     * If the bundled sample is missing, fall back to the upload.
+     *
+     * A studio stuck on a spinner is a studio nobody can tell is broken. The
+     * keyword map will be wrong about a photo it has never seen — that is what
+     * `sampleMissing` says out loud under the stage — but erasing still works
+     * and the dialog still opens, which is the difference between a degraded
+     * feature and a hung one.
+     */
+    el.onerror = () => {
+      if (!live || el.src === image.src) return;
+      setSampleMissing(true);
+      el.src = image.src;
+    };
     el.onload = () => {
       if (!live) return;
       const scale = Math.min(
@@ -215,7 +248,7 @@ export function ImageStudioDialog({
       c.getContext("2d")?.drawImage(el, 0, 0, c.width, c.height);
       setSource(c);
     };
-    el.src = image.src;
+    el.src = SAMPLE_IMAGE.src;
     return () => {
       live = false;
     };
@@ -229,6 +262,8 @@ export function ImageStudioDialog({
     setAt(0);
     setText((edit?.labels ?? []).map((l) => l.word).join(", "));
     setSeg(null);
+    setMemberOf(new Map());
+    setUnknown([]);
     setGroups([]);
     setKeyworded(false);
     setActiveGroup(null);
@@ -304,37 +339,41 @@ export function ImageStudioDialog({
 
   /* --------------------------------------------------------------- actions --- */
 
+  /**
+   * SEGMENT THE PICTURE.
+   *
+   * The regions and their outlines come from the real pixels, as they always
+   * did. What is new is that the answer to a WORD comes from the map of the
+   * sample photograph (`sample-world.ts`) rather than from a subject ranking:
+   * "humans" is the eleven walkers because somebody wrote down where the eleven
+   * walkers are, and "elephant" is an error rather than a confident highlight
+   * over the nearest bush.
+   *
+   * With nothing typed it answers with what the picture is made of — the people,
+   * the planting and the path — instead of dumping every region it found. A
+   * hundred dashed outlines is not a description of anything.
+   */
   function runSegment() {
     const canvas = canvasRef.current;
     if (!canvas || !source) return;
-    const result = segmentImage(canvas);
-    setSeg(result);
+    const pass = samplePass(segmentImage(canvas), words);
+
+    setUnknown(pass.unknown);
+    // Every word missed: nothing is segmented, because there is nothing to show
+    // and replacing the previous answer with an empty one would read as the
+    // photo having lost its regions rather than the word having failed.
+    if (words.length > 0 && pass.groups.every((g) => g.ids.length === 0)) return;
+
+    setSeg(pass.seg);
+    setMemberOf(pass.memberOf);
     setSegStrokes(snap.strokes);
     setListOpen(true);
     setActiveGroup(null);
-
-    if (words.length) {
-      // One group per keyword, filled from the subject ranking. Everything the
-      // pass offered starts counted — dropping the one it got wrong is a click,
-      // where hunting for the two it got right is a search.
-      const assigned = assignSubjects(result, seedCounts(result, words.length));
-      const next = words.map((word, i) => ({
-        word,
-        ids: assigned.filter((a) => a.word === i).map((a) => a.region.id),
-      }));
-      setGroups(next);
-      setKeyworded(true);
-      commit({ picked: next.flatMap((g) => g.ids) });
-      return;
-    }
-
-    // No keywords: every region is on offer and none is counted, because
-    // without a word for them there is nothing to claim they are.
-    setGroups([
-      { word: ALL_REGIONS, ids: result.regions.filter((r) => r.outline).map((r) => r.id) },
-    ]);
-    setKeyworded(false);
-    commit({ picked: [] });
+    setGroups(pass.groups);
+    setKeyworded(words.length > 0);
+    // Everything found starts counted: dropping the one it got wrong is a
+    // click, where hunting for the ten it got right is a search.
+    commit({ picked: pass.groups.flatMap((g) => g.ids) });
   }
 
   /**
@@ -345,7 +384,20 @@ export function ImageStudioDialog({
    * runner, you click them, and Humans reads 4. With no group selected there is
    * nothing to add it to, so the click is ignored rather than guessing.
    */
-  function toggleRegion(id: number) {
+  /**
+   * A click lands on a real region; the thing it belongs to is what answers.
+   *
+   * Composites are appended after the real regions, so an id that is already a
+   * composite resolves to itself and a member resolves upward.
+   */
+  function resolve(id: number | null): number | null {
+    if (id == null) return null;
+    return memberOf.get(id) ?? id;
+  }
+
+  function toggleRegion(rawId: number) {
+    const id = resolve(rawId);
+    if (id == null) return;
     const place = placement.get(id);
     if (!place) {
       if (activeGroup == null) return;
@@ -402,7 +454,7 @@ export function ImageStudioDialog({
       y,
       r: (brushPx / 2) * (box.width / source.width),
     });
-    setHover(selectable && seg ? (regionAt(seg, u, v)?.id ?? null) : null);
+    setHover(selectable && seg ? resolve(regionAt(seg, u, v)?.id ?? null) : null);
 
     const press = pressRef.current;
     if (!press) return;
@@ -563,6 +615,40 @@ export function ImageStudioDialog({
             />
           )}
         </div>
+
+        {/* A WORD THE PICTURE HAS NOTHING FOR.
+            Inline and persistent rather than a toast: it names the words that
+            failed and stays there while they are corrected, which is the moment
+            it is useful. The words that DID match are segmented anyway — one
+            typo should not throw away the four that were right. */}
+        {sampleMissing && (
+          <p
+            data-ui="segment-sample-missing"
+            role="alert"
+            className="type-caption mt-2 flex items-start gap-1.5 rounded-lg border border-warning/40 bg-warning-soft/40 px-2.5 py-2 text-warning"
+          >
+            <Icon name="warning" size={13} className="mt-px shrink-0" />
+            <span>
+              The sample scene is missing from <code>public/samples/</code>, so this is your own
+              upload — erasing works, but keywords will name the wrong things.
+            </span>
+          </p>
+        )}
+
+        {unknown.length > 0 && (
+          <p
+            data-ui="segment-unknown"
+            role="alert"
+            className="type-caption mt-2 flex items-start gap-1.5 rounded-lg border border-danger/40 bg-danger/10 px-2.5 py-2 text-danger"
+          >
+            <Icon name="warning" size={13} className="mt-px shrink-0" />
+            <span>
+              {unknown.map((w) => `“${w}”`).join(", ")}{" "}
+              {unknown.length === 1 ? "isn’t" : "aren’t"} in this image. Try humans, hair,
+              plants or pavement.
+            </span>
+          </p>
+        )}
 
         {/* Stage */}
         <div className="field-well mt-3 grid place-items-center rounded-xl border p-2">
