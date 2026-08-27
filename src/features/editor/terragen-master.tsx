@@ -10,9 +10,7 @@ import {
   ROLE_BADGE,
   ROLE_DOT,
   ROLE_LABEL,
-  canTakeRole,
   isContentObject,
-  isMaster,
   type ObjectRole,
 } from "./scene-types";
 import type { Asset } from "./assets-data";
@@ -61,8 +59,6 @@ export function MasterSection({
   store,
   roles,
   assets,
-  gizmoMode,
-  onGizmoMode,
   onBrowseLibrary,
   onBrowseSwaps,
   previewedSwap,
@@ -73,8 +69,6 @@ export function MasterSection({
   store: WorkOrderStore;
   roles: SceneRoles;
   assets: Asset[];
-  gizmoMode: GizmoMode;
-  onGizmoMode: (m: GizmoMode) => void;
   /**
    * Open the real asset library as a bottom sheet.
    *
@@ -187,42 +181,13 @@ export function MasterSection({
         )}
       </Group>
 
-      {/* The gizmo only means anything while something is selected, so the
-          control that drives it appears with the selection rather than sitting
-          there greyed out. */}
-      {selected && canTakeRole(selected.source) && (
-        <Group title="Transform" hint={selected.name}>
-          <div className="inline-flex rounded-lg border border-glass/12 bg-glass/6 p-0.5">
-            {(
-              [
-                { id: "translate", label: "Move", icon: "move" },
-                { id: "rotate", label: "Rotate", icon: "rotate" },
-                { id: "scale", label: "Scale", icon: "scale" },
-              ] as const
-            ).map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                aria-pressed={gizmoMode === m.id}
-                data-ui={`terragen-gizmo-${m.id}`}
-                onClick={() => onGizmoMode(m.id)}
-                className={cn(
-                  "type-label flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 transition-colors",
-                  gizmoMode === m.id
-                    ? "bg-brand text-brand-foreground"
-                    : "text-content-muted hover:text-content"
-                )}
-              >
-                <Icon name={m.icon} size={14} />
-                {m.label}
-              </button>
-            ))}
-          </div>
-          <p className="type-caption mt-2 text-content-subtle">
-            Drag the handles in the viewport. {isMaster(selected) && "Moving the master carries the camera rig with it."}
-          </p>
-        </Group>
-      )}
+      {/* NO TRANSFORM SWITCHER HERE.
+          It was three buttons that armed a gizmo, plus a line telling you to go
+          and use it. The handles are in the viewport and the rows that arm them
+          are beside them — the Transform panel that appears while a stand-in is
+          being placed, and the object's own panel in the editor. A fourth copy
+          of the same choice in a scrolling dock was a control you had to find
+          before you could use the one you were looking at. */}
     </div>
   );
 }
@@ -371,6 +336,27 @@ function ObjectCard({
             Add swap objects
           </Button>
 
+          {/* THE WARNING A SWAP LIST EARNS, above the list it is about.
+              A stand-in is rendered at the pose of the thing it replaces, so a
+              mesh with a different origin or a different size arrives
+              half-buried in the floor — and the run renders every frame of it
+              that way. It sits under the button that ADDS them rather than
+              under the list, because by the time you have scrolled past four
+              rows to read it you have already added four. */}
+          {swaps.length > 0 && (
+            <p
+              data-ui="terragen-swap-align-warning"
+              className="type-caption mb-2 flex items-start gap-1.5 rounded-lg border border-danger/45 bg-danger/10 px-2.5 py-2 text-danger"
+            >
+              <Icon name="warning" size={13} className="mt-px shrink-0" />
+              <span>
+                Each stand-in appears where {name} stands. Click one to place it in the scene,
+                then check its position, rotation and scale — otherwise it will overlap whatever
+                is around it.
+              </span>
+            </p>
+          )}
+
           {swaps.length === 0 ? (
             <Note>
               None. The run renders {name} as it stands — add a stand-in to render the same sweep
@@ -461,23 +447,6 @@ function ObjectCard({
                   );
                 })}
               </ul>
-
-              {/* THE WARNING A SWAP LIST EARNS.
-                  A stand-in is rendered at the pose of the thing it replaces, so
-                  a mesh with a different origin or a different size arrives
-                  half-buried in the floor or through the wall behind it — and
-                  the run renders every frame of it that way. This is the one
-                  place that can say so before the credits are spent. */}
-              <p
-                data-ui="terragen-swap-align-warning"
-                className="type-caption mt-2 flex items-start gap-1.5 rounded-lg border border-danger/45 bg-danger/10 px-2.5 py-2 text-danger"
-              >
-                <Icon name="warning" size={13} className="mt-px shrink-0" />
-                <span>
-                  Check each stand-in’s position, rotation and scale in the scene — click a row
-                  above to place it. Misaligned stand-ins will intersect the world around them.
-                </span>
-              </p>
 
               <p className="type-caption mt-2 text-content-subtle">
                 {inRun > 0

@@ -13,6 +13,8 @@ import { WeatherSection } from "./terragen-weather";
 import { describeLayers } from "./weather";
 import { CameraSection } from "./terragen-camera";
 import { MasterSection, type GizmoMode } from "./terragen-master";
+import { ObjectPropertiesPanel, type SettingKey } from "./ObjectPropertiesPanel";
+import { SettingControl } from "./SettingControl";
 import { SceneCanvas, type CameraGuide, type CameraHandle } from "./SceneCanvas";
 import {
   atDistance,
@@ -74,6 +76,13 @@ export type LibraryMode =
  * (the environment map is a 4K EXR) or it would start hiding a loader that is
  * still telling the truth.
  */
+/** Which gizmo each of the stand-in's transform rows arms. */
+const SWAP_GIZMO: Partial<Record<SettingKey, GizmoMode>> = {
+  position: "translate",
+  rotation: "rotate",
+  scale: "scale",
+};
+
 const LOAD_TIMEOUT_MS = 15_000;
 
 /**
@@ -179,6 +188,15 @@ export function TerraGenView({
   const [swapPreview, setSwapPreview] = useState<{ targetId: string; assetId: string } | null>(
     null
   );
+  /**
+   * Which of the stand-in's transform rows is open.
+   *
+   * It doubles as the gizmo switch: picking Position arms the translate handles,
+   * Rotation the rings, Scale the boxes — the same one-way pairing the editor
+   * makes, and the reason the dock no longer carries three buttons that only
+   * armed a gizmo.
+   */
+  const [swapSetting, setSwapSetting] = useState<SettingKey | null>(null);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
   /**
    * The dock, folded away.
@@ -279,6 +297,7 @@ export function TerraGenView({
    */
   const previewSwap = (targetId: string, assetId: string) => {
     const same = swapPreview?.targetId === targetId && swapPreview?.assetId === assetId;
+    setSwapSetting(null);
     if (same) {
       setSwapPreview(null);
       return;
@@ -502,37 +521,85 @@ export function TerraGenView({
         onSpan={spanRig}
       />
 
-      {/* WHAT YOU ARE LOOKING AT, while a stand-in is standing in.
-          Without it the viewport is simply showing the wrong object: the torus
-          has become a chair with no explanation, and the gizmo is writing
-          somewhere the panel can't be seen from. */}
+      {/* THE STAND-IN'S OWN TRANSFORM, in the corner the editor puts it in.
+          A stand-in has to be adjustable by NUMBER as well as by handle: "sits
+          40cm too low" is a figure somebody reads off a model, not something you
+          find by dragging. This is the editor's own properties panel and its own
+          setting controls, pointed at the stand-in — so the two surfaces cannot
+          drift, and every value goes into the swap's offset rather than the
+          scene. */}
+      {standIn && !preview && (
+        <div
+          data-ui="terragen-swap-inspector"
+          className="pointer-events-none absolute bottom-6 z-30 flex w-[320px] flex-col items-stretch gap-2.5"
+          style={{ right: stageInset + 16 }}
+        >
+          <ObjectPropertiesPanel
+            object={standIn.object}
+            group="Transform"
+            active={swapSetting}
+            onSelect={(k) => {
+              setSwapSetting((cur) => (cur === k ? null : k));
+              const mode = SWAP_GIZMO[k];
+              if (mode) setGizmoMode(mode);
+            }}
+          />
+        </div>
+      )}
+
+      {standIn && !preview && swapSetting && (
+        <SettingControl
+          object={standIn.object}
+          setting={swapSetting}
+          camera={null}
+          onChange={(patch) => {
+            // Only the three transform fields can reach a swap: a stand-in's
+            // material belongs to the asset, not to this substitution.
+            const pose = {
+              position: patch.position ?? standIn.object.position,
+              rotationDeg: patch.rotationDeg ?? standIn.object.rotationDeg,
+              scale: patch.scale ?? standIn.object.scale,
+            };
+            store.setSwapOffset(
+              standIn.swap.targetId,
+              standIn.swap.assetId,
+              offsetFromPose(standIn.target, pose)
+            );
+          }}
+          onClose={() => setSwapSetting(null)}
+        />
+      )}
+
+      {/* THE WAY OUT OF THE PREVIEW.
+          The bar here used to name what was standing in for what and then
+          explain the gesture — a sentence in the middle of the picture saying
+          things the panel on the right and the highlighted row in the dock
+          already say. What is left is the one thing neither of those provides. */}
       {standIn && !preview && (
         <div
           data-ui="terragen-swap-preview-bar"
-          className="pointer-events-none absolute bottom-6 left-1/2 z-30 -translate-x-1/2"
-          style={{ marginLeft: -stageInset / 2 }}
+          /* Bottom-LEFT, not centre. Centred it sat on the Transform panel,
+             which is pinned to the right edge inside the dock's inset — and the
+             two together are wider than what is left of the stage. The corner
+             is empty, and a small pill is legible in it. */
+          className="pointer-events-none absolute bottom-6 left-6 z-30"
         >
-          <div className="pointer-events-auto flex items-center gap-2.5 rounded-full border border-brand/50 bg-surface-overlay/90 px-4 py-2.5 shadow-lg backdrop-blur">
+          <button
+            type="button"
+            data-ui="terragen-swap-preview-done"
+            aria-label={`Stop standing in for ${standIn.swap.targetName}`}
+            onClick={() => {
+              setSwapPreview(null);
+              setSwapSetting(null);
+            }}
+            className="type-body-strong pointer-events-auto flex items-center gap-2 rounded-full border border-brand/50 bg-surface-overlay/90 px-4 py-2.5 text-content shadow-lg backdrop-blur transition-colors hover:bg-surface-overlay"
+          >
             <Icon name="retry" size={15} className="shrink-0 text-brand" />
-            <span className="type-body text-content">
-              <span className="text-content-muted">Standing in for</span> {standIn.swap.targetName}
-              <span className="text-content-muted"> · </span>
-              {standIn.swap.name}
-            </span>
-            <span className="type-caption hidden text-content-subtle sm:block">
-              move, turn or scale it — only this stand-in changes
-            </span>
-            <button
-              type="button"
-              data-ui="terragen-swap-preview-done"
-              onClick={() => setSwapPreview(null)}
-              className="type-caption-strong ml-1 shrink-0 rounded-md border border-brand/50 bg-brand/15 px-2.5 py-1 text-brand-on-glass transition-colors hover:bg-brand/25"
-            >
-              Done
-            </button>
-          </div>
+            Done
+          </button>
         </div>
       )}
+
       <SweepRender
         scene={scene}
         rig={rig}
@@ -614,8 +681,6 @@ export function TerraGenView({
         blocked={blockers.length > 0}
         loading={loading}
         subsets={totals.subsets}
-        gizmoMode={gizmoMode}
-        onGizmoMode={setGizmoMode}
         onReseed={() => store.reseed(scene, assets)}
         onDispatch={() => setReviewing(true)}
         onClose={onClose}
@@ -1054,8 +1119,6 @@ function TerraGenDock({
   blocked,
   loading,
   subsets,
-  gizmoMode,
-  onGizmoMode,
   onReseed,
   onDispatch,
   onClose,
@@ -1090,8 +1153,6 @@ function TerraGenDock({
   loading: boolean;
   /** for the queued confirmation only — the bill lives in the review */
   subsets: number;
-  gizmoMode: GizmoMode;
-  onGizmoMode: (m: GizmoMode) => void;
   onReseed: () => void;
   onDispatch: () => void;
   onClose: () => void;
@@ -1195,8 +1256,6 @@ function TerraGenDock({
                 store={store}
                 roles={roles}
                 assets={assets}
-                gizmoMode={gizmoMode}
-                onGizmoMode={onGizmoMode}
                 onBrowseLibrary={() => onBrowseLibrary({ kind: "place" })}
                 onBrowseSwaps={(target) => onBrowseLibrary({ kind: "swap", target })}
                 previewedSwap={previewedSwap}
