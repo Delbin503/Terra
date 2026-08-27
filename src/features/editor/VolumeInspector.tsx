@@ -109,7 +109,7 @@ export function VolumeToolbar({
 /* ======================================================== the inspector === */
 
 /** One editable thing about a space — the unit a row names and a control edits. */
-export type VolumeSetting = "move" | "rotate" | "size" | "contain" | "seed";
+export type VolumeSetting = "move" | "rotate" | "size" | "contain";
 
 /** Which gizmo each setting arms. Absent leaves the box bare. Named
  *  `VOLUME_GIZMO` rather than `SETTING_GIZMO` because EditorView already has one
@@ -137,7 +137,10 @@ const ROWS: {
   // meant clicking a thing in Contents was the only click in the editor that
   // did NOT open the centre control everything else opens.
   { key: "contain", tab: "contents", icon: "space", label: "Keep inside" },
-  { key: "seed", tab: "contents", icon: "seed", label: "Seed" },
+  // NO SEED ROW, and no scatter row. Both are in the panel itself, at the
+  // bottom: the seed is a number you reroll and immediately spend, so sending
+  // it to a control over the toolbar meant the field and the button that
+  // consumes it were in different corners of the screen.
   // NO SCATTER ROW. Every other row here names a setting and opens a control
   // that edits it; scatter is a verb that happens the moment you ask for it, and
   // dressing it as a setting put a control in the way of a button. It is the
@@ -165,7 +168,7 @@ function contentsOf(scene: SceneApi, v: SceneVolume) {
 
 /** The one-line readout each row carries on its right, exactly as the object
  *  properties list does — the value, not a repeat of the label. */
-function summarize(v: SceneVolume, key: VolumeSetting, ctx: { seed: number }): string {
+function summarize(v: SceneVolume, key: VolumeSetting): string {
   switch (key) {
     case "move":
       return v.center.map((n) => n.toFixed(1)).join(", ");
@@ -175,8 +178,6 @@ function summarize(v: SceneVolume, key: VolumeSetting, ctx: { seed: number }): s
       return v.size.map((n) => n.toFixed(1)).join(" × ");
     case "contain":
       return v.contain ? "On" : "Off";
-    case "seed":
-      return String(ctx.seed);
   }
 }
 
@@ -199,21 +200,49 @@ export function VolumeInspectorPanel({
   tab,
   active,
   seed,
+  report,
   onSelect,
+  onSeed,
   onReport,
 }: {
   scene: SceneApi;
   volume: SceneVolume;
   tab: VolumeTab;
   active: VolumeSetting | null;
-  /** the seed the Scatter button will use — shown on the Seed row */
+  /** the seed the Scatter button spends */
   seed: number;
+  /** what the last scatter did, under the button that did it */
+  report: string | null;
   onSelect: (k: VolumeSetting) => void;
-  /** clearing a stale scatter report once the strays are dealt with */
+  onSeed: (n: number) => void;
   onReport: (s: string | null) => void;
 }) {
   const rows = ROWS.filter((r) => r.tab === tab);
-  const { inside, outside } = contentsOf(scene, v);
+  const { inside, outside, movable } = contentsOf(scene, v);
+
+  const scatter = () => {
+    if (movable.length === 0) {
+      onReport("Nothing to scatter — every object here is the master, locked or hidden.");
+      return;
+    }
+    const fixed = inside.filter((o) => !movable.includes(o));
+    // Containment off means the room stops being a fence: the objects still
+    // cluster on it, but they are allowed to land outside.
+    const region = v.contain ? v : expandVolume(v, LOOSE_SPREAD);
+    const result = arrange(
+      { volume: v, region, movable, fixed, rules: movable.map((o) => makeRule(o.id)) },
+      seed
+    );
+    scene.applyPlacements(result.placements);
+    const where = v.contain ? "" : " — some outside, since containment is off";
+    onReport(
+      result.unplaced.length === 0
+        ? `Placed ${result.placements.length} ${
+            result.placements.length === 1 ? "object" : "objects"
+          }${where}.`
+        : `Placed ${result.placements.length} of ${movable.length}. No room left for ${result.unplaced.length} — widen the space or lower the clearance.`
+    );
+  };
 
   const bringInside = () => {
     scene.applyPlacements(
@@ -266,7 +295,7 @@ export function VolumeInspectorPanel({
             <Icon name={r.icon} size={15} />
             <span className="flex-1 text-left">{r.label}</span>
             <span className="type-numeric-sm text-content-subtle">
-              {summarize(v, r.key, { seed })}
+              {summarize(v, r.key)}
             </span>
           </button>
         ))}
@@ -298,10 +327,55 @@ export function VolumeInspectorPanel({
             it, there is no action to offer: an object bigger than the room is a
             fact about the room, answered by widening it. */}
 
-        {/* No Scatter button here. It went to the SEED control, because the
-            seed is the only input it has and the two were a setting in one
-            panel and the button that consumed it in another — you set a number
-            on the right, then travelled to the bottom of a list to spend it. */}
+        {/* ARRANGING, at the foot of the panel that reports on the room.
+            The seed and the button that spends it are one control in practice —
+            reroll, scatter, look, reroll — so they are one block, and they are
+            here rather than in a centre panel because the count they change is
+            the count in this panel's header. */}
+        {tab === "contents" && (
+          <div className="mt-2 border-t border-glass/10 px-0.5 pt-2.5">
+            <div className="flex items-stretch gap-2">
+              <label className="field-well flex min-w-0 grow items-center gap-2 rounded-lg border px-2.5 py-1.5">
+                <span className="type-caption shrink-0 text-content-subtle">Seed</span>
+                <input
+                  aria-label="Arrangement seed"
+                  data-ui="volume-seed-input"
+                  value={seed}
+                  inputMode="numeric"
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value.replace(/\D/g, ""), 10);
+                    onSeed(Number.isFinite(n) ? n : 0);
+                  }}
+                  className="type-numeric min-w-0 grow bg-transparent text-content outline-none"
+                />
+              </label>
+              <button
+                type="button"
+                data-ui="volume-reseed"
+                aria-label="New seed"
+                title="New seed"
+                onClick={() => onSeed(newSeed())}
+                className="grid w-10 shrink-0 place-items-center rounded-lg border border-glass/15 bg-glass/8 text-content-muted transition-colors hover:border-glass/30 hover:text-content"
+              >
+                <Icon name="seed" size={16} />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              data-ui="volume-scatter"
+              disabled={movable.length === 0}
+              onClick={scatter}
+              className="type-body-strong mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-glass/15 bg-glass/8 py-2 text-content transition-colors hover:border-glass/30 hover:bg-glass/14 disabled:opacity-40 disabled:hover:border-glass/15 disabled:hover:bg-glass/8"
+            >
+              <Icon name="shuffle" size={15} />
+              Scatter {movable.length} {movable.length === 1 ? "Object" : "Objects"}
+            </button>
+            <p className="type-caption mt-1.5 text-content-subtle">
+              {report ?? "The same seed rebuilds the same arrangement, here and on the farm."}
+            </p>
+          </div>
+        )}
       </PanelBody>
     </Panel>
   );
@@ -359,7 +433,6 @@ const CONTROL_LABEL: Record<VolumeSetting, string> = {
   rotate: "Rotate",
   size: "Size",
   contain: "Keep Objects Inside",
-  seed: "Arrangement Seed",
 };
 
 /**
@@ -371,26 +444,14 @@ const CONTROL_LABEL: Record<VolumeSetting, string> = {
  * around a model you are watching change, and a room's number does not.
  */
 export function VolumeSettingControl({
-  scene,
   volume: v,
   setting,
-  seed,
-  report,
   patch,
-  onSeed,
-  onReport,
   onClose,
 }: {
-  /** Scatter moves what is in the room, so this control reaches the scene. */
-  scene: SceneApi;
   volume: SceneVolume;
   setting: VolumeSetting;
-  seed: number;
-  /** what the last scatter did — shown under the button that did it */
-  report: string | null;
   patch: (next: Partial<SceneVolume>) => void;
-  onSeed: (n: number) => void;
-  onReport: (s: string | null) => void;
   onClose: () => void;
 }) {
   const setVec = (key: "size" | "center", axis: 0 | 1 | 2, raw: string) => {
@@ -479,114 +540,7 @@ export function VolumeSettingControl({
           />
         )}
 
-        {setting === "seed" && (
-          <>
-            <div className="flex items-stretch gap-2">
-              <label className="field-well flex min-w-0 grow items-center gap-2 rounded-lg border px-2.5 py-1.5">
-                <input
-                  aria-label="Arrangement seed"
-                  value={seed}
-                  inputMode="numeric"
-                  onChange={(e) => {
-                    const n = parseInt(e.target.value.replace(/\D/g, ""), 10);
-                    onSeed(Number.isFinite(n) ? n : 0);
-                  }}
-                  className="type-numeric min-w-0 grow bg-transparent text-content outline-none"
-                />
-              </label>
-              <button
-                type="button"
-                data-ui="volume-reseed"
-                aria-label="New seed"
-                title="New seed"
-                onClick={() => onSeed(newSeed())}
-                className="grid w-10 shrink-0 place-items-center rounded-lg border border-glass/15 bg-glass/8 text-content-muted transition-colors hover:border-glass/30 hover:text-content"
-              >
-                <Icon name="seed" size={16} />
-              </button>
-            </div>
-            <p className="type-caption mt-1.5 text-content-subtle">
-              The same seed rebuilds the same arrangement, here and on the render farm.
-            </p>
-            {/* THE BUTTON THAT SPENDS THE NUMBER, beside the number.
-                A seed is not a setting you leave somewhere and admire — it is an
-                input to exactly one action, and having them in two panels meant
-                typing a number on the right and then travelling to the bottom of
-                a list to use it. */}
-            <ScatterButton
-              scene={scene}
-              volume={v}
-              seed={seed}
-              report={report}
-              onReport={onReport}
-            />
-          </>
-        )}
-
       </Panel>
-    </div>
-  );
-}
-
-/**
- * SCATTER — one button and what it just did.
- *
- * The report is not a toast. A scatter can half-succeed — twelve chairs into a
- * space with room for nine — and the number that comes back is the reason you
- * would widen the room or reroll, both of which are one click away from here.
- */
-function ScatterButton({
-  scene,
-  volume: v,
-  seed,
-  report,
-  onReport,
-}: {
-  scene: SceneApi;
-  volume: SceneVolume;
-  seed: number;
-  report: string | null;
-  onReport: (s: string | null) => void;
-}) {
-  const { inside, movable } = contentsOf(scene, v);
-
-  const scatter = () => {
-    if (movable.length === 0) {
-      onReport("Nothing to scatter — every object here is the master, locked or hidden.");
-      return;
-    }
-    const fixed = inside.filter((o) => !movable.includes(o));
-    // Containment off means the room stops being a fence: the objects still
-    // cluster on it, but they are allowed to land outside.
-    const region = v.contain ? v : expandVolume(v, LOOSE_SPREAD);
-    const result = arrange(
-      { volume: v, region, movable, fixed, rules: movable.map((o) => makeRule(o.id)) },
-      seed
-    );
-    scene.applyPlacements(result.placements);
-    const where = v.contain ? "" : " — some outside, since containment is off";
-    onReport(
-      result.unplaced.length === 0
-        ? `Placed ${result.placements.length} ${
-            result.placements.length === 1 ? "object" : "objects"
-          }${where}.`
-        : `Placed ${result.placements.length} of ${movable.length}. No room left for ${result.unplaced.length} — widen the space or lower the clearance.`
-    );
-  };
-
-  return (
-    <div className="mt-2.5 border-t border-glass/10 pt-2.5">
-      <button
-        type="button"
-        data-ui="volume-scatter"
-        disabled={movable.length === 0}
-        onClick={scatter}
-        className="type-body-strong flex w-full items-center justify-center gap-2 rounded-lg border border-glass/15 bg-glass/8 py-2 text-content transition-colors hover:border-glass/30 hover:bg-glass/14 disabled:opacity-40 disabled:hover:border-glass/15 disabled:hover:bg-glass/8"
-      >
-        <Icon name="shuffle" size={15} />
-        Scatter {movable.length} {movable.length === 1 ? "Object" : "Objects"}
-      </button>
-      {report && <p className="type-caption mt-1.5 text-content-subtle">{report}</p>}
     </div>
   );
 }

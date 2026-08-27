@@ -6,6 +6,7 @@ import {
   type AnnotationId,
   type AxisId,
   type OutputSpec,
+  type SwapOffset,
   type WorkOrder,
 } from "./work-order";
 
@@ -42,6 +43,8 @@ export interface WorkOrderStore {
    */
   addSwap: (target: { id: string; name: string }, asset: { id: string; name: string }) => void;
   toggleSwap: (targetId: string, assetId: string) => void;
+  /** how this stand-in sits differently from the object it replaces */
+  setSwapOffset: (targetId: string, assetId: string, offset: SwapOffset) => void;
   removeSwap: (targetId: string, assetId: string) => void;
   addEnv: (assetId: string) => void;
   toggleEnv: (assetId: string) => void;
@@ -159,6 +162,30 @@ export function useWorkOrder(): WorkOrderStore {
     );
   }, []);
 
+  /**
+   * Adjust one stand-in.
+   *
+   * WRITES ONLY TO THE SWAP. The object in the scene is not touched — that is
+   * the whole point of a stand-in being an order-level substitution rather than
+   * a scene edit: the arrangement you posed stays posed, and each stand-in
+   * carries its own correction for sitting too low or facing the wrong way.
+   */
+  const setSwapOffset = useCallback(
+    (targetId: string, assetId: string, offset: SwapOffset) => {
+      setOrder((prev) =>
+        prev
+          ? {
+              ...prev,
+              swaps: prev.swaps.map((s) =>
+                isSwap(s, targetId, assetId) ? { ...s, offset } : s
+              ),
+            }
+          : prev
+      );
+    },
+    []
+  );
+
   const removeSwap = useCallback((targetId: string, assetId: string) => {
     setOrder((prev) =>
       prev
@@ -217,6 +244,7 @@ export function useWorkOrder(): WorkOrderStore {
     setPrompt,
     addSwap,
     toggleSwap,
+    setSwapOffset,
     removeSwap,
     addEnv,
     toggleEnv,

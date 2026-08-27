@@ -27,12 +27,14 @@ import { DispatchReview, orderChanges } from "./terragen-budget";
 import { AssetLibrary } from "./AssetLibrary";
 import type { Asset } from "./assets-data";
 import type { AssetStore } from "./useAssets";
-import { isContentObject } from "./scene-types";
+import { OBJECT_COLORS, isContentObject, shapeForSeed, type SceneObject } from "./scene-types";
 import type { SceneApi } from "./useScene";
 import type { WorkOrderStore } from "./useWorkOrder";
 import {
   PANEL_AXES,
   axisSummary,
+  offsetFromPose,
+  swapPose,
   computeTotals,
   formatCount,
   frameSample,
@@ -166,6 +168,17 @@ export function TerraGenView({
    */
   const [stage, setStage] = useState<StageId>("camera");
   const preview = stage === "camera";
+  /**
+   * The stand-in currently standing in — which object, and which asset.
+   *
+   * PREVIEWING IS NOT AN EDIT. Nothing about the scene changes while this is
+   * set: the substitution happens at draw time in `SceneCanvas`, and the gizmo's
+   * output is routed into the swap's own offset. Leaving the preview therefore
+   * needs no undo and no restore — the object was never replaced.
+   */
+  const [swapPreview, setSwapPreview] = useState<{ targetId: string; assetId: string } | null>(
+    null
+  );
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
   /**
    * The dock, folded away.
@@ -191,6 +204,7 @@ export function TerraGenView({
   const [library, setLibrary] = useState<LibraryMode | null>(null);
 
   const stageInset = collapsed ? COLLAPSED_INSET : STAGE_INSET;
+
   /**
    * The mode assembles before it shows anything.
    *
@@ -210,6 +224,69 @@ export function TerraGenView({
   // one again, so the footer can't keep claiming something is queued while the
   // user edits what it was queued from.
   useEffect(() => setDispatched(false), [order]);
+
+  /**
+   * THE STAND-IN, AS SOMETHING THE VIEWPORT CAN DRAW.
+   *
+   * It is the target object with its identity swapped out: the asset's name, its
+   * mesh (or its placeholder shape and colour, derived from the asset's own seed
+   * so a stand-in looks the same every time it is previewed), and the pose the
+   * swap's offset puts it at. Keeping the TARGET'S ID is what lets selection,
+   * mesh registration and the gizmo carry on knowing nothing about swaps.
+   */
+  const standIn = (() => {
+    if (!swapPreview || !order) return null;
+    const swap = order.swaps.find(
+      (s) => s.targetId === swapPreview.targetId && s.assetId === swapPreview.assetId
+    );
+    const target = scene.objects.find((o) => o.id === swapPreview.targetId);
+    if (!swap || !target) return null;
+    const asset = assets.find((a) => a.id === swap.assetId);
+    const pose = swapPose(target, swap);
+    const object: SceneObject = {
+      ...target,
+      name: swap.name,
+      modelUrl: asset?.modelUrl,
+      shape: shapeForSeed(asset?.seed ?? 0),
+      color: OBJECT_COLORS[Math.abs(asset?.seed ?? 0) % OBJECT_COLORS.length],
+      ...pose,
+    };
+    return { swap, target, object };
+  })();
+
+  const substitute = standIn
+    ? {
+        object: standIn.object,
+        onTransform: (pose: {
+          position: [number, number, number];
+          rotationDeg: [number, number, number];
+          scale: [number, number, number];
+        }) =>
+          store.setSwapOffset(
+            standIn.swap.targetId,
+            standIn.swap.assetId,
+            offsetFromPose(standIn.target, pose)
+          ),
+      }
+    : null;
+
+  /**
+   * Preview a stand-in: show it, and put the user where they can adjust it.
+   *
+   * It selects the object it replaces — the gizmo follows the selection in this
+   * mode — and leaves the camera preview if that is what was in front, because a
+   * stand-in you cannot reach the handles of is a picture, not an adjustment.
+   */
+  const previewSwap = (targetId: string, assetId: string) => {
+    const same = swapPreview?.targetId === targetId && swapPreview?.assetId === assetId;
+    if (same) {
+      setSwapPreview(null);
+      return;
+    }
+    setSwapPreview({ targetId, assetId });
+    setStage("edit");
+    scene.select(targetId);
+  };
 
   /**
    * The Arrangement axis follows whichever space is armed in the scene.
@@ -420,9 +497,42 @@ export function TerraGenView({
         hidden={preview}
         inset={stageInset}
         cameraGuide={cameraGuide}
+        substitute={substitute}
         onOrbit={orbitRig}
         onSpan={spanRig}
       />
+
+      {/* WHAT YOU ARE LOOKING AT, while a stand-in is standing in.
+          Without it the viewport is simply showing the wrong object: the torus
+          has become a chair with no explanation, and the gizmo is writing
+          somewhere the panel can't be seen from. */}
+      {standIn && !preview && (
+        <div
+          data-ui="terragen-swap-preview-bar"
+          className="pointer-events-none absolute bottom-6 left-1/2 z-30 -translate-x-1/2"
+          style={{ marginLeft: -stageInset / 2 }}
+        >
+          <div className="pointer-events-auto flex items-center gap-2.5 rounded-full border border-brand/50 bg-surface-overlay/90 px-4 py-2.5 shadow-lg backdrop-blur">
+            <Icon name="retry" size={15} className="shrink-0 text-brand" />
+            <span className="type-body text-content">
+              <span className="text-content-muted">Standing in for</span> {standIn.swap.targetName}
+              <span className="text-content-muted"> · </span>
+              {standIn.swap.name}
+            </span>
+            <span className="type-caption hidden text-content-subtle sm:block">
+              move, turn or scale it — only this stand-in changes
+            </span>
+            <button
+              type="button"
+              data-ui="terragen-swap-preview-done"
+              onClick={() => setSwapPreview(null)}
+              className="type-caption-strong ml-1 shrink-0 rounded-md border border-brand/50 bg-brand/15 px-2.5 py-1 text-brand-on-glass transition-colors hover:bg-brand/25"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
       <SweepRender
         scene={scene}
         rig={rig}
@@ -518,6 +628,8 @@ export function TerraGenView({
           setCollapsed(false);
           setLibrary(mode);
         }}
+        previewedSwap={swapPreview}
+        onPreviewSwap={previewSwap}
         onFocusCamera={focusCamera}
         onCameraEdit={setCameraEdit}
       />
@@ -783,6 +895,7 @@ function EditStage({
   hidden,
   inset,
   cameraGuide,
+  substitute,
   onOrbit,
   onSpan,
 }: {
@@ -793,6 +906,9 @@ function EditStage({
   inset: number;
   /** what the rig is doing right now — see `cameraGuide` in TerraGenView */
   cameraGuide: CameraGuide | null;
+  /** a stand-in drawn in place of the object it replaces, and where the gizmo's
+   *  output goes while it is */
+  substitute: React.ComponentProps<typeof SceneCanvas>["substitute"];
   onOrbit: (deg: number) => void;
   onSpan: (metres: number) => void;
 }) {
@@ -822,6 +938,7 @@ function EditStage({
         // Clear of the dock, the same way the editor clears its own.
         gizmoInset={inset}
         cameraGuide={cameraGuide}
+        substitute={substitute}
         onOrbit={onOrbit}
         onSpan={onSpan}
       />
@@ -945,10 +1062,16 @@ function TerraGenDock({
   collapsed,
   onToggleCollapsed,
   onBrowseLibrary,
+  previewedSwap,
+  onPreviewSwap,
   onFocusCamera,
   onCameraEdit,
 }: {
   scene: SceneApi;
+  /** which stand-in is standing in right now, if any */
+  previewedSwap: { targetId: string; assetId: string } | null;
+  /** show this stand-in in the viewport, or put it away if it already is */
+  onPreviewSwap: (targetId: string, assetId: string) => void;
   order: WorkOrder;
   store: WorkOrderStore;
   assets: Asset[];
@@ -1076,6 +1199,8 @@ function TerraGenDock({
                 onGizmoMode={onGizmoMode}
                 onBrowseLibrary={() => onBrowseLibrary({ kind: "place" })}
                 onBrowseSwaps={(target) => onBrowseLibrary({ kind: "swap", target })}
+                previewedSwap={previewedSwap}
+                onPreviewSwap={onPreviewSwap}
               />
             </Section>
 

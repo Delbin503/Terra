@@ -17,7 +17,7 @@ import {
 } from "./scene-types";
 import type { Asset } from "./assets-data";
 import type { SceneApi } from "./useScene";
-import { swapsFor, type ObjectSwap, type SceneRoles, type WorkOrder } from "./work-order";
+import { swapAdjusted, swapsFor, type ObjectSwap, type SceneRoles, type WorkOrder } from "./work-order";
 import type { WorkOrderStore } from "./useWorkOrder";
 import { Cost, Group, Note } from "./terragen-parts";
 
@@ -65,6 +65,8 @@ export function MasterSection({
   onGizmoMode,
   onBrowseLibrary,
   onBrowseSwaps,
+  previewedSwap,
+  onPreviewSwap,
 }: {
   scene: SceneApi;
   order: WorkOrder;
@@ -83,6 +85,9 @@ export function MasterSection({
   onBrowseLibrary: () => void;
   /** the same sheet, in the mode where a pick becomes a stand-in for `target` */
   onBrowseSwaps: (target: { id: string; name: string }) => void;
+  /** which stand-in the viewport is currently showing, if any */
+  previewedSwap: { targetId: string; assetId: string } | null;
+  onPreviewSwap: (targetId: string, assetId: string) => void;
 }) {
   const master = roles.master;
   const selected = scene.selected;
@@ -164,6 +169,10 @@ export function MasterSection({
                 onMakeMaster={() => scene.setRole(o.id, "master")}
                 onAddSwaps={() => onBrowseSwaps({ id: o.id, name: o.name })}
                 onToggleSwap={(assetId) => store.toggleSwap(o.id, assetId)}
+                previewedAsset={
+                  previewedSwap?.targetId === o.id ? previewedSwap.assetId : null
+                }
+                onPreviewSwap={(assetId) => onPreviewSwap(o.id, assetId)}
                 onRemoveSwap={(assetId) => store.removeSwap(o.id, assetId)}
                 onRemove={() => {
                   // The object's swap list goes with it — stand-ins for a thing
@@ -247,6 +256,8 @@ function ObjectCard({
   onToggleSwap,
   onRemoveSwap,
   onRemove,
+  previewedAsset,
+  onPreviewSwap,
 }: {
   name: string;
   role: ObjectRole;
@@ -264,6 +275,10 @@ function ObjectCard({
   onRemoveSwap: (assetId: string) => void;
   /** take it out of the scene entirely */
   onRemove: () => void;
+  /** the stand-in the viewport is showing in place of this object, if any */
+  previewedAsset: string | null;
+  /** show this stand-in in the viewport so it can be adjusted */
+  onPreviewSwap: (assetId: string) => void;
 }) {
   const master = role === "master";
   const inRun = swaps.filter((s) => s.inRun).length;
@@ -366,13 +381,19 @@ function ObjectCard({
               <ul className="space-y-1">
                 {swaps.map((sw) => {
                   const asset = assets.find((a) => a.id === sw.assetId);
+                  const showing = previewedAsset === sw.assetId;
+                  const adjusted = swapAdjusted(sw);
                   return (
                     <li
                       key={sw.assetId}
                       data-ui={`terragen-swap-${sw.assetId}`}
                       className={cn(
                         "flex items-center gap-2.5 rounded-lg border px-2.5 py-2 transition-colors",
-                        sw.inRun ? "border-brand/40 bg-brand/8" : "border-glass/12 bg-glass/6"
+                        showing
+                          ? "border-brand bg-brand/16"
+                          : sw.inRun
+                            ? "border-brand/40 bg-brand/8"
+                            : "border-glass/12 bg-glass/6"
                       )}
                     >
                       <button
@@ -398,7 +419,33 @@ function ObjectCard({
                         )}
                       </span>
 
-                      <span className="type-body min-w-0 grow truncate text-content">{sw.name}</span>
+                      {/* THE ROW IS THE PREVIEW BUTTON.
+                          Clicking a stand-in stands it in: the viewport draws it
+                          where this object is, and the gizmo adjusts THE
+                          STAND-IN. Checking the box says "render this one";
+                          clicking the name says "show me this one" — two
+                          different questions, so two different targets. */}
+                      <button
+                        type="button"
+                        data-ui={`terragen-swap-${sw.assetId}-preview`}
+                        aria-pressed={showing}
+                        title={
+                          showing
+                            ? `Stop standing in for ${name}`
+                            : `Show ${sw.name} in place of ${name}`
+                        }
+                        onClick={() => onPreviewSwap(sw.assetId)}
+                        className="min-w-0 grow text-left"
+                      >
+                        <span className="type-body block truncate text-content">{sw.name}</span>
+                        <span className="type-caption block truncate text-content-subtle">
+                          {showing
+                            ? "Standing in — adjust it in the scene"
+                            : adjusted
+                              ? "Adjusted · click to review"
+                              : "Click to place it in the scene"}
+                        </span>
+                      </button>
 
                       <button
                         type="button"
@@ -414,6 +461,23 @@ function ObjectCard({
                   );
                 })}
               </ul>
+
+              {/* THE WARNING A SWAP LIST EARNS.
+                  A stand-in is rendered at the pose of the thing it replaces, so
+                  a mesh with a different origin or a different size arrives
+                  half-buried in the floor or through the wall behind it — and
+                  the run renders every frame of it that way. This is the one
+                  place that can say so before the credits are spent. */}
+              <p
+                data-ui="terragen-swap-align-warning"
+                className="type-caption mt-2 flex items-start gap-1.5 rounded-lg border border-danger/45 bg-danger/10 px-2.5 py-2 text-danger"
+              >
+                <Icon name="warning" size={13} className="mt-px shrink-0" />
+                <span>
+                  Check each stand-in’s position, rotation and scale in the scene — click a row
+                  above to place it. Misaligned stand-ins will intersect the world around them.
+                </span>
+              </p>
 
               <p className="type-caption mt-2 text-content-subtle">
                 {inRun > 0

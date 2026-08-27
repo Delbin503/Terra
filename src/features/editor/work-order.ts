@@ -171,6 +171,105 @@ export interface ObjectSwap {
   name: string;
   /** this stand-in is one of the values the run renders */
   inRun: boolean;
+  /**
+   * How this stand-in sits differently from the thing it replaces.
+   *
+   * WHY AN OFFSET AND NOT A POSE. A stand-in is rendered where the object it
+   * replaces stands — that is what makes it a stand-in, and the capture rig is
+   * framed on that spot. An absolute pose would come unstuck the moment the
+   * scene was rearranged or the master was moved: the sweep would orbit one
+   * place and the chair would be somewhere else. An offset travels with the
+   * object it stands in for.
+   *
+   * Absent means "exactly where the target is, at the target's size", which is
+   * the right default and also the reason a swap needs no offset until somebody
+   * decides a mesh sits too low or faces the wrong way.
+   */
+  offset?: SwapOffset;
+}
+
+/** A stand-in's difference from the object it replaces: metres added, degrees
+ *  added, and a multiplier on the size. */
+export interface SwapOffset {
+  position: [number, number, number];
+  rotationDeg: [number, number, number];
+  scale: [number, number, number];
+}
+
+/** No difference at all — what a swap means before anybody adjusts it. */
+export const SWAP_IDENTITY: SwapOffset = {
+  position: [0, 0, 0],
+  rotationDeg: [0, 0, 0],
+  scale: [1, 1, 1],
+};
+
+/** Has this stand-in been adjusted, or is it still sitting exactly where the
+ *  object it replaces sits? Drives the "adjusted" mark on the row. */
+export function swapAdjusted(s: ObjectSwap): boolean {
+  const o = s.offset;
+  if (!o) return false;
+  return (
+    o.position.some((n) => n !== 0) ||
+    o.rotationDeg.some((n) => n !== 0) ||
+    o.scale.some((n) => n !== 1)
+  );
+}
+
+/**
+ * Where a stand-in actually stands: the target's pose with the swap's offset
+ * applied.
+ *
+ * One function, because three places need the same answer and must not disagree
+ * about it — the viewport preview, whatever the dispatched job rebuilds from the
+ * order, and the offset the gizmo hands back (which is this, inverted).
+ */
+export function swapPose(
+  target: { position: Vec3; rotationDeg: Vec3; scale: Vec3 },
+  swap: ObjectSwap
+): { position: Vec3; rotationDeg: Vec3; scale: Vec3 } {
+  const o = swap.offset ?? SWAP_IDENTITY;
+  return {
+    position: [
+      target.position[0] + o.position[0],
+      target.position[1] + o.position[1],
+      target.position[2] + o.position[2],
+    ],
+    rotationDeg: [
+      target.rotationDeg[0] + o.rotationDeg[0],
+      target.rotationDeg[1] + o.rotationDeg[1],
+      target.rotationDeg[2] + o.rotationDeg[2],
+    ],
+    scale: [
+      target.scale[0] * o.scale[0],
+      target.scale[1] * o.scale[1],
+      target.scale[2] * o.scale[2],
+    ],
+  };
+}
+
+/** The inverse: an absolute pose from the gizmo, back to an offset. Scale falls
+ *  back to 1 rather than dividing by a zero the Size control can pass through. */
+export function offsetFromPose(
+  target: { position: Vec3; rotationDeg: Vec3; scale: Vec3 },
+  pose: { position: Vec3; rotationDeg: Vec3; scale: Vec3 }
+): SwapOffset {
+  return {
+    position: [
+      pose.position[0] - target.position[0],
+      pose.position[1] - target.position[1],
+      pose.position[2] - target.position[2],
+    ],
+    rotationDeg: [
+      pose.rotationDeg[0] - target.rotationDeg[0],
+      pose.rotationDeg[1] - target.rotationDeg[1],
+      pose.rotationDeg[2] - target.rotationDeg[2],
+    ],
+    scale: [
+      pose.scale[0] / (target.scale[0] || 1),
+      pose.scale[1] / (target.scale[1] || 1),
+      pose.scale[2] / (target.scale[2] || 1),
+    ],
+  };
 }
 
 /** One object's stand-ins, in the order they were added. */

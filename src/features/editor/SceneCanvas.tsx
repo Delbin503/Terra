@@ -40,6 +40,7 @@ export function SceneWorld({
   register,
   selectedId,
   litIds,
+  substitute,
   onSelect,
   interactive = true,
   hideId,
@@ -49,6 +50,15 @@ export function SceneWorld({
   scene: SceneApi;
   register?: (id: string, mesh: Object3D | null) => void;
   selectedId?: string | null;
+  /**
+   * Draw this INSTEAD of the object it names — a stand-in being previewed.
+   *
+   * It keeps the target's id, so selection, registration and the gizmo all go on
+   * working without knowing a substitution happened. The scene itself is
+   * untouched: a swap is a statement about what a RUN renders, not an edit, and
+   * the arrangement the user posed has to survive being previewed against.
+   */
+  substitute?: SceneObject | null;
   /**
    * Everything else wearing the selected outline: a marquee's catch, and the
    * contents of a selected group.
@@ -110,6 +120,7 @@ export function SceneWorld({
         // placeholder mesh there would be a solid you could not delete without
         // deleting everything it stands for.
         .filter((o) => !o.group)
+        .map((o) => (substitute && o.id === substitute.id ? substitute : o))
         .filter((o) => o.id !== hideId && !hideIds?.includes(o.id) && !o.hidden)
         .filter((o) => !(hideCameras && o.source === "camera"))
         .map((o) =>
@@ -213,6 +224,21 @@ interface SceneCanvasProps {
    * moving rather than hiding, so the orbit readout it anchors stays reachable.
    */
   gizmoInset?: number;
+  /**
+   * A stand-in drawn in place of one object, and where its transform goes.
+   *
+   * The gizmo would otherwise write through to the object being stood in for —
+   * dragging the previewed chair would move the torus it replaces, which is the
+   * one thing a swap must never do.
+   */
+  substitute?: {
+    object: SceneObject;
+    onTransform: (pose: {
+      position: [number, number, number];
+      rotationDeg: [number, number, number];
+      scale: [number, number, number];
+    }) => void;
+  } | null;
 }
 
 /**
@@ -1440,6 +1466,7 @@ export function SceneCanvas({
   onOrbit,
   onSpan,
   volumeEdit,
+  substitute,
   gizmoInset = 0,
 }: SceneCanvasProps) {
   const [meshes, setMeshes] = useState<Record<string, Object3D>>({});
@@ -1508,11 +1535,27 @@ export function SceneCanvas({
 
   const commitTransform = () => {
     if (!selMesh || !scene.selectedId) return;
-    scene.update(scene.selectedId, {
-      position: [selMesh.position.x, selMesh.position.y, selMesh.position.z],
-      rotationDeg: [selMesh.rotation.x * R2D, selMesh.rotation.y * R2D, selMesh.rotation.z * R2D],
-      scale: [selMesh.scale.x, selMesh.scale.y, selMesh.scale.z],
-    });
+    const pose = {
+      position: [selMesh.position.x, selMesh.position.y, selMesh.position.z] as [
+        number,
+        number,
+        number,
+      ],
+      rotationDeg: [
+        selMesh.rotation.x * R2D,
+        selMesh.rotation.y * R2D,
+        selMesh.rotation.z * R2D,
+      ] as [number, number, number],
+      scale: [selMesh.scale.x, selMesh.scale.y, selMesh.scale.z] as [number, number, number],
+    };
+    // Dragging a previewed stand-in adjusts the STAND-IN. Writing to the scene
+    // here would move the object it replaces and take the whole arrangement —
+    // and the capture rig framed on it — along for the ride.
+    if (substitute && substitute.object.id === scene.selectedId) {
+      substitute.onTransform(pose);
+      return;
+    }
+    scene.update(scene.selectedId, pose);
   };
 
   // Framing for the focus fly-in. A camera isn't framed on its own body — its
@@ -1561,6 +1604,7 @@ export function SceneCanvas({
         register={register}
         selectedId={scene.selectedId}
         litIds={litIds}
+        substitute={substitute?.object ?? null}
         onSelect={scene.select}
         hideIds={guideHides}
       />

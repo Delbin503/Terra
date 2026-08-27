@@ -320,6 +320,16 @@ export function makeGroup(name: string, position: [number, number, number]): Sce
   };
 }
 
+/**
+ * The placeholder shape an asset stands for.
+ *
+ * Deterministic from the asset's own seed rather than from the mint counter, so
+ * a stand-in previewed in the viewport is the same shape every time it is
+ * previewed — and the same shape the library thumbnail led you to expect.
+ */
+export const shapeForSeed = (seed: number): ObjectShape =>
+  SHAPES[Math.abs(Math.round(seed)) % SHAPES.length];
+
 export function makeSceneObject(
   name: string,
   source: AssetType,
