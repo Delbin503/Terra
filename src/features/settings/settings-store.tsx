@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   account as seedAccount,
   members as seedMembers,
@@ -15,6 +23,8 @@ import {
   type BillingCycle,
   type PlanId,
 } from "./subscription-data";
+import { seedLedger, type CreditEntry } from "./credits-data";
+import type { Destination as AppDestination } from "@/features/home/Sidebar";
 
 /**
  * SETTINGS STORE — the account and org as editable state.
@@ -69,6 +79,28 @@ export interface Subscription {
   renewsOn: string | null;
 }
 
+/**
+ * A card on file, as the app is allowed to know it.
+ *
+ * BRAND AND LAST FOUR, NOTHING ELSE. Terra never holds a card number: the
+ * details go straight to the processor and what comes back is a token plus
+ * enough to recognise the card by. Every screen that spends money reads this
+ * shape, so there is nowhere for a PAN to be stored even by accident.
+ */
+export interface SavedCard {
+  id: string;
+  brand: string;
+  last4: string;
+  expires: string;
+  /** the name on it — the only part a person can correct after the fact */
+  holder: string;
+  /** the one every charge goes to. Exactly one card carries it. */
+  primary?: boolean;
+}
+
+/** How a card reads on a receipt — "Visa ···· 4242". */
+export const cardLabel = (c: SavedCard) => `${c.brand} ···· ${c.last4}`;
+
 export interface Invoice {
   id: string;
   due: string;
@@ -96,6 +128,15 @@ interface SettingsStore {
    *  cross-page buttons ("Manage" seats, "View Plans") are really navigation */
   page: SettingsPage;
   go: (p: SettingsPage) => void;
+  /**
+   * Leave Settings for a destination in the app shell.
+   *
+   * Some buttons in here are not settings navigation at all: "View Plans" on
+   * Payment Details is asking for the PRICING page, which lives out in the app.
+   * Without this the page's only options were to send you to a second, older
+   * plan picker or to fake it with a raw hash write from halfway down a form.
+   */
+  exit: (to?: AppDestination) => void;
   /** the transient confirmation line under the top bar */
   toast: string | null;
   /** the org roster, as editable state — seats move, people leave */
@@ -122,6 +163,32 @@ interface SettingsStore {
   subscription: Subscription;
   /** what the org has been billed — written by a purchase, read by Billing */
   invoices: Invoice[];
+  /**
+   * THE ONE BALANCE. Runs are priced in credits and credits are bought; there
+   * is no second monthly allowance to reconcile against.
+   */
+  creditBalance: number;
+  /** every top-up and every run that spent, newest first */
+  creditLog: CreditEntry[];
+  /** the card top-ups are charged to — the primary, null until one is added */
+  card: SavedCard | null;
+  /** every card on file, in the order they were added */
+  cards: SavedCard[];
+  /**
+   * Add one.
+   *
+   * `number` is passed, read for its last four and a brand, and NOT kept — see
+   * `SavedCard`. It is a parameter rather than state so there is no render in
+   * which a full number is sitting in this store.
+   */
+  addCard: (input: { number: string; expires: string; holder: string }) => void;
+  /** correct what a card says — the holder and the expiry, nothing else */
+  updateCard: (id: string, patch: { expires?: string; holder?: string }) => void;
+  removeCard: (id: string) => void;
+  /** make one the card charges go to */
+  setPrimaryCard: (id: string) => void;
+  /** charge the card on file and land the credits. No-op without a card. */
+  buyCredits: (next: { credits: number; usd: number; label: string }) => void;
   /** commit a plan change: the plan, its cycle, the seats, and the receipt */
   subscribe: (next: {
     plan: PlanId;
@@ -137,6 +204,9 @@ interface SettingsStore {
 
 const Ctx = createContext<SettingsStore | null>(null);
 
+let cardSeq = 1;
+const nextCardId = () => `card-${(cardSeq += 1)}`;
+
 /** Initials follow the name — an org renamed to "Acme" must not keep showing GG. */
 function initialsOf(name: string) {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -145,7 +215,17 @@ function initialsOf(name: string) {
   return letters.toUpperCase();
 }
 
-export function SettingsProvider({ children }: { children: ReactNode }) {
+export function SettingsProvider({
+  children,
+  start,
+  onExit,
+}: {
+  children: ReactNode;
+  /** the page to open on, when a link arrives pointing at one */
+  start?: SettingsPage;
+  /** how a page leaves Settings — see `exit` on the store */
+  onExit?: (to?: AppDestination) => void;
+}) {
   const [account, setAccountState] = useState<SettingsAccount>(() => {
     const [first = "", ...rest] = seedAccount.name.split(" ");
     return { ...seedAccount, firstName: first, lastName: rest.join(" "), photo: null };
@@ -156,7 +236,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     planActive: true,
   });
   const [toast, setToast] = useState<string | null>(null);
-  const [page, setPage] = useState<SettingsPage>("profile");
+  const [page, setPage] = useState<SettingsPage>(start ?? "profile");
+
+  /* A link that arrives while Settings is ALREADY open still has to land. The
+     initial value covers arriving from outside; this covers the hash changing
+     under a mounted shell, which is what a second `#settings/<page>` link from
+     a panel floating over Settings would do. Rail clicks don't re-fire it —
+     `start` hasn't changed. */
+  useEffect(() => {
+    if (start) setPage(start);
+  }, [start]);
   const [subscription, setSubscription] = useState<Subscription>({
     plan: planIdFromLabel(seedOrg.plan),
     cycle: "monthly",
@@ -164,6 +253,19 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     renewsOn: null,
   });
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  /* Seeded from the clock once, like the run history is, so the ledger is dated
+     relative to whenever the app is opened rather than to a day in the past. */
+  const [creditLog, setCreditLog] = useState<CreditEntry[]>(() => seedLedger(Date.now()));
+  const [creditBalance, setCreditBalance] = useState(3_728);
+  /* A placeholder card so the top-up path is walkable end to end. Real cards
+     arrive from the processor as a token plus a brand and four digits — which
+     is why the list below holds no number and the add form throws the one it
+     is given away the moment it has read the end off it. */
+  const [cards, setCards] = useState<SavedCard[]>([
+    { id: "card-1", brand: "Visa", last4: "4242", expires: "04/28", holder: "GG TOE", primary: true },
+  ]);
+  /** The card every charge goes to: the primary, or the only one there is. */
+  const card = cards.find((c) => c.primary) ?? cards[0] ?? null;
   const [members, setMembers] = useState<MemberRow[]>(seedMembers);
   const [projectAccess, setProjectAccessState] = useState<Record<string, AccessMember[]>>({});
 
@@ -174,6 +276,117 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     window.clearTimeout((notify as unknown as { t?: number }).t);
     (notify as unknown as { t?: number }).t = window.setTimeout(() => setToast(null), 3200);
   }, []);
+
+  /**
+   * WHAT A BRAND IS, from the first digit.
+   *
+   * Enough to draw the right word beside four digits, which is all this
+   * prototype has to do. A real integration is told the brand by the processor
+   * along with the token; nothing here should ever be the authority on it.
+   */
+  const brandOf = (digits: string) => {
+    if (/^4/.test(digits)) return "Visa";
+    if (/^5[1-5]/.test(digits)) return "Mastercard";
+    if (/^3[47]/.test(digits)) return "Amex";
+    if (/^6/.test(digits)) return "Discover";
+    return "Card";
+  };
+
+  const addCard = useCallback(
+    ({ number, expires, holder }: { number: string; expires: string; holder: string }) => {
+      const digits = number.replace(/\D/g, "");
+      if (digits.length < 12) return;
+      const added: SavedCard = {
+        id: nextCardId(),
+        brand: brandOf(digits),
+        last4: digits.slice(-4),
+        expires,
+        holder: holder.trim(),
+      };
+      // The first card on file is the primary by definition — a card nothing
+      // charges is not a payment method, it is a note.
+      setCards((list) => (list.length ? [...list, added] : [{ ...added, primary: true }]));
+      notify(`${added.brand} ···· ${added.last4} added.`);
+    },
+    [notify]
+  );
+
+  const updateCard = useCallback(
+    (id: string, patch: { expires?: string; holder?: string }) => {
+      setCards((list) => list.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+      notify("Card updated.");
+    },
+    [notify]
+  );
+
+  const removeCard = useCallback(
+    (id: string) => {
+      setCards((list) => {
+        const next = list.filter((c) => c.id !== id);
+        // Removing the primary promotes the next one rather than leaving the
+        // org with cards on file and nothing to charge.
+        return next.length && !next.some((c) => c.primary)
+          ? next.map((c, i) => (i === 0 ? { ...c, primary: true } : c))
+          : next;
+      });
+      notify("Card removed.");
+    },
+    [notify]
+  );
+
+  const setPrimaryCard = useCallback(
+    (id: string) => {
+      setCards((list) => list.map((c) => ({ ...c, primary: c.id === id })));
+    },
+    []
+  );
+
+  /**
+   * Buy credits.
+   *
+   * THREE WRITES THAT BELONG TOGETHER — the balance, the ledger row and the
+   * receipt — for the same reason `subscribe` keeps its three together: a
+   * top-up that lands the credits but leaves no record is money the user can't
+   * account for later.
+   *
+   * The card is charged by the processor, not here. This records the outcome.
+   */
+  const buyCredits = useCallback<SettingsStore["buyCredits"]>(
+    (next) => {
+      if (!card) return;
+      const at = Date.now();
+      const id = `TX-${String(at).slice(-6)}`;
+      setCreditBalance((b) => b + next.credits);
+      setCreditLog((log) => [
+        {
+          id,
+          at,
+          kind: "purchase",
+          detail: next.label,
+          credits: next.credits,
+          usd: next.usd,
+          method: cardLabel(card),
+        },
+        ...log,
+      ]);
+      setInvoices((prev) => [
+        {
+          id,
+          due: new Date(at).toLocaleDateString(undefined, {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+          }),
+          type: `Credits — ${next.label}`,
+          status: "Paid",
+          total: next.usd.toLocaleString(undefined, { style: "currency", currency: "USD" }),
+        },
+        ...prev,
+      ]);
+      notify(`${next.credits.toLocaleString()} credits added — ${cardLabel(card)} charged.`);
+    },
+    [card, notify]
+  );
 
   const setAccount = useCallback(
     (patch: Partial<SettingsAccount>) =>
@@ -334,6 +547,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       org,
       page,
       go,
+      exit: onExit ?? (() => undefined),
       toast,
       members,
       seatLedger,
@@ -348,6 +562,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setProjectRoster,
       subscription,
       invoices,
+      creditBalance,
+      creditLog,
+      card,
+      cards,
+      addCard,
+      updateCard,
+      removeCard,
+      setPrimaryCard,
+      buyCredits,
       subscribe,
       setAccount,
       setOrg,
@@ -359,6 +582,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       org,
       page,
       go,
+      onExit,
       toast,
       members,
       seatLedger,
@@ -373,6 +597,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setProjectRoster,
       subscription,
       invoices,
+      creditBalance,
+      creditLog,
+      card,
+      cards,
+      addCard,
+      updateCard,
+      removeCard,
+      setPrimaryCard,
+      buyCredits,
       subscribe,
       setAccount,
       setOrg,

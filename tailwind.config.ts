@@ -143,6 +143,23 @@ const config: Config = {
           from: { opacity: "0", transform: "translateX(16px)" },
           to: { opacity: "1", transform: "translateX(0)" },
         },
+        // A sheet docked to the BOTTOM edge — the asset library. Same idea as
+        // drawer-in and panel-in: it arrives from the edge it lives on, so the
+        // motion says where the thing came from rather than just that it
+        // appeared.
+        "sheet-in": {
+          from: { opacity: "0", transform: "translateY(14px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+        // A menu hanging off a button in the top bar. Shorter throw than the
+        // docked panels and a touch of scale: it belongs to the control that
+        // opened it and drops out of it, rather than sliding in from a screen
+        // edge it has nothing to do with. `top` origin is set at the call site,
+        // so it grows downward out of its own trigger.
+        "menu-in": {
+          from: { opacity: "0", transform: "translateY(-6px) scale(0.97)" },
+          to: { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
         // Indeterminate work: a highlight travelling across a track.
         shimmer: {
           from: { transform: "translateX(-110%)" },
@@ -160,6 +177,11 @@ const config: Config = {
         "modal-in": "modal-in 0.2s cubic-bezier(0.16,1,0.3,1)",
         "drawer-in": "drawer-in 0.26s cubic-bezier(0.16,1,0.3,1)",
         "panel-in": "panel-in 0.26s cubic-bezier(0.16,1,0.3,1)",
+        "sheet-in": "sheet-in 0.26s cubic-bezier(0.16,1,0.3,1)",
+        // Quicker than the panels. A menu is a response to the click that is
+        // still under the cursor, and 260ms on something that small reads as
+        // lag rather than as motion.
+        "menu-in": "menu-in 0.16s cubic-bezier(0.16,1,0.3,1)",
         shimmer: "shimmer 1.5s ease-in-out infinite",
         "thinking-dot": "thinking-dot 1.1s ease-in-out infinite",
       },

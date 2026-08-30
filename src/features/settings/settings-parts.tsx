@@ -278,7 +278,7 @@ export function SearchField({
   return (
     <label
       className={cn(
-        "glass-thin flex h-9 min-w-[11rem] items-center gap-2 !rounded-lg px-3",
+        "field-well flex h-9 min-w-[11rem] items-center gap-2 rounded-lg px-3",
         className
       )}
     >
@@ -300,43 +300,10 @@ export function SearchField({
  */
 export function DateField({ label }: { label: string }) {
   return (
-    <span className="glass-thin flex h-9 items-center gap-2 !rounded-lg px-3 text-content-subtle">
+    <span className="field-well flex h-9 items-center gap-2 rounded-lg px-3 text-content-subtle">
       <Icon name="calendar" size={16} className="shrink-0" />
       <span className="type-body whitespace-nowrap">{label}</span>
     </span>
   );
 }
 
-/** A quota readout: a big number over its allowance. */
-export function QuotaCell({
-  icon,
-  label,
-  used,
-  total,
-  unit,
-}: {
-  icon: IconName;
-  label: string;
-  used: number | string;
-  total: number | string;
-  unit?: string;
-}) {
-  return (
-    <div className="flex-1 p-5">
-      <div className="flex items-center gap-2.5">
-        <span className="grid h-8 w-8 place-items-center rounded-md bg-brand-soft text-brand">
-          <Icon name={icon} size={17} />
-        </span>
-        <p className="type-body-strong text-content">{label}</p>
-      </div>
-      <p className="mt-2.5 font-display text-lg font-semibold text-content">
-        {used}
-        {unit}
-        <span className="type-body ml-1 font-normal text-content-subtle">
-          / {total}
-          {unit}
-        </span>
-      </p>
-    </div>
-  );
-}

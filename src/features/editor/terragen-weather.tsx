@@ -221,7 +221,7 @@ function SetFooter({
           </p>
           <div className="flex gap-2">
             <Button
-              variant="secondary"
+              variant="outline"
               size="sm"
               className="grow"
               data-ui="terragen-weather-edit-cancel"
@@ -247,7 +247,7 @@ function SetFooter({
       ) : (
         <div className="flex gap-2">
           <Button
-            variant="secondary"
+            variant="outline"
             size="sm"
             className="grow"
             data-ui="terragen-weather-reset"

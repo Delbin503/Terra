@@ -647,6 +647,17 @@ const SECONDS_PER_SUBSET = 15;
  * because weather lives on the scene, not in the order — the same reason the
  * camera sweep is read live from the rig.
  */
+/**
+ * The most arrangements one order may sweep.
+ *
+ * A DOMAIN RULE, NOT A WIDGET'S `max`. Every arrangement is a whole subset —
+ * it multiplies against the weather sets, the swap lists and the camera's
+ * frames — so this is a statement about what a Work Order may contain, and it
+ * has to hold whichever control writes the field. `useWorkOrder.patch` clamps
+ * to it; the stepper reads it for its own bound so the two can't disagree.
+ */
+export const MAX_ARRANGEMENTS = 10;
+
 export function computeTotals(
   o: WorkOrder,
   assets: Asset[],

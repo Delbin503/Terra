@@ -29,9 +29,16 @@ import { PlansPage } from "./PlansPage";
  * frame — its own slim top bar, its own rail — and the way out is the back arrow
  * at the top of that rail, which is the only navigation the two shells share.
  */
-export function SettingsView({ onExit }: { onExit: (to?: AppDestination) => void }) {
+export function SettingsView({
+  onExit,
+  start,
+}: {
+  onExit: (to?: AppDestination) => void;
+  /** which page to open on — omitted, Settings opens where it always has */
+  start?: SettingsPage;
+}) {
   return (
-    <SettingsProvider>
+    <SettingsProvider start={start} onExit={onExit}>
       <SettingsShell onExit={onExit} />
     </SettingsProvider>
   );

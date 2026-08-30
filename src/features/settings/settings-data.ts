@@ -24,6 +24,33 @@ export type SettingsPage =
    *  from the rail: it's a task you finish and leave, not a place to sit. */
   | "plans";
 
+/**
+ * Every page id, for the router.
+ *
+ * `#settings/<id>` is a real link — the Pricing page's checkout hand-off, the
+ * rail's "manage organizations", the credit panel's Top Up all point at a
+ * SPECIFIC settings page rather than dropping you on My Profile to find it. A
+ * list is needed because a hash is a string a person can type: anything not in
+ * here opens Settings where it always opens.
+ */
+export const SETTINGS_PAGES: SettingsPage[] = [
+  "profile",
+  "messages",
+  "organizations",
+  "dashboard",
+  "members",
+  "project-access",
+  "activity",
+  "balance",
+  "org-profile",
+  "payment",
+  "billing",
+  "plans",
+];
+
+export const isSettingsPage = (v: string): v is SettingsPage =>
+  (SETTINGS_PAGES as string[]).includes(v);
+
 export const SETTINGS_NAV: {
   section: string;
   items: { id: SettingsPage; label: string; icon: IconName }[];
@@ -74,14 +101,6 @@ export const org = {
   billingEmail: "**********@gmail.com",
 };
 
-/** The quota pill in the settings top bar, and the Terra Balance cards. */
-export const quota = {
-  images: { used: 10, total: 0 },
-  videos: { used: 0, total: 0 },
-  credits: 0,
-  planExpires: "May 26, 2025",
-};
-
 export const seats = {
   total: 1,
   /** the one seat that can't be revoked or reassigned */
@@ -125,6 +144,29 @@ export const SEAT_LABEL: Record<SeatKind, string> = {
   owner: "Owner",
   full: "Full Access",
   viewer: "Viewer",
+};
+
+/**
+ * HOW A SEAT IS DRAWN — one glyph and one tone per kind, everywhere.
+ *
+ * The Members table had these inline, so anywhere else that named a seat had to
+ * guess: the Pricing cards drew every seat row as a brand-orange payment card,
+ * which made a Viewer seat and a Full Access seat the same object and neither
+ * of them the thing the roster shows. A seat is a role with a colour in this
+ * product — accent for the Owner, brand for Full Access, warning for a Viewer —
+ * and the colour is the fastest read on both screens, so it lives here with the
+ * label rather than in whichever screen drew it first.
+ */
+export const SEAT_ICON: Record<SeatKind, IconName> = {
+  owner: "person",
+  full: "layout",
+  viewer: "visible",
+};
+
+export const SEAT_TONE: Record<SeatKind, string> = {
+  owner: "bg-accent-soft text-accent",
+  full: "bg-brand-soft text-brand",
+  viewer: "bg-warning-soft text-warning",
 };
 
 export const SEAT_INCLUDES: Record<SeatKind, string> = {

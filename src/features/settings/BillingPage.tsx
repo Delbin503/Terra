@@ -144,7 +144,7 @@ function InvoicesTab() {
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-display text-lg font-semibold">Invoices</h2>
         <div className="flex flex-wrap items-center gap-2.5">
-          <span className="flex h-9 items-center gap-2 rounded-lg border border-glass/10 bg-surface px-3 text-content-muted">
+          <span className="field-well flex h-9 items-center gap-2 rounded-lg px-3 text-content-muted">
             <Icon name="filter" size={16} />
             <span className="type-body">Filter</span>
           </span>

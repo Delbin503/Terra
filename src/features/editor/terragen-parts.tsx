@@ -156,18 +156,25 @@ export function Group({
 
 export function Note({
   tone = "info",
+  ui,
+  className,
   children,
 }: {
   tone?: "info" | "warn";
+  /** layer name, for notes that a test or a screenshot needs to find */
+  ui?: string;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
     <p
+      data-ui={ui}
       className={cn(
         "type-caption flex items-start gap-1.5 rounded-lg border px-2.5 py-2",
         tone === "warn"
           ? "border-warning/40 bg-warning-soft/40 text-warning"
-          : "border-glass/10 bg-glass/6 text-content-subtle"
+          : "border-glass/10 bg-glass/6 text-content-subtle",
+        className
       )}
     >
       <Icon name={tone === "warn" ? "warning" : "info"} size={13} className="mt-px shrink-0" />

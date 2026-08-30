@@ -330,7 +330,11 @@ export function AssetLibrary({
       <GlassPanel
         ui="asset-library"
         thickness="thick"
-        className="pointer-events-auto absolute bottom-6 left-6 flex h-[40vh] max-h-[392px] min-h-[260px] overflow-hidden !rounded-3xl transition-[right] duration-300"
+        /* `animate-sheet-in` rises from the bottom edge it is docked to. The
+           library opened by snapping into place fully formed, which on a
+           surface this large reads as the screen changing rather than as a
+           thing arriving — and gave no clue which button had produced it. */
+        className="pointer-events-auto absolute bottom-6 left-6 flex h-[40vh] max-h-[392px] min-h-[260px] animate-sheet-in overflow-hidden !rounded-3xl transition-[right] duration-300"
         // Driven by style rather than a class pair so the caller's inset can be
         // added to it — two variants became four the moment TerraGen also
         // needed to push the panel in.

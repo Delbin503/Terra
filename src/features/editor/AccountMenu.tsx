@@ -49,7 +49,7 @@ export function AccountMenu({ userName }: { userName: string }) {
         <Panel
           ui="account"
           thickness="overlay"
-          className="absolute right-0 top-[calc(100%+10px)] z-50 w-[248px] !rounded-2xl"
+          className="absolute right-0 top-[calc(100%+10px)] z-50 w-[248px] origin-top-right animate-menu-in !rounded-2xl"
         >
           {/* Signed-in user */}
           <div data-ui="account-me" className="flex items-center gap-2.5 px-3 pb-2.5 pt-3">

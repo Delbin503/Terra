@@ -67,3 +67,28 @@ export const shelfSpec = (id: Shelf) =>
 /** Where a shelf starts: Favourites opens on projects, the others on everything. */
 export const initialScope = (id: Shelf): Scope =>
   id === "favourites" ? "projects" : "all";
+
+/* ------------------------------------------------------------- the controls */
+
+/**
+ * HOW A SHELF IS LOOKED AT — the layout switch and the card-size range.
+ *
+ * Here rather than in ProjectsView because Trash is the same shelf with the
+ * same two questions asked of it: covers or rows, and how big. They were the
+ * page's own constants, so Trash had neither until it grew a second copy of
+ * them — which is the point at which two shelves start sizing their cards
+ * differently for no reason anyone chose.
+ */
+export type Layout = "grid" | "list";
+
+export const LAYOUTS: { value: Layout; label: string; icon: IconName }[] = [
+  { value: "grid", label: "Grid", icon: "grid" },
+  { value: "list", label: "List", icon: "list" },
+];
+
+/**
+ * Card-size range, as the minimum width a column may be. The initial value is
+ * chosen so a full-width window lands on the four-up grid the design shows —
+ * the slider is for going denser or bigger than that, not for finding it.
+ */
+export const CARD_SIZE = { min: 170, max: 380, step: 10, initial: 300 };

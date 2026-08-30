@@ -172,7 +172,7 @@ export function ActivityLogsPage() {
           prefix="Status:"
           aria-label="Status"
           value={status}
-          onChange={(e) => setStatus(e.target.value)}
+          onChange={setStatus}
           options={[
             { value: "all", label: "All" },
             { value: "success", label: "Success" },
@@ -182,7 +182,7 @@ export function ActivityLogsPage() {
         <Select
           aria-label="Category"
           value={category}
-          onChange={(e) => setCategory(e.target.value)}
+          onChange={setCategory}
           options={[
             { value: "all", label: "All Categories" },
             { value: "Prj", label: "Project" },

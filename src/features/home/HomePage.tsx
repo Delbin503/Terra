@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
-import { WorldThumb } from "./WorldThumb";
 import { Sidebar, type Destination } from "./Sidebar";
 import { AppBackdrop } from "./AppBackdrop";
 import { HomeTopBar } from "./HomeTopBar";
@@ -9,13 +8,18 @@ import { ChatLauncher } from "./ChatLauncher";
 import { CreateWorldModal } from "./CreateWorldModal";
 import { ProjectCard } from "./ProjectCard";
 import { ProjectsView } from "./ProjectsView";
-import { CommunityView, WorldCard } from "./CommunityView";
+import { CommunityView, FeatureCard, WorldCard } from "./CommunityView";
+import { RemixDialog } from "./RemixDialog";
 import { TrashView } from "./TrashView";
+import { PricingView } from "./PricingView";
 import { NotificationsDrawer } from "./NotificationsDrawer";
 import { AiChatDrawer } from "./AiChatDrawer";
 import { WorkspaceProvider, useWorkspace } from "./workspace";
 import type { Shelf } from "./shelves";
-import { whatsNew, communityWorlds, type FeedItem } from "./data";
+import type { CommunityWorld } from "./data";
+import { WorkOrdersDialog } from "@/features/editor/WorkOrdersDialog";
+import type { WorkOrderRunStore } from "@/features/editor/work-order-runs";
+import { whatsNew, communityWorlds } from "./data";
 
 /** Title Case, because it reads as a greeting card rather than a status line. */
 function greeting() {
@@ -40,10 +44,17 @@ const SHELF = 5;
  * is what lets Trash show what Projects threw away and the notification list
  * show that it happened.
  */
-export function HomePage({ at = "home" }: { at?: Destination }) {
+export function HomePage({
+  at = "home",
+  runs,
+}: {
+  at?: Destination;
+  /** the shared Work Order history — see the comment in App.tsx */
+  runs: WorkOrderRunStore;
+}) {
   return (
     <WorkspaceProvider>
-      <Shell at={at} />
+      <Shell at={at} runs={runs} />
     </WorkspaceProvider>
   );
 }
@@ -56,13 +67,23 @@ export function HomePage({ at = "home" }: { at?: Destination }) {
  * because the bar's left half is the page's own business — the home page has no
  * breadcrumb to put there and the others do.
  */
-function Shell({ at: landing }: { at: Destination }) {
+function Shell({ at: landing, runs }: { at: Destination; runs: WorkOrderRunStore }) {
   const { unread, markNotificationsRead } = useWorkspace();
   const [collapsed, setCollapsed] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   /** the two panels that arrive from the edges */
   const [notifications, setNotifications] = useState(false);
   const [chat, setChat] = useState(false);
+  /** the Work Orders table, opened by the rail's Downloads button */
+  const [orders, setOrders] = useState(false);
+  /** a community world being considered — the Remix sheet is about this one */
+  const [remix, setRemix] = useState<CommunityWorld | null>(null);
+  /** community likes — here rather than in the grid, so the sheet shares them */
+  const [likedWorlds, setLikedWorlds] = useState<string[]>([]);
+  const toggleWorldLike = (id: string) =>
+    setLikedWorlds((list) =>
+      list.includes(id) ? list.filter((x) => x !== id) : [...list, id]
+    );
   // Seeded rather than fixed: coming back from Settings can land on Projects.
   const [at, setAt] = useState<Destination>(landing);
   // Which Projects shelf is open lives here because the rail lists the shelves
@@ -95,6 +116,12 @@ function Shell({ at: landing }: { at: Destination }) {
           setShelf(next);
           setAt("projects");
         }}
+        /* Downloads is where an archive comes from, and an archive is what a
+           finished Work Order leaves behind — so the button opens the run list
+           rather than a file save with nothing to save. Same table the editor
+           shows, same store behind it. */
+        downloads={runs.active}
+        onDownloads={() => setOrders(true)}
         unread={unread}
         onNotifications={() => {
           setNotifications(true);
@@ -112,14 +139,26 @@ function Shell({ at: landing }: { at: Destination }) {
         )}
       >
         {/* Wide, not centred-narrow: the five-up Projects row is the widest thing
-            on the page and it's what sets the measure. */}
-        <div className="mx-auto max-w-[1600px] px-8 pb-20 pt-6">
+            on the page and it's what sets the measure.
+
+            The tail of runway at the bottom is for the shelves, which are lists
+            that run out — it keeps the last row off the window's edge. Pricing
+            is the one destination sized to FIT the window, so 80px of nothing
+            under it is 80px it would have to scroll to reach. */}
+        <div
+          className={cn(
+            "mx-auto max-w-[1600px] px-8 pt-6",
+            at === "pricing" ? "pb-2" : "pb-20"
+          )}
+        >
           {at === "home" && (
             <HomeFeed
               narrow={chat}
               onCreate={() => setModalOpen(true)}
               onSeeProjects={() => setAt("projects")}
+              onSeeCommunity={() => setAt("community")}
               onChat={() => setChat(true)}
+              onPricing={() => setAt("pricing")}
             />
           )}
           {at === "projects" && (
@@ -128,6 +167,7 @@ function Shell({ at: landing }: { at: Destination }) {
               onShelf={setShelf}
               onHome={() => setAt("home")}
               onChat={() => setChat(true)}
+              onPricing={() => setAt("pricing")}
               onCreateProject={() => setModalOpen(true)}
               onOpenProject={() => {
                 window.location.hash = "#editor";
@@ -138,13 +178,26 @@ function Shell({ at: landing }: { at: Destination }) {
             <CommunityView
               onHome={() => setAt("home")}
               onChat={() => setChat(true)}
-              onOpenWorld={() => {
-                window.location.hash = "#editor";
-              }}
+              onPricing={() => setAt("pricing")}
+              /* A community world is somebody ELSE'S work. Opening it straight
+                 into the editor implied you were about to edit theirs; the
+                 sheet says what you would actually be doing — taking it as a
+                 starting point — and makes that a decision rather than a
+                 surprise. */
+              onOpenWorld={setRemix}
+              liked={likedWorlds}
+              onToggleLike={toggleWorldLike}
             />
           )}
           {at === "trash" && (
             <TrashView
+              onHome={() => setAt("home")}
+              onChat={() => setChat(true)}
+              onPricing={() => setAt("pricing")}
+            />
+          )}
+          {at === "pricing" && (
+            <PricingView
               onHome={() => setAt("home")}
               onChat={() => setChat(true)}
             />
@@ -164,6 +217,19 @@ function Shell({ at: landing }: { at: Destination }) {
         onClose={() => setChat(false)}
         onCreateWorld={() => setModalOpen(true)}
       />
+
+      {orders && <WorkOrdersDialog store={runs} onClose={() => setOrders(false)} />}
+
+      <RemixDialog
+        world={remix}
+        liked={remix ? likedWorlds.includes(remix.id) : false}
+        onToggleLike={toggleWorldLike}
+        onClose={() => setRemix(null)}
+        onRemix={() => {
+          setRemix(null);
+          window.location.hash = "#editor";
+        }}
+      />
     </div>
   );
 }
@@ -172,13 +238,18 @@ function HomeFeed({
   narrow,
   onCreate,
   onSeeProjects,
+  onSeeCommunity,
   onChat,
+  onPricing,
 }: {
   /** the chat drawer has taken a column — every grid loses one */
   narrow: boolean;
   onCreate: () => void;
   onSeeProjects: () => void;
+  /** where a What's New card's "Explore Now" leads */
+  onSeeCommunity: () => void;
   onChat: () => void;
+  onPricing: () => void;
 }) {
   const { projects } = useWorkspace();
   const [tab, setTab] = useState<Tab>("new");
@@ -193,7 +264,7 @@ function HomeFeed({
 
   return (
     <>
-      <HomeTopBar onChat={onChat} />
+      <HomeTopBar onChat={onChat} onPricing={onPricing} />
 
       <h1 className="mb-6 mt-5 text-center font-display text-2xl font-extrabold tracking-tight">
         {greeting()}, Start Creating!
@@ -271,26 +342,31 @@ function HomeFeed({
                 }}
               />
             ))
-          : whatsNew.map((item) => <FeedCard key={item.id} item={item} />)}
+          : whatsNew.map((item) => (
+              /* The Community banners' card, not a lookalike — see
+                 `FeatureCard`. These used to be a title on a render inside a
+                 button with no handler: pressable-looking and inert. */
+              <FeatureCard
+                key={item.id}
+                eyebrow="What's New"
+                headline={item.title}
+                seed={item.seed}
+                /* A FIXED HEIGHT, LIKE THE BANNERS — not `aspect-video`.
+                   The ratio left ~145px at three or four columns, and a badge,
+                   a two-line headline and a button do not fit in that: the
+                   second line of "Terra 2.4 — faster capture runs" was cut off
+                   by the button. Adding `min-h` to the ratio was worse — an
+                   aspect-ratio box with a min-height grows its WIDTH to match
+                   (180 × 16/9 = 320px), which pushed the grid past its
+                   container. Height is the constraint here, so height is what
+                   is set. */
+                className="h-[180px]"
+                onExplore={onSeeCommunity}
+              />
+            ))}
       </div>
     </>
   );
 }
 
-/** A world or release note. The title sits ON the render, over a scrim. */
-function FeedCard({ item }: { item: FeedItem }) {
-  return (
-    <button
-      type="button"
-      className="group relative aspect-video overflow-hidden rounded-xl border border-glass/10 text-left"
-    >
-      <div className="h-full w-full transition-transform duration-200 group-hover:scale-[1.03]">
-        <WorldThumb seed={item.seed} />
-      </div>
-      <span aria-hidden className="absolute inset-0 scrim-strong" />
-      <span className="type-body-strong absolute inset-x-3 bottom-2.5 line-clamp-2 text-white">
-        {item.title}
-      </span>
-    </button>
-  );
-}
+

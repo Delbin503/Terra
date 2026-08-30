@@ -104,7 +104,7 @@ export function MoveDialog({
           Choose where to file it, then press Move.
         </DialogDescription>
 
-        <label className="mt-4 flex h-10 items-center gap-2 glass-thin !rounded-lg px-3">
+        <label className="field-well mt-4 flex h-10 items-center gap-2 rounded-lg px-3">
           <Icon name="search" size={16} className="shrink-0 text-content-subtle" />
           <input
             value={query}

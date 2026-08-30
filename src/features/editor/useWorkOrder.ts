@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type { Asset } from "./assets-data";
 import type { SceneApi } from "./useScene";
 import {
+  MAX_ARRANGEMENTS,
   deriveWorkOrder,
   type AnnotationId,
   type AxisId,
@@ -92,7 +93,10 @@ export function useWorkOrder(): WorkOrderStore {
        */
       if (id === "layouts") {
         const l = merged as WorkOrder["layouts"];
-        return { ...prev, layouts: { ...l, on: l.count > 1 } };
+        // Clamped here as well as in the stepper: the cap is a fact about the
+        // order, and this is the one door every write to it comes through.
+        const count = Math.min(MAX_ARRANGEMENTS, Math.max(1, Math.round(l.count)));
+        return { ...prev, layouts: { ...l, count, on: count > 1 } };
       }
       return { ...prev, [id]: merged };
     });

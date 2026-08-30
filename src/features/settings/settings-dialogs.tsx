@@ -1,15 +1,18 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui";
 import { Icon } from "@/components/icons";
 
 /**
- * The two dialogs every Settings control ends up needing: change one value, or
- * confirm one irreversible thing.
+ * The dialogs every Settings control ends up needing: change one value, or
+ * change the password.
  *
- * They're here rather than per-page because eleven screens asking the same two
- * questions in eleven layouts is how a settings area stops feeling like one
- * product. The distinction that matters is between them: an EDIT is a form you
- * can abandon, a CONFIRM is a decision you have to type your way out of if it
+ * They're here rather than per-page because eleven screens asking the same
+ * question in eleven layouts is how a settings area stops feeling like one
+ * product. The OTHER question — confirm one irreversible thing — is asked in
+ * more places than Settings, so it lives in `@/components/ui` as `ConfirmDialog`
+ * and is the same sheet here, on the Projects shelf and in the editor. The
+ * distinction that matters is between the two kinds: an EDIT is a form you can
+ * abandon, a CONFIRM is a decision you have to type your way out of if it
  * destroys something.
  */
 
@@ -195,94 +198,6 @@ export function ChangePasswordDialog({
             }}
           >
             Save Password
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/**
- * Confirm something you can't take back.
- *
- * `confirmWord` arms the destructive path: when it's set, the action stays
- * disabled until the word is typed. That's reserved for things that end an
- * account or a subscription — asking someone to type DELETE to sign out of
- * other devices would just train them to type it without reading.
- */
-export function ConfirmDialog({
-  open,
-  onOpenChange,
-  title,
-  body,
-  confirmLabel,
-  confirmWord,
-  tone = "danger",
-  onConfirm,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  title: string;
-  body: ReactNode;
-  confirmLabel: string;
-  confirmWord?: string;
-  tone?: "danger" | "brand";
-  onConfirm: () => void;
-}) {
-  const [typed, setTyped] = useState("");
-
-  useEffect(() => {
-    if (open) setTyped("");
-  }, [open]);
-
-  const armed = !confirmWord || typed.trim().toUpperCase() === confirmWord.toUpperCase();
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[28rem]">
-        <div className="flex items-start gap-3">
-          <span
-            className={
-              "grid h-9 w-9 shrink-0 place-items-center rounded-lg " +
-              (tone === "danger" ? "bg-danger/15 text-danger" : "bg-brand-soft text-brand")
-            }
-          >
-            <Icon name={tone === "danger" ? "warning" : "info"} size={18} />
-          </span>
-          <div className="min-w-0">
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>{body}</DialogDescription>
-          </div>
-        </div>
-
-        {confirmWord && (
-          <label className="mt-4 block">
-            <span className="type-caption text-content-subtle">
-              Type <b className="text-content">{confirmWord}</b> to confirm
-            </span>
-            <input
-              autoFocus
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              className="field-well type-body mt-1.5 h-10 w-full rounded-lg border px-3 text-content outline-none transition-colors focus:border-danger"
-            />
-          </label>
-        )}
-
-        <div className="mt-5 flex justify-end gap-2.5">
-          <Button variant="secondary" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant={tone === "danger" ? "danger" : "brand"}
-            size="sm"
-            disabled={!armed}
-            onClick={() => {
-              onConfirm();
-              onOpenChange(false);
-            }}
-          >
-            {confirmLabel}
           </Button>
         </div>
       </DialogContent>

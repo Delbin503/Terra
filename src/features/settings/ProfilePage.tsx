@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { Avatar, Button } from "@/components/ui";
+import { Avatar, Button, ConfirmDialog } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { DetailRow, InlineEditRow, PageTitle, SectionTitle } from "./settings-parts";
 import { useSettings } from "./settings-store";
-import { ChangePasswordDialog, ConfirmDialog, useImagePicker } from "./settings-dialogs";
+import { ChangePasswordDialog, useImagePicker } from "./settings-dialogs";
 
 /**
  * MY PROFILE — the facts about the account, then the two ways to end it.

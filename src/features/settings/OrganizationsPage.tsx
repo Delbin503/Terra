@@ -90,7 +90,7 @@ export function OrganizationsPage() {
             prefix="Last Active:"
             aria-label="Last active"
             value={active}
-            onChange={(e) => setActive(e.target.value)}
+            onChange={setActive}
             options={[
               { value: "all", label: "All" },
               { value: "week", label: "This week" },
@@ -101,7 +101,7 @@ export function OrganizationsPage() {
             prefix="Seat Type:"
             aria-label="Seat type"
             value={seatType}
-            onChange={(e) => setSeatType(e.target.value)}
+            onChange={setSeatType}
             options={[
               { value: "all", label: "All" },
               { value: "owner", label: "Owner" },

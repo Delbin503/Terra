@@ -164,8 +164,8 @@ export function DataTable<T>({
         <Select
           aria-label="Rows per page"
           value={String(size)}
-          onChange={(e) => {
-            setSize(Number(e.target.value));
+          onChange={(v) => {
+            setSize(Number(v));
             setPage(1);
           }}
           options={PAGE_SIZES.map((v) => ({ value: v, label: v }))}

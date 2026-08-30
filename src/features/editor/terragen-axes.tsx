@@ -8,6 +8,7 @@ import { CountField } from "./controls-ui";
 import type { Asset } from "./assets-data";
 import {
   ANNOTATIONS,
+  MAX_ARRANGEMENTS,
   RESOLUTION_LIMITS,
   RESOLUTION_PRESETS,
   axisValues,
@@ -102,7 +103,7 @@ function BackgroundEditor({ order, store, assets, onBrowseLibrary }: EditorProps
             one that could only ever show what was already catalogued. Picking
             happens in the sheet now; what stays here is the shortlist. */}
         <Button
-          variant="secondary"
+          variant="outline"
           size="sm"
           data-ui="terragen-add-hdri"
           className="mb-2 w-full"
@@ -190,6 +191,7 @@ function BackgroundEditor({ order, store, assets, onBrowseLibrary }: EditorProps
 }
 
 /* --- arrangement ---------------------------------------------------------- */
+
 
 /**
  * ARRANGEMENT — rearrange the room, N times, reproducibly.
@@ -281,7 +283,13 @@ function ArrangementEditor({ order, store, scene }: EditorProps) {
           ui="terragen-arrangements"
           value={l.count}
           min={1}
-          max={24}
+          /* TEN, NOT 24. Every arrangement is a whole subset — it multiplies
+             against the weather sets, the swap lists and the camera's frames —
+             so the far end of this stepper was an order nobody meant to place.
+             Ten is enough variety to sweep a room and still a bill you can read
+             on the review screen. The stepper clamps, and so does a typed
+             value. */
+          max={MAX_ARRANGEMENTS}
           onChange={(n) => store.patch("layouts", { count: n })}
         />
       </Group>
@@ -348,6 +356,28 @@ function ArrangementEditor({ order, store, scene }: EditorProps) {
         {note && (
           <p className="type-caption mt-2 text-warning">{note}</p>
         )}
+
+        {/* THE SEED THE CLICKED ONE ACTUALLY RAN.
+            The field above holds ONE number and the sweep derives N from it
+            (`seedFor`), so "the seed" on screen was never the seed of the room
+            you were looking at — it was the seed of the set. That is the number
+            somebody writes down to get a particular arrangement back, and until
+            now it existed only inside the solver.
+
+            ONLY AFTER A CLICK, and only for that one. Printing all ten would be
+            a column of eight-digit numbers nobody asked for, and printing one
+            before anything is applied would attach a figure to a room the
+            viewport is not showing. */}
+        {applied !== null && (
+          <p
+            data-ui="terragen-arrangement-seed"
+            className="type-caption mt-2 flex items-center justify-between gap-2 rounded-lg border border-glass/12 bg-glass/6 px-2.5 py-2"
+          >
+            <span className="text-content-subtle">Arrangement {applied + 1} seed</span>
+            <span className="type-numeric text-content">{seedFor(l.seed, applied)}</span>
+          </p>
+        )}
+
         <p className="type-caption mt-1.5 text-content-subtle">
           Clicking one rearranges the scene so you can look at it. Undo puts it back; the run
           rebuilds every arrangement from the seed regardless.

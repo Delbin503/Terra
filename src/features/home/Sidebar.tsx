@@ -1,12 +1,20 @@
+import { useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/icons";
-import { Avatar, IconButton, Meter, Tooltip } from "@/components/ui";
-import { credits, user } from "./data";
+import { Avatar, IconButton, Tooltip } from "@/components/ui";
+import { useDismissable } from "@/features/editor/use-dismissable";
+import { credits } from "./data";
 import { SHELVES, type Shelf } from "./shelves";
+import { useWorkspace } from "./workspace";
 
-/** The destinations the app can actually show. The other rows are still in the
- *  rail because the design has them, but nothing routes to them yet. */
-export type Destination = "home" | "projects" | "community" | "trash";
+/**
+ * The destinations the app can actually show.
+ *
+ * `pricing` is one of them without being a row here: it is reached from the top
+ * bar's Pricing link on every page, and a rail entry for it would put a
+ * purchase next to the four places your work lives.
+ */
+export type Destination = "home" | "projects" | "community" | "trash" | "pricing";
 
 interface NavItem {
   icon: IconName;
@@ -46,6 +54,8 @@ export function Sidebar({
   onNavigate,
   shelf,
   onShelf,
+  onDownloads,
+  downloads,
   onNotifications,
   unread,
 }: {
@@ -58,10 +68,16 @@ export function Sidebar({
   /** which Projects shelf is showing, for the nested rows */
   shelf: Shelf;
   onShelf: (shelf: Shelf) => void;
+  /** open the Work Orders table — where an archive actually comes from */
+  onDownloads: () => void;
+  /** runs still in flight, so the button can say there is something coming */
+  downloads: number;
   onNotifications: () => void;
   /** drives the dot — a bell with no unread has nothing to announce */
   unread: number;
 }) {
+  const { org } = useWorkspace();
+
   return (
     <aside
       className={cn(
@@ -166,37 +182,32 @@ export function Sidebar({
       {/* Workspace + usage + account actions */}
       <div className="mt-auto flex flex-col gap-2">
         {collapsed ? (
-          <Tooltip label={`${user.workspace} · ${user.plan}`}>
+          <Tooltip label={`${org.name} · ${org.plan}`}>
             <button type="button" className="mx-auto">
-              <Avatar name={user.workspace} size={30} />
+              <Avatar name={org.name} size={30} />
             </button>
           </Tooltip>
         ) : (
           <div className="glass-thin !rounded-lg p-2.5">
-            <button type="button" className="flex w-full items-center gap-2 text-left">
-              <Avatar name={user.workspace} size={26} />
-              <span className="min-w-0 flex-1">
-                <span className="type-label-strong block truncate">{user.workspace}</span>
-                <span className="type-caption-strong mt-px inline-block rounded bg-brand-soft px-1 py-px text-brand">
-                  {user.plan}
-                </span>
-              </span>
-              <Icon name="chevron-up" size={14} className="shrink-0 text-content-subtle" />
-            </button>
+            <OrgSwitcher />
 
-            <div className="mt-3 flex flex-col gap-2.5">
-              <UsageRow
-                label="Images"
-                used={credits.images.used}
-                total={credits.images.total}
-                unit={credits.images.unit}
-              />
-              <UsageRow
-                label="Videos"
-                used={credits.videos.used}
-                total={credits.videos.total}
-                unit={credits.videos.unit}
-              />
+            {/* ONE FIGURE, NO METERS. The two bars here were a monthly Img and
+                video allowance — a second currency that had to be read
+                alongside the credit balance to answer one question, and that
+                could say "fine" about a run the balance could not pay for.
+                Credits buy every run, so the balance is the whole readout, and
+                a bar under it would be measuring against a cap that no longer
+                exists. */}
+            <div className="mt-3 flex items-baseline gap-2">
+              {/* The same bolt the top bar, the dispatch review and the Work
+                  Orders table put beside a credit figure. Without it this row
+                  was the only place in the app where a credit balance was a
+                  bare word and a bare number. */}
+              <Icon name="credits" size={13} className="shrink-0 text-brand" />
+              <span className="type-caption-strong text-content-muted">Credits</span>
+              <span className="type-numeric-sm ml-auto text-content">
+                <b className="font-medium">{credits.balance.toLocaleString()}</b>
+              </span>
             </div>
 
             <button
@@ -212,10 +223,18 @@ export function Sidebar({
         <div className={cn("grid gap-1.5", collapsed ? "grid-cols-1 justify-items-center" : "grid-cols-3")}>
           <IconButton
             icon="download"
-            label="Downloads"
+            label={
+              downloads
+                ? `Downloads (${downloads} run${downloads === 1 ? "" : "s"} in progress)`
+                : "Downloads"
+            }
             variant="solid"
             size="sm"
             iconSize={16}
+            /* Lit while something is rendering, like the notification dot: the
+               reason to come back to this button is that a run has finished. */
+            indicator={downloads > 0}
+            onClick={onDownloads}
             className={collapsed ? "w-8" : "w-full"}
           />
           <IconButton
@@ -275,27 +294,127 @@ function NavButton({
 }
 
 /** One metered allowance. The bar is driven by the numbers beside it. */
-function UsageRow({
-  label,
-  used,
-  total,
-  unit,
-}: {
-  label: string;
-  used: number;
-  total: number;
-  unit: string;
-}) {
+
+/**
+ * WHICH ORGANIZATION, AND THE WAY TO ANOTHER.
+ *
+ * The card used to end in a chevron-up that opened nothing — the rail's own
+ * version of the dead Pricing button: an affordance drawn, a menu implied,
+ * nothing behind it. A chevron was also the wrong glyph for what belongs here.
+ * Up-and-down is disclosure, "there is more of this below"; moving between two
+ * organizations is a SWAP, so it gets the swap arrows and says so on hover.
+ *
+ * The menu opens UPWARD, because the card is pinned to the bottom of the rail
+ * and a list hanging below it would be off the screen. Every org the account is
+ * in is listed with its plan — the plan is usually the reason you are switching
+ * — and the last row leaves for Settings, where orgs are actually joined and
+ * left. An account with one org still gets the menu: it says which one you are
+ * in and where to go to join another, which is a better answer than a control
+ * that does nothing.
+ */
+function OrgSwitcher() {
+  const { org, orgs, switchOrg } = useWorkspace();
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  useDismissable(open, () => setOpen(false), wrap);
+
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-baseline gap-2">
-        <span className="type-caption-strong text-content-muted">{label}</span>
-        <span className="type-numeric-sm ml-auto text-content-subtle">
-          <b className="font-medium text-content">{used.toLocaleString()}</b> /{" "}
-          {total.toLocaleString()} {unit}
-        </span>
-      </div>
-      <Meter value={(used / total) * 100} tone="brand" className="h-1" />
+    <div ref={wrap} className="relative">
+      <Tooltip label="Switch organization" side="right" hidden={open}>
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          data-ui="org-switcher"
+          onClick={() => setOpen((o) => !o)}
+          className="flex w-full items-center gap-2 rounded-md text-left"
+        >
+          <Avatar name={org.name} size={26} />
+          <span className="min-w-0 flex-1">
+            <span className="type-label-strong block truncate">{org.name}</span>
+            <span className="type-caption-strong mt-px inline-block rounded bg-brand-soft px-1 py-px text-brand">
+              {org.plan}
+            </span>
+          </span>
+          <Icon
+            name="switch"
+            size={14}
+            className={cn(
+              "shrink-0 transition-colors",
+              open ? "text-brand" : "text-content-subtle"
+            )}
+          />
+        </button>
+      </Tooltip>
+
+      {open && (
+        <div
+          role="menu"
+          data-ui="org-switcher-menu"
+          /* THE DROPDOWN SKIN, not glass. Every other list-of-choices in the
+             web app — the Select's listbox, the right-click menu — is an
+             opaque `surface-overlay` sheet with a `line/12` hairline and the
+             pop shadow. This one was frosted glass, so the rail's own menu was
+             the only one you could read the page through. */
+          className="absolute bottom-[calc(100%+10px)] left-0 z-50 w-[calc(100%+1rem)] min-w-[13rem] origin-bottom-left animate-menu-in rounded-xl border border-line/12 bg-surface-overlay p-1.5 shadow-pop"
+        >
+          <p className="type-eyebrow px-2 py-1 text-content-subtle">Organizations</p>
+          {orgs.map((o) => {
+            const on = o.id === org.id;
+            return (
+              <button
+                key={o.id}
+                type="button"
+                role="menuitemradio"
+                aria-checked={on}
+                onClick={() => {
+                  switchOrg(o.id);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors",
+                  on ? "bg-surface-raised" : "hover:bg-surface-raised"
+                )}
+              >
+                <Avatar name={o.name} size={22} />
+                <span className="min-w-0 flex-1">
+                  <span
+                    className={cn(
+                      "type-body-dense block truncate",
+                      on ? "text-content" : "text-content-muted"
+                    )}
+                  >
+                    {o.name}
+                  </span>
+                  <span className="type-caption block truncate text-content-subtle">
+                    {o.plan}
+                  </span>
+                </span>
+                <Icon
+                  name="check"
+                  size={14}
+                  aria-hidden
+                  className={cn("shrink-0 text-brand", !on && "invisible")}
+                />
+              </button>
+            );
+          })}
+
+          <div className="mx-1 my-1 h-px bg-line/10" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              window.location.hash = "#settings/organizations";
+            }}
+            className="type-body-dense flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-content-muted transition-colors hover:bg-surface-raised hover:text-content"
+          >
+            <Icon name="organization" size={14} className="shrink-0" />
+            Manage organizations
+          </button>
+        </div>
+      )}
     </div>
   );
 }

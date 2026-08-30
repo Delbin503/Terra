@@ -17,7 +17,7 @@ import type { Asset } from "./assets-data";
 import type { SceneApi } from "./useScene";
 import { swapAdjusted, swapsFor, type ObjectSwap, type SceneRoles, type WorkOrder } from "./work-order";
 import type { WorkOrderStore } from "./useWorkOrder";
-import { Cost, Group, Note } from "./terragen-parts";
+import { Group, Note } from "./terragen-parts";
 
 /** How the gizmo is currently dragging. Mirrors the editor's own three modes. */
 export type GizmoMode = "translate" | "rotate" | "scale";
@@ -115,11 +115,6 @@ export function MasterSection({
 
   return (
     <div data-ui="terragen-editor-master">
-      <Cost>
-        The object every camera orbits, and everything else sharing the frame with it. Editing
-        here moves the scene itself — only an object's swap list multiplies the run.
-      </Cost>
-
       <Group title="Master" hint={master ? undefined : "not set"}>
         {master ? (
           <div className="flex items-center gap-2.5 rounded-xl border border-master/45 bg-master/10 p-2.5">
@@ -146,8 +141,14 @@ export function MasterSection({
       </Group>
 
       <Group title="Scene objects" hint={`${contents.length} in scene`}>
+        {/* OUTLINE, NOT A RAISED SURFACE. `secondary` paints a filled slab, and
+            inside this panel that slab lands on glass — so every ordinary
+            action read as a black bar and competed with Review & dispatch, the
+            one button in here that should look like a button. A stroke says
+            "pressable" without claiming the weight. Dispatch keeps its fill;
+            it is the only thing that spends. */}
         <Button
-          variant="secondary"
+          variant="outline"
           size="sm"
           data-ui="terragen-add-object"
           className="mb-2 w-full"
@@ -339,7 +340,7 @@ function ObjectCard({
       {swapsOpen && (
         <div className="border-t border-glass/10 px-2.5 py-2.5">
           <Button
-            variant="secondary"
+            variant="outline"
             size="sm"
             data-ui={`terragen-add-swap-${slug}`}
             className="mb-2 w-full"
@@ -357,17 +358,19 @@ function ObjectCard({
               under the list, because by the time you have scrolled past four
               rows to read it you have already added four. */}
           {swaps.length > 0 && (
-            <p
-              data-ui="terragen-swap-align-warning"
-              className="type-caption mb-2 flex items-start gap-1.5 rounded-lg border border-danger/45 bg-danger/10 px-2.5 py-2 text-danger"
-            >
-              <Icon name="warning" size={13} className="mt-px shrink-0" />
-              <span>
-                Each stand-in appears where {name} stands. Click one to place it in the scene,
-                then check its position, rotation and scale — otherwise it will overlap whatever
-                is around it.
-              </span>
-            </p>
+            /* WARNING YELLOW, NOT DANGER RED. Red is this app's colour for
+               something broken or something about to be destroyed — the bin on
+               a layer row, a failed run, an order that costs more than the
+               balance. Nothing here is wrong yet: a stand-in you haven't
+               positioned is a thing to go and check, which is exactly what the
+               "no environment" and "no space" notes in the axes say in yellow.
+               Red made a routine next step read as an error, and it made the
+               genuine errors in the same panel cheaper. */
+            <Note tone="warn" ui="terragen-swap-align-warning" className="mb-2">
+              Each stand-in appears where {name} stands. Click one to place it in the scene, then
+              check its position, rotation and scale — otherwise it will overlap whatever is
+              around it.
+            </Note>
           )}
 
           {swaps.length === 0 ? (

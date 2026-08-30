@@ -107,8 +107,16 @@ export function WorkOrdersDialog({
       align: "right",
       className: "w-[110px]",
       sortValue: (r) => r.credits,
+      /* The bolt rides WITH the figure rather than only in the header. Read
+         down the table these are bare numbers in a column of other bare
+         numbers — the frame counts one cell to the left are also digits — and
+         the same mark the top bar and the dispatch review use for a credit
+         balance is what says which of the two this one is. */
       render: (r) => (
-        <span className="type-numeric-sm text-content">{r.credits.toLocaleString()}</span>
+        <span className="inline-flex items-center justify-end gap-1 whitespace-nowrap">
+          <Icon name="credits" size={13} className="shrink-0 text-brand" />
+          <span className="type-numeric-sm text-content">{r.credits.toLocaleString()}</span>
+        </span>
       ),
     },
     {

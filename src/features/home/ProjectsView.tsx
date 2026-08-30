@@ -1,12 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/icons";
-import { Button, ContextMenu, Segmented, type MenuItem } from "@/components/ui";
+import { Button, ConfirmDialog, ContextMenu, Segmented, type MenuItem } from "@/components/ui";
 import { HomeTopBar } from "./HomeTopBar";
 import { ProjectCard, ProjectRow } from "./ProjectCard";
-import { FolderCard } from "./FolderCard";
+import { FolderCard, FolderRow } from "./FolderCard";
 import { MoveDialog, type MoveRequest } from "./MoveDialog";
-import { initialScope, shelfSpec, type Scope, type Shelf } from "./shelves";
+import {
+  CARD_SIZE,
+  LAYOUTS,
+  initialScope,
+  shelfSpec,
+  type Layout,
+  type Scope,
+  type Shelf,
+} from "./shelves";
 import { useWorkspace } from "./workspace";
 import type { Folder, Project } from "./data";
 
@@ -22,22 +30,8 @@ import type { Folder, Project } from "./data";
  * Opening a folder stays on this page too: it is this shelf, scoped.
  */
 
-type Layout = "grid" | "list";
-
-const LAYOUTS: { value: Layout; label: string; icon: IconName }[] = [
-  { value: "grid", label: "Grid", icon: "grid" },
-  { value: "list", label: "List", icon: "list" },
-];
-
 const matches = (name: string, query: string) =>
   name.toLowerCase().includes(query.trim().toLowerCase());
-
-/**
- * Card-size range, as the minimum width a column may be. The initial value is
- * chosen so a full-width window lands on the four-up grid the design shows —
- * the slider is for going denser or bigger than that, not for finding it.
- */
-const SIZE = { min: 170, max: 380, step: 10, initial: 300 };
 
 /** Where the right-click menu was opened, and on what. */
 interface MenuAt {
@@ -88,6 +82,7 @@ export function ProjectsView({
   onShelf,
   onHome,
   onChat,
+  onPricing,
   onCreateProject,
   onOpenProject,
 }: {
@@ -96,18 +91,26 @@ export function ProjectsView({
   onHome: () => void;
   /** opens Terra AI from this page's top bar */
   onChat: () => void;
+  /** the plans page, from this page's top bar */
+  onPricing: () => void;
   /** the composer — "New Project" is the same act as Create on the home page */
   onCreateProject: () => void;
   onOpenProject: (project: Project) => void;
 }) {
   const [scope, setScope] = useState<Scope>(() => initialScope(shelf));
   const [layout, setLayout] = useState<Layout>("grid");
+  /** the item a "Move to Trash" is waiting on — null when nothing is pending */
+  const [pendingTrash, setPendingTrash] = useState<{
+    kind: "project" | "folder";
+    id: string;
+    name: string;
+  } | null>(null);
   const [query, setQuery] = useState("");
   const [openFolderId, setOpenFolderId] = useState<string | null>(null);
   const [naming, setNaming] = useState(false);
   const [draftName, setDraftName] = useState("");
   /** the narrowest a card may be — the slider writes this, the grid reads it */
-  const [cardSize, setCardSize] = useState(SIZE.initial);
+  const [cardSize, setCardSize] = useState(CARD_SIZE.initial);
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [move, setMove] = useState<MoveRequest | null>(null);
@@ -178,11 +181,27 @@ export function ProjectsView({
     }
   }
 
+  /**
+   * ASKED, NOT DONE.
+   *
+   * "Move to Trash" sat one row below "Move" in the same menu and took effect on
+   * click — a slip of one row silently removed a folder and everything filed in
+   * it, and the only sign was a toast that had gone by the time you looked up.
+   * Trash is recoverable, which is why this is a plain confirm rather than a
+   * type-the-word gate; it is not invisible, which is why it is a confirm at
+   * all. A folder's dialog says what goes with it.
+   */
   function trash(at: MenuAt) {
-    const name = named(at);
-    trashItem(at.kind, at.id);
-    if (at.kind === "folder" && openFolderId === at.id) setOpenFolderId(null);
+    setPendingTrash({ kind: at.kind, id: at.id, name: named(at) });
+  }
+
+  function confirmTrash() {
+    if (!pendingTrash) return;
+    const { kind, id, name } = pendingTrash;
+    trashItem(kind, id);
+    if (kind === "folder" && openFolderId === id) setOpenFolderId(null);
     setNote(`“${name}” moved to Trash — find it under Trash`);
+    setPendingTrash(null);
   }
 
   function applyMove(target: string) {
@@ -267,6 +286,7 @@ export function ProjectsView({
     <>
       <HomeTopBar
         onChat={onChat}
+        onPricing={onPricing}
         breadcrumb={
           <nav aria-label="Breadcrumb" className="type-body flex items-center gap-2">
             <button
@@ -333,7 +353,7 @@ export function ProjectsView({
           )}
 
           <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-            <label className="flex h-9 w-full min-w-[11rem] flex-1 items-center gap-2 glass-thin !rounded-lg px-3 sm:w-[300px] sm:flex-none">
+            <label className="field-well flex h-9 w-full min-w-[11rem] flex-1 items-center gap-2 rounded-lg px-3 sm:w-[300px] sm:flex-none">
               <Icon name="search" size={16} className="shrink-0 text-content-subtle" />
               <input
                 value={query}
@@ -367,9 +387,9 @@ export function ProjectsView({
             {layout === "grid" && (
               <input
                 type="range"
-                min={SIZE.min}
-                max={SIZE.max}
-                step={SIZE.step}
+                min={CARD_SIZE.min}
+                max={CARD_SIZE.max}
+                step={CARD_SIZE.step}
                 value={cardSize}
                 onChange={(e) => setCardSize(Number(e.target.value))}
                 aria-label="Card size"
@@ -409,7 +429,7 @@ export function ProjectsView({
               e.preventDefault();
               createFolder();
             }}
-            className="mt-4 flex flex-wrap items-center gap-2 glass-thin !rounded-lg p-2"
+            className="field-well mt-4 flex flex-wrap items-center gap-2 rounded-lg p-2"
           >
             <Icon name="folder-add" size={16} className="ml-1.5 text-content-muted" />
             <input
@@ -432,12 +452,22 @@ export function ProjectsView({
         <div className="mt-5">
           {showingFolders ? (
             shownFolders.length ? (
+              /* The layout switch has to change the SHAPE, not the column
+                 count. Folders rendered a mosaic card either way and the list
+                 setting only re-columned it, so pressing the control changed
+                 nothing you could name. */
               <div
-                className={cn("grid gap-5", layout === "list" && "xl:grid-cols-2")}
+                className={cn(
+                  layout === "grid"
+                    ? "grid gap-5"
+                    : "grid grid-cols-1 gap-x-6 gap-y-1.5 md:grid-cols-2"
+                )}
                 style={layout === "grid" ? gridStyle : undefined}
               >
-                {shownFolders.map((folder) => (
-                  <FolderCard
+                {shownFolders.map((folder) => {
+                  const Row = layout === "grid" ? FolderCard : FolderRow;
+                  return (
+                  <Row
                     key={folder.id}
                     folder={folder}
                     onOpen={() => setOpenFolderId(folder.id)}
@@ -449,7 +479,8 @@ export function ProjectsView({
                     }
                     onRenameCancel={() => setRenamingId(null)}
                   />
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <Empty
@@ -482,7 +513,15 @@ export function ProjectsView({
                 ))}
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 xl:grid-cols-2">
+              /* TWO COLUMNS OF ROWS, not one. A row is a name, a date and an
+                 avatar — about 40 characters of ink in a 1400px measure — so a
+                 single column made the list view a narrow ribbon down the left
+                 with the rest of the page empty, and halved how much of the
+                 shelf you could see at once. The pairing starts at `md` rather
+                 than `xl`: `xl` keyed off the WINDOW, and the rail has already
+                 taken its slice out of the row, so a 1200px window sat on one
+                 column with room for two. */
+              <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 md:grid-cols-2">
                 {shownProjects.map((project) => (
                   <ProjectRow
                     key={project.id}
@@ -530,6 +569,19 @@ export function ProjectsView({
           onClose={() => setMenu(null)}
         />
       )}
+
+      <ConfirmDialog
+        open={!!pendingTrash}
+        onOpenChange={(o) => !o && setPendingTrash(null)}
+        title={`Move “${pendingTrash?.name ?? ""}” to Trash?`}
+        body={
+          pendingTrash?.kind === "folder"
+            ? "The folder and every project inside it go to Trash. You can restore them until you delete them for good."
+            : "It goes to Trash, where you can restore it until you delete it for good."
+        }
+        confirmLabel="Move to Trash"
+        onConfirm={confirmTrash}
+      />
 
       <MoveDialog
         request={move}

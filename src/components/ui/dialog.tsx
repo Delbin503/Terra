@@ -20,6 +20,11 @@ export const DialogClose = DialogPrimitive.Close;
  *
  * `solid` remains for the rare case that needs to hide what is behind it
  * outright — nothing currently does.
+ *
+ * ABOVE EVERYTHING. The tier is z-65 rather than z-50 because the editor floats
+ * its own overlays at z-55/56 over the canvas, and a modal that opens behind the
+ * panel that opened it is worse than no modal. A dialog is the topmost thing on
+ * screen wherever it is raised from.
  */
 export type DialogSurface = "solid" | "glass";
 
@@ -56,13 +61,13 @@ export const DialogContent = React.forwardRef<
 >(({ className, children, hideClose, surface = "glass", ...props }, ref) => (
   <DialogPrimitive.Portal>
     <DialogPrimitive.Overlay
-      className={cn("fixed inset-0 z-50 animate-overlay-in", SCRIM[surface])}
+      className={cn("fixed inset-0 z-[65] animate-overlay-in", SCRIM[surface])}
     />
     <DialogPrimitive.Content
       ref={ref}
       data-ui={surface === "glass" ? "glass-dialog" : undefined}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2",
+        "fixed left-1/2 top-1/2 z-[65] w-full max-w-lg -translate-x-1/2 -translate-y-1/2",
         "p-5 animate-modal-in focus:outline-none",
         PANEL[surface],
         className

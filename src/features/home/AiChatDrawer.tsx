@@ -73,7 +73,7 @@ export function AiChatDrawer({
   function reply(asked: string): string {
     const q = asked.toLowerCase();
     if (q.includes("credit")) {
-      return `You have ${credits.balance.toLocaleString()} credits left, and this month you've used ${credits.images.used.toLocaleString()} of ${credits.images.total.toLocaleString()} images and ${credits.videos.used.toLocaleString()} of ${credits.videos.total.toLocaleString()} seconds of video. A world costs 129.`;
+      return `You have ${credits.balance.toLocaleString()} credits left. Credits pay for every dataset run and don't reset monthly — a world costs 129, and Settings → Terra Balance shows what you've generated so far.`;
     }
     if (q.includes("lately") || q.includes("recent") || q.includes("made")) {
       const recent = projects.slice(0, 3).map((p) => p.name);

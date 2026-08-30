@@ -44,7 +44,7 @@ import { TerraGenView } from "./TerraGenView";
 import { useScene } from "./useScene";
 import { useAssets } from "./useAssets";
 import { useWorkOrder } from "./useWorkOrder";
-import { useWorkOrderRuns } from "./work-order-runs";
+import type { WorkOrderRunStore } from "./work-order-runs";
 import { WorkOrdersDialog } from "./WorkOrdersDialog";
 import { CameraPlaceDialog } from "./CameraPlaceDialog";
 import { CaptureRunPanel } from "./CaptureRunPanel";
@@ -108,9 +108,12 @@ const DOCK_INSET = 16 + DOCK_WIDTH + 12;
 export function EditorView({
   projectName: initialProjectName = "Traffic Scene",
   userName = "Terra User",
+  runs,
 }: {
   projectName?: string;
   userName?: string;
+  /** the shared run history — owned by App, so Downloads at home sees it too */
+  runs: WorkOrderRunStore;
 }) {
   /* The project name is editable from the top bar, and four other surfaces
      quote it — the chatbot's context line, the Work Order, the capture panel.
@@ -177,7 +180,6 @@ export function EditorView({
   const workOrder = useWorkOrder();
   /** Dispatched runs — the list behind the Download button. Owned here so a run
    *  outlives the TerraGen mode that queued it. */
-  const runs = useWorkOrderRuns(projectName);
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [libraryCategory, setLibraryCategory] = useState<CategoryId>("all");
   // Two panels borrow the library as an image chooser, and only one library is

@@ -4,7 +4,13 @@ import { Icon } from "@/components/icons";
 import { Avatar, Button, DataTable, Select, type Column } from "@/components/ui";
 import { Chip, PageTitle, SearchField } from "./settings-parts";
 import { MemberDrawer } from "./MemberDrawer";
-import { SEAT_INCLUDES, SEAT_LABEL, type MemberRow, type SeatKind } from "./settings-data";
+import {
+  SEAT_ICON,
+  SEAT_INCLUDES,
+  SEAT_LABEL,
+  SEAT_TONE,
+  type MemberRow,
+} from "./settings-data";
 import { useSettings } from "./settings-store";
 import { InviteMembersDialog } from "./InviteMembersDialog";
 import { EXTRA_SEAT_PRICE, money } from "./subscription-data";
@@ -179,7 +185,7 @@ export function MembersPage() {
           prefix="Last Active:"
           aria-label="Filter by activity"
           value={active}
-          onChange={(e) => setActive(e.target.value)}
+          onChange={setActive}
           options={[
             { value: "all", label: "All" },
             { value: "joined", label: "Joined" },
@@ -190,7 +196,7 @@ export function MembersPage() {
           prefix="Seat Type:"
           aria-label="Filter by seat type"
           value={seatType}
-          onChange={(e) => setSeatType(e.target.value)}
+          onChange={setSeatType}
           options={[
             { value: "all", label: "All" },
             { value: "owner", label: "Owner" },
@@ -247,21 +253,15 @@ export function MembersPage() {
 
 /** The seat, as the way into the panel that changes it. The Owner's is flat. */
 function SeatCell({ row, onOpen }: { row: MemberRow; onOpen: () => void }) {
-  const tones: Record<SeatKind, string> = {
-    owner: "bg-accent-soft text-accent",
-    full: "bg-brand-soft text-brand",
-    viewer: "bg-warning-soft text-warning",
-  };
-  const icons: Record<SeatKind, "person" | "layout" | "visible"> = {
-    owner: "person",
-    full: "layout",
-    viewer: "visible",
-  };
-
   const face = (
     <>
-      <span className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-lg", tones[row.seat])}>
-        <Icon name={icons[row.seat]} size={16} />
+      <span
+        className={cn(
+          "grid h-8 w-8 shrink-0 place-items-center rounded-lg",
+          SEAT_TONE[row.seat]
+        )}
+      >
+        <Icon name={SEAT_ICON[row.seat]} size={16} />
       </span>
       <span className="type-body text-content">{SEAT_LABEL[row.seat]}</span>
     </>

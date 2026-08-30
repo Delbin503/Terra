@@ -7,11 +7,16 @@ import { useDismissable } from "./use-dismissable";
 import { workspace, terraCredits } from "./account-data";
 
 /**
- * CreditsMenu — the lightning affordance in the top-right cluster (replaces the
- * old globe scene-selector). Clicking it opens the Credits popover: the
- * workspace identity, a running Terra-credits balance and a Top Up action.
- * Built from the shared glass Panel primitives on the `overlay` tier so it reads
- * as the same material as the docked panels it floats over.
+ * CreditsMenu — the lightning affordance in the editor's top-right cluster.
+ * Clicking it opens the Credits popover: the workspace identity, a running
+ * Terra-credits balance and a Top Up action. Built from the shared glass Panel
+ * primitives on the `overlay` tier so it reads as the same material as the
+ * docked panels it floats over.
+ *
+ * The POPOVER is `CreditsPanel` below, and it is exported, because the web side
+ * shows the same balance behind the same question — click the number in the top
+ * bar and this is what should open. One panel, two triggers, rather than the
+ * web growing a lookalike that drifts.
  */
 export function CreditsMenu() {
   const [open, setOpen] = useState(false);
@@ -34,84 +39,124 @@ export function CreditsMenu() {
             open && "bg-glass/15 text-content"
           )}
         >
-          <span className="grid h-6 w-6 place-items-center rounded-full border-2 border-brand text-brand">
-            <Icon name="credits" size={13} strokeWidth={2.4} />
-          </span>
+          {/* No ring of its own any more: the credit mark IS a ringed glyph
+              (see terra-credit.tsx), and a circle inside a circle read as a
+              button with a target painted on it. */}
+          <Icon name="credits" size={22} className="text-brand" />
           <Icon name="chevron-down" size={15} />
         </button>
       </Tooltip>
 
       {open && (
-        /* Sized to the project-emoji picker, not to its own contents. These
-           popovers hang off a 48px bar over a live 3D scene: at 360px with a
-           display-sized balance the panel read as a page that had landed on the
-           viewport rather than as a menu belonging to the button above it. */
-        <Panel
-          ui="credits"
-          thickness="overlay"
-          className="absolute left-0 top-[calc(100%+10px)] z-50 w-[248px] !rounded-2xl"
-        >
-          <PanelHeader className="px-3 py-2.5">
-            <PanelTitle>Credits</PanelTitle>
-            <PanelClose size="sm" onClick={() => setOpen(false)} />
-          </PanelHeader>
-
-          <div className="flex flex-col gap-2.5 p-3">
-            {/* Workspace identity + history */}
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
-                <span
-                  aria-hidden
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-white"
-                  style={{ background: "var(--gradient-brand)" }}
-                >
-                  <Icon name="credits" size={13} />
-                </span>
-                <span className="type-caption-strong truncate text-content">{workspace.name}</span>
-              </div>
-              <button
-                type="button"
-                data-ui="credits-history"
-                className="type-caption-strong shrink-0 text-content-muted transition-colors hover:text-brand"
-              >
-                History
-              </button>
-            </div>
-
-            {/* Balance card */}
-            <div
-              data-ui="credits-balance"
-              className="relative overflow-hidden rounded-xl border border-glass/12 bg-glass/10 p-3"
-            >
-              {/* Decorative corner glow — kept faint so the number stays the hero. */}
-              <div
-                aria-hidden
-                className="pointer-events-none absolute -bottom-8 -right-6 h-24 w-28 rounded-full opacity-40 blur-2xl"
-                style={{ background: "var(--gradient-brand)" }}
-              />
-              <div className="relative flex items-end justify-between gap-2">
-                <div className="flex flex-col gap-1">
-                  <span className="type-eyebrow flex items-center gap-1 text-content-muted">
-                    <Icon name="credits" size={11} className="text-brand-on-glass" />
-                    Terra Credits
-                  </span>
-                  <span className="type-title leading-none text-brand-on-glass tabular-nums">
-                    {terraCredits.toLocaleString()}
-                  </span>
-                </div>
-                <Button
-                  variant="brand"
-                  size="sm"
-                  data-ui="credits-topup"
-                  className="!h-7 !rounded-lg !px-2.5"
-                >
-                  Top Up
-                </Button>
-              </div>
-            </div>
-          </div>
-        </Panel>
+        <CreditsPanel
+          workspace={workspace.name}
+          balance={terraCredits}
+          onClose={() => setOpen(false)}
+          className="absolute left-0 top-[calc(100%+10px)] z-50 origin-top-left animate-menu-in"
+        />
       )}
     </div>
+  );
+}
+
+/**
+ * THE CREDITS POPOVER — who the balance belongs to, what it is, and the two
+ * things you can do about it.
+ *
+ * Sized to the project-emoji picker rather than to its own contents. These hang
+ * off a 48px bar: at 360px with a display-sized balance the panel read as a page
+ * that had landed on the viewport rather than as a menu belonging to the button
+ * above it.
+ *
+ * Top Up and History both leave for Settings → Terra Balance, which is where
+ * credits are actually bought and where the ledger lives. They used to be two
+ * buttons with no handlers — the balance's own panel offering nothing you could
+ * do with the balance.
+ */
+export function CreditsPanel({
+  workspace: name,
+  balance,
+  onClose,
+  className,
+}: {
+  workspace: string;
+  balance: number;
+  onClose: () => void;
+  /** where the caller hangs it off its own trigger */
+  className?: string;
+}) {
+  const toBalance = () => {
+    onClose();
+    window.location.hash = "#settings/balance";
+  };
+
+  return (
+    <Panel
+      ui="credits"
+      thickness="overlay"
+      className={cn("w-[248px] !rounded-2xl", className)}
+    >
+      <PanelHeader className="px-3 py-2.5">
+        <PanelTitle>Credits</PanelTitle>
+        <PanelClose size="sm" onClick={onClose} />
+      </PanelHeader>
+
+      <div className="flex flex-col gap-2.5 p-3">
+        {/* Workspace identity + history */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              aria-hidden
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-white"
+              style={{ background: "var(--gradient-brand)" }}
+            >
+              <Icon name="credits" size={13} />
+            </span>
+            <span className="type-caption-strong truncate text-content">{name}</span>
+          </div>
+          <button
+            type="button"
+            data-ui="credits-history"
+            onClick={toBalance}
+            className="type-caption-strong shrink-0 text-content-muted transition-colors hover:text-brand"
+          >
+            History
+          </button>
+        </div>
+
+        {/* Balance card */}
+        <div
+          data-ui="credits-balance"
+          className="relative overflow-hidden rounded-xl border border-glass/12 bg-glass/10 p-3"
+        >
+          {/* Decorative corner glow — kept faint so the number stays the hero. */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -bottom-8 -right-6 h-24 w-28 rounded-full opacity-40 blur-2xl"
+            style={{ background: "var(--gradient-brand)" }}
+          />
+          <div className="relative flex items-end justify-between gap-2">
+            <div className="flex flex-col gap-1">
+              <span className="type-eyebrow flex items-center gap-1 text-content-muted">
+                <Icon name="credits" size={11} className="text-brand-on-glass" />
+                Terra Credits
+              </span>
+              <span className="type-title leading-none text-brand-on-glass tabular-nums">
+                {balance.toLocaleString()}
+              </span>
+            </div>
+            <Button
+              variant="brand"
+              size="sm"
+              data-ui="credits-topup"
+              onClick={toBalance}
+              className="!h-7 !rounded-lg !px-2.5"
+            >
+              Top Up
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Panel>
   );
 }

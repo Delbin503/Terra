@@ -629,7 +629,7 @@ function PaymentStep({
             <Select
               aria-label="Country"
               value={card.country}
-              onChange={(e) => set({ country: e.target.value })}
+              onChange={(v) => set({ country: v })}
               options={[
                 { value: "", label: "Select country" },
                 ...COUNTRIES.map((c) => ({ value: c, label: c })),

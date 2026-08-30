@@ -14,7 +14,7 @@ import { distance } from "./camera-rig";
 import { CAMERA_RIG, READOUT } from "./scene-palette";
 import type { SceneApi } from "./useScene";
 import { VolumeBox, VolumeDraw, VolumeHandles, type VolumeGizmo } from "./VolumeBox";
-import { subtreeIds } from "./scene-tree";
+import { ancestorIds, subtreeIds } from "./scene-tree";
 import { radiusOf } from "./group-transform";
 import type { SceneObject } from "./scene-types";
 import { contactWalls, type SceneVolume, type Vec3 } from "./scene-volume";
@@ -1517,6 +1517,67 @@ export function SceneCanvas({
     return subtreeIds(scene.objects, selectedGroup.id).filter((id) => id !== selectedGroup.id);
   }, [scene.selectedIds, scene.objects, selectedGroup]);
 
+  /**
+   * WHAT A CLICK IN THE VIEWPORT SELECTS — the group first, the object after.
+   *
+   * A group draws nothing of its own (`SceneWorld` filters it out), so the only
+   * way to reach one in the viewport is through something it holds. Every such
+   * click used to land on the individual object, which meant a group could be
+   * moved, turned or scaled as a unit only by finding its row in the layers
+   * tree — the gesture the viewport offers for "take this whole set" did not
+   * exist, and grouping things made them harder to handle, not easier.
+   *
+   * So a click walks DOWN the chain rather than straight to the leaf. First
+   * click on a chair inside a room takes the room; a second takes the chair.
+   * Nesting is handled by the same rule one level at a time, and clicking empty
+   * space (`onPointerMissed`) drops out of the chain entirely, so the next click
+   * starts at the outermost group again.
+   *
+   * A SIBLING DOES NOT COST A SECOND CLICK. Once something inside a group is
+   * held, that group has been opened — clicking a different object in it lands
+   * on that object directly rather than bouncing back to the group. Otherwise
+   * adjusting six chairs in a room would mean twelve clicks, half of them
+   * re-selecting a room the user is plainly already working inside.
+   *
+   * THE LAYERS TREE IS DELIBERATELY NOT ROUTED THROUGH THIS. It draws the
+   * hierarchy, and a row in it names exactly one object — clicking a nested
+   * child there means that child, not the box around it.
+   */
+  const pick = (id: string) => {
+    const groups = ancestorIds(scene.objects, id);
+    if (groups.length === 0) {
+      scene.select(id);
+      return;
+    }
+    // Outermost group → … → innermost group → the object itself.
+    const chain = [...groups].reverse();
+    chain.push(id);
+
+    const held = scene.selectedId;
+    if (!held) {
+      scene.select(chain[0]);
+      return;
+    }
+
+    // Holding a link of this very chain: step one down it.
+    const at = chain.indexOf(held);
+    if (at >= 0) {
+      scene.select(chain[Math.min(at + 1, chain.length - 1)]);
+      return;
+    }
+
+    /* Holding something else. If it sits inside one of these groups then that
+       group is already open, and the click belongs to whatever is under the
+       cursor at the next level down — the deepest such group wins, so a click
+       inside a nested room doesn't jump back out to the building. */
+    const heldGroups = new Set(ancestorIds(scene.objects, held));
+    let open = -1;
+    for (let i = 0; i < chain.length - 1; i++) {
+      if (heldGroups.has(chain[i])) open = i;
+    }
+    scene.select(open < 0 ? chain[0] : chain[open + 1]);
+  };
+
   const selMesh = scene.selectedId ? meshes[scene.selectedId] : null;
   // Gizmo (and its readout/skin) only exist while Object settings is open — and
   // never on a locked object, which is the whole point of the lock: still
@@ -1605,7 +1666,7 @@ export function SceneCanvas({
         selectedId={scene.selectedId}
         litIds={litIds}
         substitute={substitute?.object ?? null}
-        onSelect={scene.select}
+        onSelect={pick}
         hideIds={guideHides}
       />
 

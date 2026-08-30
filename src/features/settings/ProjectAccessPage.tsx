@@ -8,11 +8,11 @@ import {
   DataTable,
   Select,
   Tabs,
+  ConfirmDialog,
   type Column,
   type MenuItem,
 } from "@/components/ui";
 import { Chip, DateField, PageTitle, SearchField } from "./settings-parts";
-import { ConfirmDialog } from "./settings-dialogs";
 import { InviteMembersDialog } from "./InviteMembersDialog";
 import { useSettings } from "./settings-store";
 import type { AccessMember } from "./settings-data";
@@ -131,7 +131,7 @@ export function ProjectAccessPage() {
         <Select
           aria-label="Folder"
           value={folder}
-          onChange={(e) => setFolder(e.target.value)}
+          onChange={setFolder}
           options={[
             { value: "all", label: "All Folders" },
             ...folders.map((f) => ({ value: f.name, label: f.name })),

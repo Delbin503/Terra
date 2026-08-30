@@ -180,6 +180,17 @@ function RigControls({
 
   return (
     <>
+      {/* AT THE TOP, NOT THE BOTTOM. This says what editing anything below it
+          will DO — the rig moves, and the stage jumps to the rig to show it —
+          which is a thing to know before you touch the first control, not a
+          footnote under the last one. Sat at the end it was reached only by
+          someone who had already scrolled past every dial it was warning
+          about. */}
+      <Note>
+        These are the camera's own settings — editing them here moves the rig in the scene, and the
+        stage switches to the rig so you can see it happen.
+      </Note>
+
       <Group title="Camera mode">
         {/* The editor's own two cards — the choice and what it costs you, not a
             segmented control whose labels have to carry the whole explanation. */}
@@ -424,11 +435,6 @@ function RigControls({
           </Group>
         </>
       )}
-
-      <Note>
-        These are the camera's own settings — editing them here moves the rig in the scene, and the
-        stage switches to the rig so you can see it happen.
-      </Note>
     </>
   );
 }

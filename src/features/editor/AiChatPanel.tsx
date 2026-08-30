@@ -159,7 +159,7 @@ export function AiChatPanel({ scene, onClose }: { scene: SceneApi; onClose: () =
     <GlassPanel
       ui="ai-chat-panel"
       thickness="thick"
-      className="pointer-events-auto fixed bottom-6 left-[84px] top-24 z-30 flex w-[360px] max-w-[calc(100vw-6rem)] flex-col !rounded-3xl"
+      className="pointer-events-auto fixed bottom-6 left-[84px] top-24 z-30 flex w-[360px] max-w-[calc(100vw-6rem)] animate-drawer-in flex-col !rounded-3xl"
     >
       {/* Header */}
       <div className="flex items-center gap-2.5 border-b border-glass/10 p-4">

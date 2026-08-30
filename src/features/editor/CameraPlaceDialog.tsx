@@ -1,6 +1,4 @@
-import { Button } from "@/components/ui";
-import { Icon } from "@/components/icons";
-import { Panel, PanelHeader, PanelTitle, PanelSubtitle, PanelClose, PanelBody, PanelFooter } from "./ui";
+import { ConfirmDialog } from "@/components/ui";
 
 /**
  * CameraPlaceDialog — asked once, on drop, when the scene has a master object.
@@ -9,6 +7,11 @@ import { Panel, PanelHeader, PanelTitle, PanelSubtitle, PanelClose, PanelBody, P
  * rig starts out. "Focus" frames it around the master so the sweep is usable
  * immediately, "cursor" honours where the user actually dropped it. Without a
  * master there's nothing to frame, so this never appears.
+ *
+ * BOTH BUTTONS ARE ANSWERS here, which is the one thing this question does not
+ * share with the rest — so the left one carries `onCancel` rather than only
+ * closing. Dismissing (Escape, the scrim, the X) still means neither: the drop
+ * is abandoned, not silently resolved to one of the two.
  */
 export function CameraPlaceDialog({
   masterName,
@@ -22,41 +25,17 @@ export function CameraPlaceDialog({
   onCancel: () => void;
 }) {
   return (
-    <>
-      <div className="pointer-events-auto fixed inset-0 z-[55] bg-black/40" onClick={onCancel} />
-      <Panel
-        ui="camera-place"
-        thickness="overlay"
-        className="pointer-events-auto fixed left-1/2 top-1/2 z-[56] w-[400px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2"
-      >
-        <PanelHeader align="start" className="p-4">
-          <div className="min-w-0">
-            <PanelTitle>Place Camera</PanelTitle>
-            <PanelSubtitle>Master object · {masterName}</PanelSubtitle>
-          </div>
-          <PanelClose size="sm" label="Cancel placement" onClick={onCancel} />
-        </PanelHeader>
-
-        <PanelBody className="p-4">
-          <p className="type-body leading-relaxed text-content">
-            Place camera near the master object to focus on it?
-          </p>
-          <p className="type-caption mt-2 leading-relaxed text-content-subtle">
-            Either way the rig locks onto {masterName} — this only decides where its start and end
-            cameras begin.
-          </p>
-        </PanelBody>
-
-        <PanelFooter className="gap-3 p-3">
-          <Button variant="secondary" size="md" className="flex-1 !rounded-xl" onClick={onAtCursor} data-ui="camera-place-cursor">
-            No, drop here
-          </Button>
-          <Button variant="brand" size="md" className="flex-1 !rounded-xl" onClick={onFocus} data-ui="camera-place-focus">
-            <Icon name="camera" size={16} />
-            Yes, focus
-          </Button>
-        </PanelFooter>
-      </Panel>
-    </>
+    <ConfirmDialog
+      open
+      onOpenChange={(o) => !o && onCancel()}
+      tone="brand"
+      title="Place camera to focus on the master?"
+      body={`Either way the rig locks onto ${masterName} — this only decides where its start and end cameras begin.`}
+      cancelLabel="No, drop here"
+      onCancel={onAtCursor}
+      confirmLabel="Yes, focus"
+      confirmIcon="camera"
+      onConfirm={onFocus}
+    />
   );
 }

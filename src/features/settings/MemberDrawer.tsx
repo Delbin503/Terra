@@ -1,7 +1,14 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
-import { Avatar, Button, Dialog, DialogContent, DialogTitle } from "@/components/ui";
+import {
+  Avatar,
+  Button,
+  ConfirmDialog,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui";
 import { Chip } from "./settings-parts";
 import { SEAT_LABEL, type MemberRow, type SeatKind } from "./settings-data";
 import { useSettings } from "./settings-store";
@@ -35,7 +42,7 @@ const SEATS: {
     can: [
       "Create and manage projects",
       "Invite Viewers",
-      "Use and track data quotas (Img/video generation)",
+      "Spend credits on dataset generation",
       "Access settings and asset requests",
     ],
     cannot: [],
@@ -177,50 +184,49 @@ export function MemberDrawer({ member, onClose }: { member: MemberRow | null; on
         onPick={applySeat}
       />
 
-      <AskDialog
+      <ConfirmDialog
         open={ask === "admin"}
+        onOpenChange={(o) => !o && setAsk(null)}
+        tone="brand"
         title="Grant Admin Access"
+        body={`You're about to grant admin access to ${member.name}. Admins can manage members, billing and organization settings, and have full project access.`}
         confirmLabel="Grant Access"
-        onClose={() => setAsk(null)}
         onConfirm={() => {
           grantAdmin(member.id);
           notify(`${member.name} is now an Admin.`);
           setAsk(null);
           onClose();
         }}
-      >
-        <p>You&apos;re about to grant admin access to {member.name}.</p>
-        <p className="mt-2.5">
-          Admins can manage members, billing, organization settings, and have full project
-          access. Please confirm this action.
-        </p>
-      </AskDialog>
+      />
 
-      <AskDialog
+      <ConfirmDialog
         open={ask === "ownership"}
+        onOpenChange={(o) => !o && setAsk(null)}
         title="Transfer Ownership"
+        body={`You're about to transfer ownership of this organization to ${member.name}. Once transferred you are no longer the owner, and may lose access to billing, plan management and team settings.`}
         confirmLabel="Transfer Ownership"
-        onClose={() => setAsk(null)}
         onConfirm={() => {
           transferOwnership(member.id);
           notify(`Ownership transferred to ${member.name}.`);
           setAsk(null);
           onClose();
         }}
-      >
-        <p>You&apos;re about to transfer ownership of this organization to {member.name}.</p>
-        <p className="mt-2.5">
-          Once transferred, you will no longer be the owner and may lose access to certain
-          administrative permissions, including billing, plan management, and team settings.
-        </p>
-      </AskDialog>
+      />
 
-      <AskDialog
+      <ConfirmDialog
         open={ask === "remove"}
-        title={member.status === "pending" ? "Revoke this invitation?" : "Remove from this Organization"}
+        onOpenChange={(o) => !o && setAsk(null)}
+        title={
+          member.status === "pending"
+            ? "Revoke this invitation?"
+            : "Remove from this Organization?"
+        }
+        body={
+          member.status === "pending"
+            ? `The invitation to ${member.email} stops working and its seat is released.`
+            : `${member.name} will lose access to every project in this organization. Their ${SEAT_LABEL[member.seat]} seat is released back to the plan.`
+        }
         confirmLabel={member.status === "pending" ? "Revoke invitation" : "Remove User"}
-        danger
-        onClose={() => setAsk(null)}
         onConfirm={() => {
           removeMember(member.id);
           notify(
@@ -231,16 +237,7 @@ export function MemberDrawer({ member, onClose }: { member: MemberRow | null; on
           setAsk(null);
           onClose();
         }}
-      >
-        {member.status === "pending" ? (
-          <p>The invitation to {member.email} stops working and its seat is released.</p>
-        ) : (
-          <p>
-            {member.name} will lose access to every project in this organization. Their{" "}
-            {SEAT_LABEL[member.seat]} seat is released back to the plan.
-          </p>
-        )}
-      </AskDialog>
+      />
     </>
   );
 }
@@ -395,38 +392,3 @@ function SeatDialog({
   );
 }
 
-/** A decision with consequences spelled out, and one button that takes it. */
-function AskDialog({
-  open,
-  title,
-  confirmLabel,
-  danger,
-  children,
-  onClose,
-  onConfirm,
-}: {
-  open: boolean;
-  title: string;
-  confirmLabel: string;
-  danger?: boolean;
-  children: React.ReactNode;
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="w-[27rem]">
-        <DialogTitle>{title}</DialogTitle>
-        <div className="type-body mt-2.5 text-content-muted">{children}</div>
-        <div className="mt-5 flex justify-end gap-2.5">
-          <Button variant="secondary" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant={danger ? "danger" : "brand"} size="sm" onClick={onConfirm}>
-            {confirmLabel}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}

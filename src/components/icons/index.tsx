@@ -31,11 +31,11 @@ import {
   Blocks,
   Dices,
   Shuffle,
+  ArrowLeftRight,
   PanelLeftClose,
   PanelLeftOpen,
   Bell,
   Download,
-  Zap,
   Images,
   Clock,
   ChevronRight,
@@ -141,6 +141,7 @@ import {
   Minus,
   type LucideIcon,
 } from "lucide-react";
+import { TerraCredit } from "./terra-credit";
 
 /** Concept → glyph. Keep keys sorted by domain area. */
 export const iconRegistry = {
@@ -181,6 +182,8 @@ export const iconRegistry = {
   seed: Dices,
   /** Scatter what's in the room into a fresh arrangement. */
   shuffle: Shuffle,
+  /** swap one thing for another of the same kind — switching organization */
+  switch: ArrowLeftRight,
   assets: Package,
   ai: WandSparkles,
   world: Globe,
@@ -324,7 +327,8 @@ export const iconRegistry = {
   warning: TriangleAlert,
 
   // Credits / status
-  credits: Zap,
+  /** Terra's own mark, ringed — see terra-credit.tsx. Not a lightning bolt. */
+  credits: TerraCredit,
   "image-credits": Images,
   "render-time": Clock,
   check: Check,

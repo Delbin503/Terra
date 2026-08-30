@@ -250,7 +250,11 @@
      a lighter well reads as another sheet of glass stacked on the panel instead
      of a recess cut into it. */
   --field-well: 0.2;
-  --field-border: 0.14;
+  /* One step above the 0.10 hairline the dividers and panel edges use: a field
+     is a target, so its edge has to be findable without becoming the loudest
+     line on a form of eight of them. */
+  --field-border: 0.12;
+  --field-border-hover: 0.2;
 
   /* Brand ramps — the accent→brand sweep used for identity marks. */
   --gradient-brand: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--brand)));

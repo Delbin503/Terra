@@ -1263,12 +1263,25 @@ function TerraGenDock({
           <Icon name="generate" size={15} />
         </span>
         <span className="type-body-strong text-content">Generate</span>
+        {/* THE SAME PAIR AS EXPANDED, and in the same order — the chevron that
+            folded it, and the ✕ that leaves. Folded, the ✕ was gone: the only
+            way back to the editor was to expand the panel first and then close
+            it, two clicks to undo one, and nothing on screen said so. A folded
+            panel is still the panel; it should still be closable. */}
         <GlassGhostButton
           ui="terragen-expand"
           size="sm"
-          icon="sidebar-expand"
+          icon="chevron-down"
           label="Expand the Work Order panel"
           onClick={onToggleCollapsed}
+          className="-rotate-90 transition-transform"
+        />
+        <GlassGhostButton
+          ui="terragen-close"
+          size="sm"
+          icon="close"
+          label="Back to editor"
+          onClick={onClose}
         />
       </Panel>
     );
@@ -1281,33 +1294,57 @@ function TerraGenDock({
       className="absolute inset-y-3 right-3 overflow-hidden"
       style={{ width: TERRAGEN_WIDTH }}
     >
+      {/* THE SAME HEADER AS EVERY OTHER PANEL.
+          Layers, MAT Preview and the AI panel all wear one chrome — a
+          `type-panel-title` on a `px-3 py-2.5` row with `sm` ghost buttons.
+          This one had grown its own: `type-heading` is the DISPLAY face at
+          text-lg, four steps up the ramp from a panel title, on a taller row
+          with bigger buttons. Side by side with the dock it didn't read as the
+          same kind of surface — it read as a dialog that had drifted onto the
+          canvas. The panel is wider than the dock for its own documented
+          reason (see TERRAGEN_WIDTH), and that is the only dimension that
+          should differ. */}
       <header
         data-ui="terragen-header"
-        className="flex shrink-0 items-center gap-3 border-b border-glass/12 px-4 py-3"
+        className="flex shrink-0 items-center gap-1 border-b border-glass/12 px-3 py-2.5"
       >
         {/* ONE TITLE, NO MARK. It was a brand-filled sparkle disc, "Generate",
             and "Work Order" underneath — three things saying one thing, and the
             two-line title made the header taller than the sections it sits over
             while still not naming what the panel is. It is the Generate Work
             Order panel, so that is what it says. */}
-        <div className="min-w-0 grow">
-          <h2 className="type-heading truncate text-content">Generate Work Order</h2>
-        </div>
+        <h2 className="type-panel-title min-w-0 flex-1 truncate text-content">
+          Generate Work Order
+        </h2>
         <GlassGhostButton
           ui="terragen-reseed"
+          size="sm"
           icon="retry"
           label="Re-read the scene into every axis"
           onClick={onReseed}
         />
         {/* Fold, don't close: the panel gets out of the way of the render it is
             describing without discarding the Work Order in it. */}
+        {/* THE DOCK'S FOLD CHEVRON. `sidebar-collapse` is a panel-shoved-to-the-
+            edge glyph, which is not what this does — the panel stays where it
+            is and its body folds away. Layers, SAB, MAT and ASA all say that
+            with a chevron that rotates, and this button does the same job as
+            those, so it should not be a fourth icon meaning a fifth thing. */}
         <GlassGhostButton
           ui="terragen-collapse"
-          icon="sidebar-collapse"
+          size="sm"
+          icon="chevron-down"
           label="Collapse the Work Order panel"
           onClick={onToggleCollapsed}
+          className="transition-transform"
         />
-        <GlassGhostButton ui="terragen-close" icon="close" label="Back to editor" onClick={onClose} />
+        <GlassGhostButton
+          ui="terragen-close"
+          size="sm"
+          icon="close"
+          label="Back to editor"
+          onClick={onClose}
+        />
       </header>
 
       <div data-ui="terragen-body" className="min-h-0 grow overflow-y-auto p-3">
@@ -1461,7 +1498,7 @@ function TerraGenDock({
               <Icon name="check" size={16} className="mt-0.5 shrink-0 text-success" />
               Work Order queued — {formatCount(subsets)} {subsets === 1 ? "subset" : "subsets"}.
             </p>
-            <Button variant="secondary" size="sm" onClick={onClose}>
+            <Button variant="outline" size="sm" onClick={onClose}>
               Back to scene
             </Button>
           </>

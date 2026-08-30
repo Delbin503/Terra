@@ -140,14 +140,39 @@ export function CreateWorldModal({
     setImages((prev) => assignSlot(prev, id, slot));
   }
 
-  /** Hand it over. The generated world opens in the editor. */
-  function create() {
-    if (!canCreate) return;
+  /** Everything the composer was holding goes back, whichever way we leave. */
+  function reset() {
     for (const image of images) URL.revokeObjectURL(image.src);
     setImages([]);
     setPrompt("");
     setNotice(null);
     onOpenChange(false);
+  }
+
+  /** Hand it over. The generated world opens in the editor. */
+  function create() {
+    if (!canCreate) return;
+    reset();
+    window.location.hash = "#editor";
+  }
+
+  /**
+   * THE WAY IN THAT ASKS FOR NOTHING.
+   *
+   * Both paths above are generation: they take a sentence or four photographs,
+   * spend credits, and hand back a world somebody else's model imagined. That
+   * is the whole composer, which left no way to simply START — to open the
+   * editor on an empty stage and place the first object yourself. People who
+   * know exactly what they are building were being made to describe it to a
+   * model first, or to type something meaningless to get past this dialog.
+   *
+   * It sits at the BOTTOM, quiet, in the ghost weight: it is the alternative to
+   * the thing this dialog is for, not a rival to it. Nothing typed is carried
+   * across — an empty project is empty, and a prompt half-written above would
+   * arrive in the editor as a promise nothing is going to keep.
+   */
+  function createEmpty() {
+    reset();
     window.location.hash = "#editor";
   }
 
@@ -322,6 +347,21 @@ export function CreateWorldModal({
               )}
             </>
           )}
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-glass/10 pt-3">
+            <p className="type-body-dense text-content-subtle">
+              Know what you&apos;re building? Skip the generation entirely.
+            </p>
+            <Button
+              variant="ghost"
+              size="sm"
+              data-ui="create-empty-project"
+              onClick={createEmpty}
+            >
+              <Icon name="create" size={15} />
+              Create empty project
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

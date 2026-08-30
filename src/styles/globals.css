@@ -209,10 +209,37 @@
     background-image: linear-gradient(to top, hsl(0 0% 0% / var(--scrim-soft)), transparent);
   }
 
-  /* The recess an input sits in, inside a glass panel. */
+  /* THE RECESS AN INPUT SITS IN — the one skin for anything you type into or
+     pick from, on either surface.
+
+     It carries its own BORDER, width and style included. It used to set only
+     `border-color`, which left every call site to remember a bare `border`
+     utility beside it: the ones that did got a hairline, the ones that didn't
+     got a well with no edge at all, and a third group skipped the class
+     entirely for `glass-thin` — a material with no border and a lit top edge,
+     which on a 36px control reads as a half-drawn box. Three treatments for
+     one object, sometimes two of them in the same row.
+
+     Focus is here for the same reason: an input that brightens its edge and a
+     wrapper that doesn't were the same inconsistency one level down. `:has()`
+     covers the wrappers (a well with an input inside it), the bare `:focus`
+     covers a control wearing the class itself. */
   .field-well {
     background-color: hsl(0 0% 0% / var(--field-well));
-    border-color: hsl(var(--glass-tint) / var(--field-border));
+    border: 1px solid hsl(var(--glass-tint) / var(--field-border));
+    transition: border-color 0.15s ease;
+  }
+  /* Hover brightens the edge only where there is something to type in or press.
+     A read-only value box wears this skin too — the billing email, the seat
+     type — and lighting those up under the cursor promises an edit that isn't
+     there. */
+  .field-well:is(input, textarea, select, button, label):hover,
+  .field-well:has(input, textarea, select):hover {
+    border-color: hsl(var(--glass-tint) / var(--field-border-hover));
+  }
+  .field-well:focus,
+  .field-well:focus-within {
+    border-color: hsl(var(--brand) / 0.6);
   }
 
   .gradient-brand { background-image: var(--gradient-brand); }

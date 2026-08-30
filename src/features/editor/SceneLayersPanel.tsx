@@ -9,6 +9,7 @@ import { typeIcon, type AssetType } from "./assets-data";
 import {
   ROLE_DOT,
   ROLE_LABEL,
+  ROLE_TEXT,
   SOURCE_LABEL,
   canTakeRole,
   type ObjectRole,
@@ -487,19 +488,63 @@ function LayerRow({
         <span className="type-body min-w-0 flex-1 truncate">{o.name}</span>
       )}
 
-      {/* The role badge is a dot in the role's own colour — at this row height
-          a word doesn't fit, and the dot is the same hue the object outlines
-          with in the viewport, so the two readings agree. */}
+      {/* THE ROLE BADGE.
+          Master gets the CROWN, not a dot. Every other surface that names the
+          master uses that glyph — the object title, the role menu, TerraGen's
+          object list — and this row was the one place it appeared as an
+          anonymous coloured dot, indistinguishable at a glance from the two
+          other role dots beside it. Master is also the role you scan a scene
+          for: there is exactly one, and "which of these is the hero" is the
+          question the list gets asked.
+
+          The other two roles keep the dot. They have no glyph of their own, and
+          the dot's hue is the colour the object outlines with in the viewport,
+          so the two readings agree. */}
       {o.role !== "none" && !renaming && (
         <span
           data-ui={`layer-role-${o.role}`}
-          className={cn("h-2 w-2 shrink-0 rounded-full border", ROLE_DOT[o.role])}
           title={ROLE_LABEL[o.role]}
-        />
+          className={cn(
+            "grid shrink-0 place-items-center",
+            o.role === "master" ? ROLE_TEXT.master : ""
+          )}
+        >
+          {o.role === "master" ? (
+            <Icon name="master" size={12} />
+          ) : (
+            <span className={cn("block h-2 w-2 rounded-full border", ROLE_DOT[o.role])} />
+          )}
+        </span>
       )}
 
+      {/* THE ACTIONS TAKE NO ROOM UNTIL THEY ARE WANTED.
+          They were always laid out and merely transparent, which kept the row
+          from reflowing under the cursor — but it also parked the role badge
+          three invisible buttons in from the right edge, floating in the middle
+          of the row with nothing between it and the margin. Collapsing the
+          strip puts the badge where a badge belongs, hard against the edge, and
+          hovering slides it left to open the space.
+
+          THE WIDTH IS ON THE STRIP, NOT ON EACH BUTTON. The row is a flex line
+          with a gap, and a zero-width child still earns its gap — three of them
+          would hold 18px open and leave the badge short of the edge anyway.
+          One collapsing container has one gap.
+
+          Pinned stays pinned. A locked or hidden object keeps the strip open,
+          because the whole point of those two icons staying lit is that a row
+          you can't move or can't see says so without being pointed at. Inside
+          an open strip the individual buttons keep their own reveal, so the
+          eye still shows alone while the lock and the bin wait for the
+          cursor. */}
       {!renaming && (
-        <>
+        <div
+          className={cn(
+            "flex shrink-0 items-center gap-1.5 overflow-hidden transition-[width] duration-200 ease-out",
+            o.locked || o.hidden
+              ? "w-[4.5rem]"
+              : "w-0 focus-within:w-[4.5rem] group-hover/row:w-[4.5rem]"
+          )}
+        >
           <RowToggle
             icon={o.locked ? "lock" : "unlock"}
             label={o.locked ? `Unlock ${o.name}` : `Lock ${o.name}`}
@@ -524,7 +569,7 @@ function LayerRow({
             danger
             onClick={onDelete}
           />
-        </>
+        </div>
       )}
     </div>
   );
