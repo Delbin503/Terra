@@ -38,7 +38,7 @@ So the climb never leans the pair into a slope, and the near camera is always th
 
 | | Where it lives | How it's edited |
 |---|---|---|
-| **Far distance** | Derived — the actual distance from master to the **end camera** | Move the cameras (drag in the viewport, or the Farthest slider in TerraGen) |
+| **Far distance** | Derived — the actual distance from master to the **end camera** | Set at placement by the **10% framing rule** (§2), and re-derived whenever the rig re-frames. Move the cameras to change it by hand. TerraGen has no control for it at all. |
 | **Near distance** | **Stored on the rig** (`rig.nearDistance`) | The Distance slider. Nothing moves |
 
 The pair physically **parks at the far distance** — from the moment it's placed (see §2) and for the rest of its life. That makes the first frame the establishing one — whole object in shot, nothing cropped — and it means the near reach can be dialled in later against something already visible. Storing the near end as data is what lets it survive every other edit (orbit, climb, a dragged camera) instead of being whatever a camera position happened to imply.
@@ -71,10 +71,24 @@ The pair physically **parks at the far distance** — from the moment it's place
 
 | Choice | What happens |
 |---|---|
-| **Yes, focus** | Both cameras are built by `framingPosition` — pulled back along the scene's viewing diagonal and lifted, scaled to the master's size. Start low, end high. Usable sweep immediately. |
+| **Yes, focus** | Both cameras are built by `framingPosition` — stood off along the scene's viewing diagonal at the distance where the master fills ~10% of the frame, and lifted. Start low, end high. Usable sweep immediately. See the framing rule below. |
 | **No, drop here** | The pair lands at the drop point, separated 10m vertically so the sweep still has somewhere to travel. |
 
 **If there's no Master**, there's nothing to frame around, so the dialog never appears and the pair just drops.
+
+### How far back "focus" puts it — the 10% framing rule
+
+**A focused rig is placed at the distance where the master fills about 10% of the frame** — 10% of the frame's width or height, whichever way the object's largest dimension runs. That is the establishing shot: the whole object in view, nothing cropped, and enough scene around it that the frame reads as a place rather than a close-up.
+
+The number is derived, not chosen. At the scene's 45° field of view the frame's half-height at distance `d` is `d · tan(22.5°) ≈ 0.414 d`, so a master of radius `r` fills `r / 0.414 d` of it. Hold that at 10% and the distance falls out:
+
+```
+d = r / (0.414 × 0.10) ≈ 24 × masterRadius        masterRadius = 0.7 × max(scale)
+```
+
+Because it scales off the master's own size, a lamppost lands further back than a mug and both arrive framed the same way. It also means the rule is about the **picture**, not a saved number: re-scale the master and the rig re-frames to hold the same 10%.
+
+**This distance is the far end of the sweep**, and it is the one distance the user never sets directly — see below, and §5.
 
 ### A focused rig always lands at the FAR end of its sweep
 
@@ -94,13 +108,13 @@ master ●                    · · · · · ▷ [ rig parks HERE ]
 
 | | Value |
 |---|---|
-| Camera positions | `framingPosition(master, radius, "start" \| "end")` — this *is* the far distance |
+| Camera positions | `framingPosition(master, radius, "start" \| "end")` — the 10% framing distance. This *is* the far distance |
 | `farDistance` | Derived: the actual distance from the master to the **end** camera. Nothing stores it. |
 | `nearDistance` | `max(nearLimit, farDistance × 0.45)` — a real move inward, but not so close that the rig opens with the master filling the frame |
 
-For a master at default scale (radius 0.7) that works out to roughly **6.2m far, 2.8m near**.
+For a master at default scale (radius 0.7) that works out to roughly **16.8m far, 7.6m near**.
 
-**One clarification for whoever reads this next to §9:** "furthest" here means the far end of *this rig's own sweep*, not the `farLimit` ceiling. `farLimit` is ~30 × radius (about 21m for a unit master) and is only the point past which the master stops being the subject. A freshly focused rig sits well inside it — `framingPosition` pulls back by `max(3, radius × 4)` and lifts by `max(5, radius × 4)`. So the rig lands at the top of its own range, not at the top of the allowed range.
+**One clarification for whoever reads this next to §9:** "furthest" here means the far end of *this rig's own sweep*, not the `farLimit` ceiling. The two are close but not the same rule — placement holds the master at **10%** of the frame (≈ 24 × radius, about 16.8m for a unit master), while `farLimit` is where it stops being the subject at all, ~**8%** (30 × radius, about 21m). So a freshly focused rig lands near the top of the allowed range and just inside it, which is the intent: the establishing frame is as wide as the framing rule allows, and the ceiling exists to stop anyone dragging past it.
 
 The pair goes on standing at the far distance for the rest of its life, through every other edit. Orbiting, climbing and dragging all move it; only the Distance slider changes the near number, and that moves nothing at all (see §5).
 
@@ -292,7 +306,7 @@ None of these are guessed. All in `camera-rig.ts`, all derived from the master's
 | Limit | Formula | Why |
 |---|---|---|
 | `nearLimit` | `max(0.8, radius × 1.15)` | All but touching the master. Any nearer and the lens is inside the bounding box, which TerraGen clamps anyway — this mirrors that rule so the UI shows the floor instead of having the value silently overridden server-side. |
-| `farLimit` | `max(6, radius × 30)` | Where the master stops being the subject. At the scene's 45° FOV the frame half-height at distance *d* is ≈ 0.414*d*, so the master fills `radius / 0.414d` of it. Holding that at ~8% gives *d* ≈ 30 × radius. |
+| `farLimit` | `max(6, radius × 30)` | Where the master stops being the subject. At the scene's 45° FOV the frame half-height at distance *d* is ≈ 0.414*d*, so the master fills `radius / 0.414d` of it. Holding that at ~8% gives *d* ≈ 30 × radius. **Not the placement distance** — a focused rig parks at the 10% reach, ≈ 24 × radius (§2). |
 | `spanLimit` | `= farLimit` | The climb ceiling. It used to be a geometric pole (straight overhead on the camera's sphere); now the far camera rises straight, and nothing stops a mast being tall — so the ceiling is the same one Distance uses: past it, more height stops buying a usable shot. |
 | `MIN_STOP_GAP` | 0.25 m | Two stops closer than this are the same frame twice. |
 | `maxStops(span)` | `min(12, floor(span / 0.25) + 1)` | A count the rig can't honour is worse than a lower ceiling. |
@@ -352,5 +366,16 @@ The collapsed row summary reads `Torus · 5.6–12.4 m`, or `Torus · no camera 
 **The capture run doesn't have a trigger.** `CaptureRunPanel.tsx` is complete and working — it renders frames against a `CapturePlan`, commits them into the library in batches of 250ms (named `Torus — pass 2/3 · 7`), shows live progress, and turns into a success card with "Click to view" — but nothing in the editor ever calls `setCapture(plan)`. The **Generate** button opens TerraGen instead, and TerraGen's dispatch confirms the Work Order (`console.info("[terra] Work Order dispatched", order)`) rather than running a capture locally.
 
 If you want to wire it up, the plan is already computed every render: `capturePlan` in `EditorView.tsx` (line ~660). `setCapture(capturePlan)` is all it needs.
+
+**The 10% framing rule isn't in the code yet.** `framingPosition` currently backs a focused rig off by `max(3, radius × 4)` — about 2.8m for a unit master, which frames it at roughly 60% of the frame rather than 10%. §2 describes the rule the placement is meant to follow; the 10%-ish reach exists in code only as `farLimit` (`radius × 30`, ≈ 8% fill), which is the ceiling rather than the landing spot. One line in `camera-rig.ts` closes the gap:
+
+```ts
+// today
+const back = Math.max(3, radius * 4);
+// the 10% rule
+const back = Math.max(3, radius / (Math.tan((22.5 * Math.PI) / 180) * 0.1));  // ≈ radius × 24
+```
+
+Both the seeded numbers in §2 (16.8m far / 7.6m near) and TerraGen's sheet 6 §7 already assume the rule.
 
 **Stale comment:** `RigHandles` in `SceneCanvas.tsx` still says the far camera "stays exactly as far from the master as it was (see `withVerticalSpan`)". That was true when the climb travelled on a sphere; it now moves straight up, so the distance to the master *does* change as the rig climbs. The behaviour is intentional (the mast model) — only the comment is out of date.

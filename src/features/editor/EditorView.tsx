@@ -1123,6 +1123,20 @@ export function EditorView({
             dark={titleDark}
             role={selected.role}
             typeLabel={objectTypeLabel(selected)}
+            /* The container it sits in, so a click that walked down into a group
+               says which one it landed inside. Resolved here rather than in the
+               title: `parentId` is scene state, and the title takes a name. */
+            groupName={
+              selected.parentId
+                ? scene.objects.find((o) => o.id === selected.parentId && o.group)?.name ?? null
+                : null
+            }
+            /* Pressing it goes UP a level. `scene.select` directly rather than
+               through the viewport's `pick`: that walks down a chain from a
+               click, and this is the one gesture that names its target. */
+            onSelectGroup={
+              selected.parentId ? () => scene.select(selected.parentId!) : undefined
+            }
             description={selected.description}
             insetLeft={leftInset}
             onRename={(name) => scene.update(selected.id, { name })}

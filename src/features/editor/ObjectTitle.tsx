@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
 import { SCENE_LABEL } from "./scene-palette";
 import { ROLE_LABEL, type ObjectRole } from "./scene-types";
@@ -47,6 +48,21 @@ const roleBadgeStyle: Record<Exclude<ObjectRole, "none">, CSSProperties> = {
   },
 };
 
+/**
+ * MEMBERSHIP, NOT IDENTITY — so it is the one badge in the row that isn't tinted.
+ *
+ * The type badge is brand orange and the role badges carry their role's colour,
+ * because both answer "what is this thing". This one answers "what is it inside
+ * of", which is context: a third saturated pill beside those two would compete
+ * with the two that name the object. Neutral ink on the same dark glass keeps it
+ * legible over any scene while reading as secondary at a glance.
+ */
+const groupBadgeStyle: CSSProperties = {
+  color: "hsl(0 0% 90%)",
+  borderColor: "hsl(0 0% 100% / 0.34)",
+  background: "hsl(0 0% 6% / 0.32)",
+};
+
 const typeBadgeStyle: CSSProperties = {
   color: "hsl(26 100% 72%)",
   borderColor: "hsl(var(--brand) / 0.6)",
@@ -73,6 +89,8 @@ export function ObjectTitle({
   dark,
   role,
   typeLabel,
+  groupName,
+  onSelectGroup,
   description,
   insetLeft = 0,
   onRename,
@@ -84,6 +102,30 @@ export function ObjectTitle({
   dark: boolean;
   role: ObjectRole;
   typeLabel: string;
+  /**
+   * The group this object sits directly inside, if any.
+   *
+   * WHY THE TITLE CARRIES IT. A group draws nothing in the viewport, so once a
+   * click has walked down into one (see `pick` in SceneCanvas) there is nothing
+   * on screen saying which container you are inside — the chair looks exactly
+   * like a chair that was never grouped, and the only way to find out was the
+   * layers tree. The label already answers "what is this"; this is the same
+   * question one level out.
+   *
+   * The IMMEDIATE parent, not the whole chain: a nest reads from the tree, and a
+   * row of three ancestors would push the badge row past the label's width.
+   */
+  groupName?: string | null;
+  /**
+   * Select that group — the way back OUT of one.
+   *
+   * A viewport click walks DOWN the chain (see `pick` in SceneCanvas) and there
+   * was no gesture for the other direction: once you were on the chair, getting
+   * back to the room meant Back-then-reselect, or finding the row in the layers
+   * tree. The badge already names the container, so it is the obvious thing to
+   * press. Without it the badge is inert text.
+   */
+  onSelectGroup?: () => void;
   description: string;
   /** px of left edge the caller needs kept clear — a docked left panel */
   insetLeft?: number;
@@ -324,6 +366,9 @@ export function ObjectTitle({
           style={{
             display: "flex",
             alignItems: "center",
+            // Wraps: a grouped master reads type + group + role, and three pills
+            // plus a long group name overflow the label's column on one line.
+            flexWrap: "wrap",
             gap: "0.5rem",
             marginTop: "0.9rem",
           }}
@@ -345,6 +390,50 @@ export function ObjectTitle({
               <Icon name="master" size={13} />
               {ROLE_LABEL[role]}
             </span>
+          )}
+          {/* LAST IN THE ROW, and the only badge you can press.
+              The order is what the object IS, then what it does for the dataset,
+              then what it sits inside — outward from the thing itself, so the two
+              pills that describe the object stay adjacent and the one that points
+              somewhere else sits at the end of the line, where a link belongs. */}
+          {groupName && (
+            <button
+              type="button"
+              data-ui="badge-group"
+              onClick={onSelectGroup}
+              disabled={!onSelectGroup}
+              /* The name can be anything the user typed, and the badge truncates
+                 it; the tooltip carries the whole thing — and says what pressing
+                 it does, since a badge is not obviously a control. */
+              title={onSelectGroup ? `Select ${groupName}` : `Part of ${groupName}`}
+              style={{
+                ...badgeStyle,
+                ...groupBadgeStyle,
+                ...(onSelectGroup ? { cursor: "pointer" } : null),
+              }}
+              className={cn(
+                "type-scene-badge",
+                onSelectGroup && "pointer-events-auto transition-opacity hover:opacity-75"
+              )}
+            >
+              <Icon name="group" size={13} />
+              {/* "Part of", not just the name: on its own beside the type badge
+                  a bare "Group 1" reads as a second thing this object IS. */}
+              {/* `inline-block`: overflow and text-overflow do nothing on an
+                  inline box, so a long group name would have run out past the
+                  pill's border rather than ellipsing inside it. */}
+              <span
+                style={{
+                  display: "inline-block",
+                  maxWidth: "11rem",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  verticalAlign: "bottom",
+                }}
+              >
+                Part of {groupName}
+              </span>
+            </button>
           )}
         </div>
 
