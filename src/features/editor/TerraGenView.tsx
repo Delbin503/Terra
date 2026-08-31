@@ -767,6 +767,15 @@ export function TerraGenView({
           // opened from is what you check the result against — so the dock
           // stays up rather than being folded away for it.
           setCollapsed(false);
+          /* AND THE EDIT STAGE COMES FORWARD, for the same reason previewing a
+             stand-in or touching the rig does it (see `previewSwap`,
+             `focusCamera`): everything you can pick in that sheet lands in the
+             SCENE, and the sweep preview is shot from the camera — it renders
+             neither a newly placed object you now have to position, nor the
+             environment you just shortlisted. Picking something and being left
+             looking at a frame that cannot show it reads as the pick having
+             failed. */
+          setStage("edit");
           setLibrary(mode);
         }}
         previewedSwap={swapPreview}

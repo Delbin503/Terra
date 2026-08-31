@@ -132,9 +132,8 @@ The section holds the whole cast: the master, everything sharing the frame with 
 ### 6.1 Adding a new asset from the library
 
 1. Open **Objects → Add from library**. The **real asset library** opens as a bottom sheet over the stage — the same component the editor uses, so folders, tags, search, filters and upload all behave exactly as they do outside TerraGen. It opens on **All Assets**, not "3D Models" (that category is the AI-output folder and would show an empty grid to someone who only wanted a chair).
-2. The dock **stays open** behind the sheet: the section you opened it from is what you check the result against.
+2. The dock **stays open** behind the sheet: the section you opened it from is what you check the result against. The stage switches to **Edit scene** at the same time — what you are about to pick lands in the scene, and the sweep preview is shot *from* the camera, so it can render neither a new object nor a shortlisted environment.
 3. Click an asset. It is added to the scene by name, type and model URL, **the sheet closes**, and the object arrives **already selected** — because the next thing you want is the viewport it just landed in.
-4. If you were on **Scene preview**, switch to **Edit scene** to see and adjust it. The new object appears in the Scene objects list either way.
 
 > Placing is the one library errand that closes the sheet on the first pick. The two shortlists — swap objects and environments — deliberately stay open, because both are multi-select by nature.
 

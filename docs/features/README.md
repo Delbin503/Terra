@@ -11,6 +11,8 @@ One sheet per feature area. Each covers how the user gets to it and what it does
 | 5 | [Camera Settings](05-camera-settings.md) | The camera rig, placement dialog, orbit, distance, climb, capture mode, increments and shots per rotation |
 | 6 | [TerraGen — the Generate panel](06-terragen-generate-panel.md) | The Work Order author behind Generate: the two stages, the six dock sections (Objects, Camera, Weather, Environment, Arrangement, Output), the subset/frame arithmetic, preflight and the dispatch review |
 | 7 | [Object Grouping and the Layers Panel](07-grouping-and-layers.md) | What a group is, making one from a marquee, what a group edit does to its contents, the click-walks-down selection rule, the Layers tree, its context menu, and ungrouping |
+| 8 | [TerraArrange — laying out a scene automatically](08-terra-arrange.md) | Spaces, the Scatter button, the TerraGen Arrangement axis, building a room by asking the assistant, seeds and reproducibility, and how the placement solver works |
+| 9 | [The Objects section — the cast of the shot](09-terragen-objects.md) | The long form of TerraGen's first section: adding from the library, the position/rotation/scale controls and their gizmos, swap objects end to end (shortlist, preview, offsets, what they cost), the Master, roles, and deleting |
 
 ## Where these came from
 
