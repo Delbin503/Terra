@@ -73,6 +73,15 @@ const config: Config = {
           DEFAULT: "hsl(var(--backdrop) / <alpha-value>)",
           "on-glass": "hsl(var(--backdrop-on-glass) / <alpha-value>)",
         },
+        // Notification categories — an identity palette, not state. See tokens.css.
+        notify: {
+          project: "hsl(var(--notify-project) / <alpha-value>)",
+          organization: "hsl(var(--notify-organization) / <alpha-value>)",
+          billing: "hsl(var(--notify-billing) / <alpha-value>)",
+          security: "hsl(var(--notify-security) / <alpha-value>)",
+          collaboration: "hsl(var(--notify-collaboration) / <alpha-value>)",
+          system: "hsl(var(--notify-system) / <alpha-value>)",
+        },
         ring: "hsl(var(--ring) / <alpha-value>)",
         // visionOS glass tint — for ad-hoc alpha use (bg-glass/10);
         // prefer the composed .glass* material classes for real ornaments.

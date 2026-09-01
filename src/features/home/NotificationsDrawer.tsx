@@ -52,6 +52,47 @@ const MARK: Record<NotificationCategory, IconName> = {
   system: "news",
 };
 
+/**
+ * ONE HUE PER CATEGORY. Six identical grey chips meant the glyph was doing all
+ * the work of telling a billing row from a security row, at 14px, in a list you
+ * scan rather than read. Colour gets you to the right kind of row before the
+ * glyph resolves.
+ *
+ * These are the `--notify-*` tokens, kept deliberately apart from
+ * --success/--warning/--danger: a password change is not an error and a top-up
+ * is not a success, and borrowing the state roles to say "billing" is how a
+ * state palette stops meaning anything.
+ *
+ * Colour carries the CATEGORY; weight carries UNREAD. Written out in full
+ * because Tailwind only ships classes it can see as literal strings.
+ */
+const TONE: Record<NotificationCategory, { read: string; unread: string }> = {
+  project: {
+    read: "bg-notify-project/15 text-notify-project",
+    unread: "bg-notify-project/25 text-notify-project ring-1 ring-notify-project/40",
+  },
+  organization: {
+    read: "bg-notify-organization/15 text-notify-organization",
+    unread: "bg-notify-organization/25 text-notify-organization ring-1 ring-notify-organization/40",
+  },
+  billing: {
+    read: "bg-notify-billing/15 text-notify-billing",
+    unread: "bg-notify-billing/25 text-notify-billing ring-1 ring-notify-billing/40",
+  },
+  security: {
+    read: "bg-notify-security/15 text-notify-security",
+    unread: "bg-notify-security/25 text-notify-security ring-1 ring-notify-security/40",
+  },
+  collaboration: {
+    read: "bg-notify-collaboration/15 text-notify-collaboration",
+    unread: "bg-notify-collaboration/25 text-notify-collaboration ring-1 ring-notify-collaboration/40",
+  },
+  system: {
+    read: "bg-notify-system/15 text-notify-system",
+    unread: "bg-notify-system/25 text-notify-system ring-1 ring-notify-system/40",
+  },
+};
+
 export function NotificationsDrawer({
   open,
   railCollapsed,
@@ -152,9 +193,7 @@ export function NotificationsDrawer({
                 <span
                   className={cn(
                     "grid h-7 w-7 shrink-0 place-items-center rounded-lg",
-                    n.unread
-                      ? "bg-brand text-brand-foreground"
-                      : "bg-glass/20 text-content-muted"
+                    n.unread ? TONE[n.category].unread : TONE[n.category].read
                   )}
                 >
                   <Icon name={MARK[n.category]} size={14} />

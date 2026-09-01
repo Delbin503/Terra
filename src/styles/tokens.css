@@ -120,6 +120,19 @@
   --distractor: 190 92% 55%;
   --backdrop: 280 78% 70%;
 
+  /* NOTIFICATION CATEGORIES — an IDENTITY palette, deliberately NOT the state
+     roles. A "Password Changed" row is not an error and a "Credits Topped Up"
+     row is not a success; colouring them with --danger/--success would teach
+     people to read state colour as decoration, which is exactly how a state
+     palette stops meaning anything. Six hues, one per category, so a row is
+     identifiable before it is read. */
+  --notify-project: var(--terra-400);
+  --notify-organization: var(--indigo-400);
+  --notify-billing: var(--moss-400);
+  --notify-security: var(--amber-400);
+  --notify-collaboration: 190 62% 56%;
+  --notify-system: 300 46% 70%;
+
   /* Role colours ON GLASS. The raw role tokens are tuned for solid dark chrome;
      on a tinted glass ornament floating over a bright scene they land at nearly
      the same lightness as their own tint, so the label disappears into its
@@ -171,6 +184,14 @@
   --master: 42 88% 45%;
   --distractor: 192 90% 32%;
   --backdrop: 278 62% 48%;
+
+  /* Category hues go darker on a light ground, same as the on-glass roles. */
+  --notify-project: var(--terra-600);
+  --notify-organization: var(--indigo-600);
+  --notify-billing: var(--moss-600);
+  --notify-security: 32 92% 42%;
+  --notify-collaboration: 192 70% 34%;
+  --notify-system: 300 40% 46%;
 
   /* Light theme: glass gains body and lightens, so the on-glass role colours
      invert — they go DARKER than the raw token, not lighter. */

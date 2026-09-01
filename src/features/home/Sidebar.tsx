@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/icons";
-import { Avatar, IconButton, Tooltip } from "@/components/ui";
+import { Avatar, ConfirmDialog, IconButton, Tooltip } from "@/components/ui";
 import { useDismissable } from "@/features/editor/use-dismissable";
 import { credits } from "./data";
 import { SHELVES, type Shelf } from "./shelves";
@@ -77,6 +77,7 @@ export function Sidebar({
   unread: number;
 }) {
   const { org } = useWorkspace();
+  const [signingOut, setSigningOut] = useState(false);
 
   return (
     <aside
@@ -247,16 +248,35 @@ export function Sidebar({
             onClick={onNotifications}
             className={collapsed ? "w-8" : "w-full"}
           />
+          {/* RED, AND IT ASKS FIRST. This sat in a row of three identical grey
+              buttons where the other two are harmless — one opens a drawer, one
+              opens a panel — so the only irreversible control in the rail looked
+              exactly like its neighbours and was one mis-click from ending the
+              session. */}
           <IconButton
             icon="sign-out"
             label="Sign out"
-            variant="solid"
+            variant="danger"
             size="sm"
             iconSize={16}
+            data-ui="sign-out"
+            onClick={() => setSigningOut(true)}
             className={collapsed ? "w-8" : "w-full"}
           />
         </div>
       </div>
+
+      <ConfirmDialog
+        open={signingOut}
+        onOpenChange={setSigningOut}
+        title="Sign out?"
+        body="You'll be returned to the sign-in screen. Anything already saved stays in your workspace."
+        confirmLabel="Sign out"
+        confirmIcon="sign-out"
+        onConfirm={() => {
+          /* No auth layer yet — wire the real sign-out here when there is one. */
+        }}
+      />
     </aside>
   );
 }
@@ -315,6 +335,10 @@ function NavButton({
 function OrgSwitcher() {
   const { org, orgs, switchOrg } = useWorkspace();
   const [open, setOpen] = useState(false);
+  /* The org they picked, held until they confirm. Switching changes what the
+     whole app is showing, so it asks first rather than swapping the workspace
+     out from under a half-finished thought. */
+  const [pending, setPending] = useState<(typeof orgs)[number] | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
   useDismissable(open, () => setOpen(false), wrap);
 
@@ -368,8 +392,10 @@ function OrgSwitcher() {
                 role="menuitemradio"
                 aria-checked={on}
                 onClick={() => {
-                  switchOrg(o.id);
                   setOpen(false);
+                  /* Re-picking the org you are already in is a no-op, so it
+                     shouldn't stop to ask. */
+                  if (o.id !== org.id) setPending(o);
                 }}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors",
@@ -415,6 +441,31 @@ function OrgSwitcher() {
           </button>
         </div>
       )}
+
+      {/* Switching org changes what every page is listing, so it names the
+          consequence before it happens rather than leaving you to work out why
+          the shelf emptied. */}
+      <ConfirmDialog
+        open={!!pending}
+        onOpenChange={(o) => !o && setPending(null)}
+        title={`Switch to ${pending?.name ?? ""}?`}
+        body={
+          <>
+            You&rsquo;ll be working in{" "}
+            <b className="text-content">{pending?.name}</b> on the{" "}
+            {pending?.plan}. Projects and folders filed under{" "}
+            <b className="text-content">{org.name}</b> stop being listed —
+            anything shared with you stays visible in both.
+          </>
+        }
+        confirmLabel="Switch"
+        confirmIcon="switch"
+        tone="brand"
+        onConfirm={() => {
+          if (pending) switchOrg(pending.id);
+          setPending(null);
+        }}
+      />
     </div>
   );
 }

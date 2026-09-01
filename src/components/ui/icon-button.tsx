@@ -10,6 +10,12 @@ const iconButtonVariants = cva(
       variant: {
         solid: "bg-surface-raised text-content-muted hover:text-content hover:bg-surface-overlay border border-line/10",
         ghost: "text-content-muted hover:bg-surface-raised hover:text-content",
+        /* For a control whose action is destructive or hard to undo — sign out,
+           remove, revoke. Tinted rather than filled: it sits in a row beside
+           neutral siblings, and a solid red block there would read as an error
+           state rather than an available action. */
+        danger:
+          "border border-danger/30 bg-danger/10 text-danger hover:border-danger/50 hover:bg-danger/20",
       },
       size: {
         sm: "h-8 w-8",
