@@ -71,7 +71,6 @@ export function ProjectAccessPage() {
   const columns: Column<AccessRow>[] = [
     { key: "project", label: "Project Name", sortValue: (r) => r.project, render: (r) => r.project },
     { key: "folder", label: "Folder Name", sortValue: (r) => r.folder, render: (r) => r.folder },
-    { key: "type", label: "Project Type", sortValue: (r) => r.type, render: (r) => r.type },
     {
       key: "members",
       // Reads the edited roster where there is one, so removing someone inside
