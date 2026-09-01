@@ -95,12 +95,85 @@ export function seedLedger(now: number): CreditEntry[] {
 /* -------------------------------------------------------------- the usage */
 
 /** One day's output. Images are a count; video is measured in seconds. */
+/** What one person generated on one day. */
+export interface UsageByMember {
+  memberId: string;
+  name: string;
+  images: number;
+  videoSeconds: number;
+  credits: number;
+}
+
 export interface UsageDay {
   /** ms since epoch, midnight */
   at: number;
   images: number;
   videoSeconds: number;
   credits: number;
+  /**
+   * The same day split by who spent it. A team's credit balance is drained by
+   * PEOPLE, and "we used 2,867 credits" doesn't tell an admin which of those
+   * people to go and talk to — the aggregate is the question this page used to
+   * answer and the least useful one it could.
+   */
+  byMember: UsageByMember[];
+}
+
+/**
+ * Who the usage is attributed to, and roughly what share each takes.
+ *
+ * Weights are fixed rather than even: usage on a real team is lopsided, and an
+ * even split would make the per-member view look like a rounding artefact of
+ * the total instead of a fact worth reading.
+ */
+const USAGE_SHARE: { memberId: string; name: string; weight: number }[] = [
+  { memberId: "m1", name: "GG TOE", weight: 0.46 },
+  { memberId: "m2", name: "Henry William", weight: 0.31 },
+  { memberId: "m3", name: "Liam Johnson", weight: 0.14 },
+  { memberId: "m4", name: "Emma Brown", weight: 0.09 },
+];
+
+/**
+ * Split a day across the team so the parts always sum to the whole.
+ *
+ * The last member takes the remainder rather than its own rounded share —
+ * rounding four percentages independently leaves the column off the total by a
+ * credit or two, and a breakdown that doesn't add up is the fastest way to make
+ * a billing page look wrong.
+ */
+function splitDay(
+  index: number,
+  images: number,
+  videoSeconds: number,
+  credits: number
+): UsageByMember[] {
+  // A per-day wobble, so one person's share isn't a flat percentage forever.
+  const shares = USAGE_SHARE.map((m, i) => {
+    const wobble = 0.8 + ((Math.sin(index * 0.9 + i * 2.3) + 1) / 2) * 0.4;
+    return { ...m, w: m.weight * wobble };
+  });
+  const sum = shares.reduce((a, b) => a + b.w, 0);
+
+  let usedI = 0;
+  let usedV = 0;
+  let usedC = 0;
+  return shares.map((m, i) => {
+    const last = i === shares.length - 1;
+    const f = m.w / sum;
+    const mi = last ? images - usedI : Math.round(images * f);
+    const mv = last ? videoSeconds - usedV : Math.round(videoSeconds * f);
+    const mc = last ? credits - usedC : Math.round(credits * f);
+    usedI += mi;
+    usedV += mv;
+    usedC += mc;
+    return {
+      memberId: m.memberId,
+      name: m.name,
+      images: Math.max(0, mi),
+      videoSeconds: Math.max(0, mv),
+      credits: Math.max(0, mc),
+    };
+  });
 }
 
 export type UsageRange = "7d" | "30d" | "12m";
@@ -132,7 +205,8 @@ export function seedUsage(now: number): UsageDay[] {
     const scale = trend * wobble * (weekend ? 0.25 : 1);
     const images = Math.round(420 * scale);
     const videoSeconds = Math.round(95 * scale);
-    return { at, images, videoSeconds, credits: Math.round(images * 0.125 + videoSeconds * 0.4) };
+    const credits = Math.round(images * 0.125 + videoSeconds * 0.4);
+    return { at, images, videoSeconds, credits, byMember: splitDay(i, images, videoSeconds, credits) };
   });
 }
 
@@ -149,6 +223,29 @@ export interface UsageBucket {
   images: number;
   videoSeconds: number;
   credits: number;
+  /** the same split, summed over whatever the bucket covers */
+  byMember: UsageByMember[];
+}
+
+/** Sum the per-member split across a set of days, biggest spender first. */
+export function byMemberTotals(days: UsageDay[]): UsageByMember[] {
+  const acc = new Map<string, UsageByMember>();
+  days.forEach((d) =>
+    d.byMember.forEach((m) => {
+      const found = acc.get(m.memberId) ?? {
+        memberId: m.memberId,
+        name: m.name,
+        images: 0,
+        videoSeconds: 0,
+        credits: 0,
+      };
+      found.images += m.images;
+      found.videoSeconds += m.videoSeconds;
+      found.credits += m.credits;
+      acc.set(m.memberId, found);
+    })
+  );
+  return [...acc.values()].sort((a, b) => b.credits - a.credits);
 }
 
 /**
@@ -167,6 +264,7 @@ export function bucket(days: UsageDay[], range: UsageRange): UsageBucket[] {
       images: d.images,
       videoSeconds: d.videoSeconds,
       credits: d.credits,
+      byMember: d.byMember,
     }));
   }
   const months = new Map<string, UsageBucket>();
@@ -182,13 +280,24 @@ export function bucket(days: UsageDay[], range: UsageRange): UsageBucket[] {
       images: 0,
       videoSeconds: 0,
       credits: 0,
+      byMember: [],
     };
     found.images += d.images;
     found.videoSeconds += d.videoSeconds;
     found.credits += d.credits;
     months.set(key, found);
   });
-  return [...months.values()];
+  // Roll the member split up per month from the days that fed it.
+  const out = [...months.values()];
+  out.forEach((b) => {
+    b.byMember = byMemberTotals(
+      days.filter((d) => {
+        const date = new Date(d.at);
+        return `${date.getFullYear()}-${date.getMonth()}` === b.key;
+      })
+    );
+  });
+  return out;
 }
 
 export const totalsOf = (days: UsageDay[]) =>

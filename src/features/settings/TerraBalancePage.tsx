@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/icons";
 import {
+  Avatar,
   Button,
   DataTable,
   Dialog,
@@ -20,6 +21,7 @@ import {
   CUSTOM_MIN,
   RANGE_LABEL,
   bucket,
+  byMemberTotals,
   daysIn,
   duration,
   priceOf,
@@ -520,13 +522,64 @@ function UsageTab() {
   const days = useMemo(() => daysIn(all, range), [all, range]);
   const buckets = useMemo(() => bucket(days, range), [days, range]);
   const totals = useMemo(() => totalsOf(days), [days]);
+  /** The point held open under the chart, if any. Cleared when the period
+   *  changes, since the key it refers to may not exist in the new range. */
+  const [pick, setPick] = useState<string | null>(null);
+  const picked = buckets.find((b) => b.key === pick) ?? null;
+  /** Who spent what across the whole period — the page's main subject now. */
+  const perMember = useMemo(() => byMemberTotals(days), [days]);
 
-  const columns: Column<UsageBucket>[] = [
+  /**
+   * One row per person per day. The table used to have one row per day with the
+   * team's output summed into it, which is the number an admin already has at
+   * the top of the page — what they cannot get anywhere else is whose spend it
+   * was.
+   */
+  type MemberDayRow = {
+    key: string;
+    day: string;
+    name: string;
+    images: number;
+    videoSeconds: number;
+    credits: number;
+  };
+
+  const memberRows: MemberDayRow[] = useMemo(
+    () =>
+      [...buckets]
+        .reverse()
+        .flatMap((b) =>
+          b.byMember
+            .filter((m) => m.credits > 0)
+            .map((m) => ({
+              key: `${b.key}-${m.memberId}`,
+              day: b.label,
+              name: m.name,
+              images: m.images,
+              videoSeconds: m.videoSeconds,
+              credits: m.credits,
+            }))
+        ),
+    [buckets]
+  );
+
+  const columns: Column<MemberDayRow>[] = [
     {
-      key: "period",
+      key: "day",
       label: range === "12m" ? "Month" : "Day",
       sortValue: (r) => r.key,
-      render: (r) => <span className="type-body text-content">{r.label}</span>,
+      render: (r) => <span className="type-body text-content">{r.day}</span>,
+    },
+    {
+      key: "name",
+      label: "Member",
+      sortValue: (r) => r.name,
+      render: (r) => (
+        <span className="flex items-center gap-2.5">
+          <Avatar name={r.name} size={26} />
+          <span className="type-body truncate text-content">{r.name}</span>
+        </span>
+      ),
     },
     {
       key: "images",
@@ -554,7 +607,7 @@ function UsageTab() {
       align: "right",
       sortValue: (r) => r.credits,
       render: (r) => (
-        <span className="type-numeric-sm text-content-muted">{r.credits.toLocaleString()}</span>
+        <span className="type-numeric-sm text-content">{r.credits.toLocaleString()}</span>
       ),
     },
   ];
@@ -570,7 +623,10 @@ function UsageTab() {
             aria-label="Period"
             className="ml-auto"
             value={range}
-            onChange={(v) => setRange(v as UsageRange)}
+            onChange={(v) => {
+              setRange(v as UsageRange);
+              setPick(null);
+            }}
             options={(Object.keys(RANGE_LABEL) as UsageRange[]).map((r) => ({
               value: r,
               label: RANGE_LABEL[r],
@@ -584,29 +640,92 @@ function UsageTab() {
           <StatTile icon="credits" label="Credits spent" value={totals.credits.toLocaleString()} note={RANGE_LABEL[range]} />
         </div>
 
-        {/* TWO CHARTS, NOT ONE WITH TWO AXES. Images are a count and video is a
-            duration — plotting both against a single scale would make one of
-            them a flat line at the bottom, and giving them a scale each is the
-            classic way to draw two series that cross wherever the author chose
-            the multipliers. Small multiples share the x-axis and let each
-            measure keep its own honest y. */}
-        <div className="grid gap-4 border-t border-glass/10 p-5 lg:grid-cols-2">
-          <UsageChart
-            title="Images generated"
-            buckets={buckets}
-            valueOf={(b) => b.images}
-            format={(n) => `${n.toLocaleString()} images`}
-            tone="brand"
-          />
-          <UsageChart
-            title="Video generated"
-            buckets={buckets}
-            valueOf={(b) => b.videoSeconds}
-            format={duration}
-            tone="accent"
-          />
+        <div className="border-t border-glass/10 p-5">
+          <CreditsLine buckets={buckets} selected={pick} onSelect={setPick} />
+
+          {/* THE SECOND QUESTION, asked of one day. Images and video are what
+              the credits bought, so they belong to a point on the line rather
+              than to charts of their own — and a count and a duration have no
+              shared y-axis anyway. */}
+          {picked ? (
+            <div className="mt-4 rounded-xl border border-brand/30 bg-brand/5 p-4">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="type-body-strong text-content">{picked.label}</span>
+                <span className="type-numeric text-content-muted">
+                  {picked.images.toLocaleString()} images · {duration(picked.videoSeconds)} video ·{" "}
+                  {picked.credits.toLocaleString()} credits
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPick(null)}
+                  className="type-body-dense ml-auto text-content-subtle transition-colors hover:text-content"
+                >
+                  Clear
+                </button>
+              </div>
+
+              <ul className="mt-3 flex flex-col gap-1.5">
+                {picked.byMember
+                  .filter((m) => m.credits > 0)
+                  .map((m) => (
+                    <li key={m.memberId} className="flex items-center gap-3">
+                      <span className="type-body min-w-0 flex-1 truncate text-content">{m.name}</span>
+                      <span className="type-numeric-sm text-content-subtle">
+                        {m.images.toLocaleString()} img · {duration(m.videoSeconds)}
+                      </span>
+                      <span className="type-numeric w-16 text-right text-content">
+                        {m.credits.toLocaleString()}
+                      </span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="type-caption mt-3 text-center text-content-subtle">
+              Select a point to see what was generated that day, and by whom.
+            </p>
+          )}
         </div>
+
       </Panel>
+
+      {/* WHO SPENT IT, for the whole period. The question the page is asked most
+          — "why is the balance going down" — is answered by a name, and this is
+          the shortest path to one. */}
+      <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-display text-lg font-semibold">Credits by member</h2>
+        <span className="type-body text-content-subtle">{RANGE_LABEL[range]}</span>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {perMember.map((m) => {
+          const share = totals.credits ? Math.round((m.credits / totals.credits) * 100) : 0;
+          return (
+            <div
+              key={m.memberId}
+              data-ui={`usage-member-${m.memberId}`}
+              className="rounded-xl border border-glass/10 bg-glass/5 p-4"
+            >
+              <div className="flex items-center gap-2.5">
+                <Avatar name={m.name} size={28} />
+                <span className="type-body-strong min-w-0 flex-1 truncate text-content">
+                  {m.name}
+                </span>
+              </div>
+              <p className="font-display mt-3 text-2xl font-semibold tabular-nums text-content">
+                {m.credits.toLocaleString()}
+              </p>
+              <p className="type-caption mt-0.5 text-content-subtle">
+                {share}% of spend · {m.images.toLocaleString()} images · {duration(m.videoSeconds)}
+              </p>
+              {/* The share as a bar, so four cards can be compared without
+                  reading four percentages. */}
+              <div className="mt-3 h-1 overflow-hidden rounded-full bg-glass/10">
+                <div className="h-full rounded-full bg-brand" style={{ width: `${share}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-display text-lg font-semibold">Breakdown</h2>
@@ -615,7 +734,7 @@ function UsageTab() {
       <div className="mt-4">
         <DataTable
           columns={columns}
-          rows={[...buckets].reverse()}
+          rows={memberRows}
           rowKey={(r) => r.key}
           pageSize={10}
           empty="Nothing generated in this period."
@@ -651,67 +770,142 @@ function StatTile({
 }
 
 /**
- * One measure over time, as bars.
+ * CREDITS PER DAY, as one line.
  *
- * SINGLE SERIES, SO NO LEGEND — the title names it, and a legend box for one
- * thing is a key to a lock with one key. Every bar carries its own hover
- * readout because a chart you cannot interrogate makes the reader guess at
- * values the table below already knows exactly.
+ * This was two bar charts — images and video — side by side. Neither answered
+ * the question the page exists for: credits are the currency, and the other two
+ * are what the credits BOUGHT. A reader asking "are we spending more than last
+ * week" had to convert two counts in their head.
+ *
+ * One series, so no legend — the caption names it. Clicking a point holds that
+ * day open below, because the images/video split is a second question asked of
+ * one day, not a permanent second axis. (A count and a duration share no y.)
  */
-function UsageChart({
-  title,
+function CreditsLine({
   buckets,
-  valueOf,
-  format,
-  tone,
+  selected,
+  onSelect,
 }: {
-  title: string;
   buckets: UsageBucket[];
-  valueOf: (b: UsageBucket) => number;
-  format: (n: number) => string;
-  tone: "brand" | "accent";
+  selected: string | null;
+  onSelect: (key: string | null) => void;
 }) {
-  const peak = Math.max(1, ...buckets.map(valueOf));
-  const last = buckets[buckets.length - 1];
+  const [hover, setHover] = useState<number | null>(null);
+  const peak = Math.max(1, ...buckets.map((b) => b.credits));
+  const n = buckets.length;
+
+  // 0–100 viewBox with headroom, so the line never touches the top edge.
+  const x = (i: number) => (n <= 1 ? 50 : (i / (n - 1)) * 100);
+  const y = (v: number) => 100 - (v / peak) * 88;
+
+  const line = buckets.map((b, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(b.credits)}`).join(" ");
+  const area = `${line} L100,100 L0,100 Z`;
+
+  const activeIndex =
+    hover ?? (selected ? buckets.findIndex((b) => b.key === selected) : -1);
+  const active = activeIndex >= 0 ? activeIndex : null;
+  const shown = active != null ? buckets[active] : null;
 
   return (
-    <figure className="rounded-xl border border-glass/10 p-4">
+    <figure>
       <figcaption className="flex items-baseline gap-2">
-        <span className="type-body-strong text-content">{title}</span>
-        <span className="type-caption ml-auto text-content-subtle">
-          peak {format(peak)}
+        <span className="type-body-strong text-content">Credits spent per day</span>
+        <span className="type-caption ml-auto tabular-nums text-content-subtle">
+          {shown
+            ? `${shown.label} · ${shown.credits.toLocaleString()} credits`
+            : `peak ${peak.toLocaleString()}`}
         </span>
       </figcaption>
 
-      <div className="mt-4 flex h-32 items-end gap-[2px]" role="img" aria-label={`${title} over the selected period`}>
-        {buckets.map((b) => {
-          const v = valueOf(b);
-          return (
-            <div
+      <div
+        className="relative mt-4 h-44"
+        onPointerLeave={() => setHover(null)}
+        role="img"
+        aria-label="Credits spent per day over the selected period"
+      >
+        <svg
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          className="h-full w-full overflow-visible"
+        >
+          <defs>
+            <linearGradient id="credits-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="hsl(var(--brand))" stopOpacity="0.28" />
+              <stop offset="1" stopColor="hsl(var(--brand))" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+
+          {/* Recessive grid — rules with no numbers on them; the caption carries
+              the value, so the plot itself stays quiet. */}
+          {[0, 1, 2, 3].map((g) => (
+            <line
+              key={g}
+              x1="0"
+              x2="100"
+              y1={12 + g * 22}
+              y2={12 + g * 22}
+              stroke="hsl(var(--glass-tint) / 0.08)"
+              strokeWidth="1"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+
+          <path d={area} fill="url(#credits-fill)" />
+          <path
+            d={line}
+            fill="none"
+            stroke="hsl(var(--brand))"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+
+          {shown && active != null && (
+            <line
+              x1={x(active)}
+              x2={x(active)}
+              y1="0"
+              y2="100"
+              stroke="hsl(var(--brand) / 0.5)"
+              strokeWidth="1"
+              strokeDasharray="3 3"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
+        </svg>
+
+        {/* Hit targets are full-height columns, not the 2px line — a point you
+            have to land on is a point nobody hits. */}
+        <div className="absolute inset-0 flex">
+          {buckets.map((b, i) => (
+            <button
               key={b.key}
-              /* The hit target is the full column height, not the bar — a quiet
-                 weekend is four pixels tall and would be unhoverable. */
-              className="group/bar relative flex h-full flex-1 items-end"
-              title={`${b.label} · ${format(v)}`}
-            >
-              <div
-                className={cn(
-                  "w-full rounded-t-[3px] transition-opacity group-hover/bar:opacity-100",
-                  tone === "brand" ? "bg-brand" : "bg-accent",
-                  "opacity-80"
-                )}
-                style={{ height: `${Math.max(2, (v / peak) * 100)}%` }}
-              />
-            </div>
-          );
-        })}
+              type="button"
+              aria-label={`${b.label}: ${b.credits.toLocaleString()} credits`}
+              aria-pressed={selected === b.key}
+              data-ui={`credits-point-${b.key}`}
+              onPointerEnter={() => setHover(i)}
+              onFocus={() => setHover(i)}
+              onClick={() => onSelect(selected === b.key ? null : b.key)}
+              className="h-full flex-1 cursor-pointer rounded-sm outline-none focus-visible:bg-glass/10"
+            />
+          ))}
+        </div>
+
+        {/* Above the hit layer, and pointer-events-none so it can't swallow it. */}
+        {shown && active != null && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand ring-2 ring-canvas"
+            style={{ left: `${x(active)}%`, top: `${y(shown.credits)}%` }}
+          />
+        )}
       </div>
 
-      {/* Two labels, not one per bar: the ends are what orient you, and a label
-          under all thirty is a grey smear. */}
       <div className="type-caption mt-2 flex justify-between text-content-subtle">
         <span>{buckets[0]?.label}</span>
-        <span>{last?.label}</span>
+        <span>{buckets[buckets.length - 1]?.label}</span>
       </div>
     </figure>
   );
