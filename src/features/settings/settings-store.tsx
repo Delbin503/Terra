@@ -153,6 +153,17 @@ interface SettingsStore {
    */
   projectAccess: Record<string, AccessMember[]>;
   setProjectRoster: (projectId: string, roster: AccessMember[]) => void;
+  /**
+   * Renamed and deleted projects, kept the same way as the rosters above: only
+   * what has been TOUCHED is stored, and the page falls back to the workspace's
+   * own project list for everything else. A rename here has to survive going
+   * back to the table and reopening — the detail screen's local state would
+   * lose it the moment you left.
+   */
+  projectNames: Record<string, string>;
+  renameProject: (projectId: string, name: string) => void;
+  deletedProjects: string[];
+  deleteProject: (projectId: string) => void;
   removeMember: (id: string) => void;
   resendInvite: (id: string) => void;
   grantAdmin: (id: string) => void;
@@ -268,6 +279,8 @@ export function SettingsProvider({
   const card = cards.find((c) => c.primary) ?? cards[0] ?? null;
   const [members, setMembers] = useState<MemberRow[]>(seedMembers);
   const [projectAccess, setProjectAccessState] = useState<Record<string, AccessMember[]>>({});
+  const [projectNames, setProjectNames] = useState<Record<string, string>>({});
+  const [deletedProjects, setDeletedProjects] = useState<string[]>([]);
 
   /** Toasts replace rather than queue: two confirmations stacked up is noise,
    *  and the last thing you did is the one you're checking. */
@@ -528,6 +541,16 @@ export function SettingsProvider({
     []
   );
 
+  const renameProject = useCallback<SettingsStore["renameProject"]>((projectId, name) => {
+    const next = name.trim();
+    if (!next) return; // an empty title is not a rename, it is a mistake
+    setProjectNames((all) => ({ ...all, [projectId]: next }));
+  }, []);
+
+  const deleteProject = useCallback<SettingsStore["deleteProject"]>((projectId) => {
+    setDeletedProjects((all) => (all.includes(projectId) ? all : [...all, projectId]));
+  }, []);
+
   const resendInvite = useCallback<SettingsStore["resendInvite"]>((id) => {
     setMembers((list) =>
       list.map((m) => (m.id === id ? { ...m, lastActive: "Invitation resent just now" } : m))
@@ -560,6 +583,14 @@ export function SettingsProvider({
       buySeats,
       projectAccess,
       setProjectRoster,
+      projectNames,
+      renameProject,
+      deletedProjects,
+      deleteProject,
+      projectNames,
+      renameProject,
+      deletedProjects,
+      deleteProject,
       subscription,
       invoices,
       creditBalance,
@@ -595,6 +626,14 @@ export function SettingsProvider({
       buySeats,
       projectAccess,
       setProjectRoster,
+      projectNames,
+      renameProject,
+      deletedProjects,
+      deleteProject,
+      projectNames,
+      renameProject,
+      deletedProjects,
+      deleteProject,
       subscription,
       invoices,
       creditBalance,

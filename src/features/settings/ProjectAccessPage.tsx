@@ -53,12 +53,21 @@ function accessRows() {
 type AccessRow = ReturnType<typeof accessRows>[number];
 
 export function ProjectAccessPage() {
-  const { projectAccess } = useSettings();
+  const { projectAccess, projectNames, deletedProjects } = useSettings();
   const [query, setQuery] = useState("");
   const [folder, setFolder] = useState("all");
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const rows = useMemo(accessRows, []);
+  // The workspace's projects, with whatever this admin has renamed or deleted
+  // applied on top. Kept here rather than in the detail screen so the table and
+  // the screen it opens can never disagree about what a project is called.
+  const rows = useMemo(
+    () =>
+      accessRows()
+        .filter((r) => !deletedProjects.includes(r.id))
+        .map((r) => (projectNames[r.id] ? { ...r, project: projectNames[r.id] } : r)),
+    [projectNames, deletedProjects]
+  );
   const shown = rows.filter(
     (r) =>
       r.project.toLowerCase().includes(query.trim().toLowerCase()) &&
@@ -156,12 +165,21 @@ export function ProjectAccessPage() {
 /* ------------------------------------------------------------------ detail */
 
 function ProjectDetail({ row, onBack }: { row: AccessRow; onBack: () => void }) {
-  const { account, notify, projectAccess, setProjectRoster } = useSettings();
+  const { account, notify, projectAccess, setProjectRoster, renameProject, deleteProject } =
+    useSettings();
   const [scope, setScope] = useState<Scope>("internal");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [menu, setMenu] = useState<{ m: AccessMember; at: { x: number; y: number } } | null>(null);
   const [removing, setRemoving] = useState<AccessMember | null>(null);
+  /** The project's own menu, hanging off the title. */
+  const [titleMenu, setTitleMenu] = useState<{ x: number; y: number } | null>(null);
+  /** Renaming happens IN the title rather than in a dialog — you are editing a
+   *  word you can see, and a modal would cover the thing being renamed. */
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  /** Who the details panel is showing, if anyone. */
+  const [detail, setDetail] = useState<AccessMember | null>(null);
 
   /** What the project starts with, before anyone edits it. */
   const seed: AccessMember[] = useMemo(
@@ -288,14 +306,17 @@ function ProjectDetail({ row, onBack }: { row: AccessRow; onBack: () => void }) 
       label: "Action",
       align: "right",
       render: (m) => (
+        /* Opens the member's details rather than the same seat menu the Seats
+           column already offers — two controls on one row that did the same
+           thing meant the Action column had no reason to exist. */
         <button
           type="button"
-          aria-label={`Manage ${m.status === "pending" ? m.email : m.name}`}
-          aria-haspopup="menu"
-          onClick={(e) => openMenu(m, e)}
+          aria-label={`Details for ${m.status === "pending" ? m.email : m.name}`}
+          data-ui={`access-detail-${m.id}`}
+          onClick={() => setDetail(m)}
           className="inline-grid h-8 w-8 place-items-center rounded-lg border border-glass/10 text-content-muted transition-colors hover:border-brand hover:text-brand"
         >
-          <Icon name="more" size={16} />
+          <Icon name="chevron-right" size={16} />
         </button>
       ),
     },
@@ -305,14 +326,66 @@ function ProjectDetail({ row, onBack }: { row: AccessRow; onBack: () => void }) 
 
   return (
     <>
-      <button
-        type="button"
-        onClick={onBack}
-        className="mb-4 flex items-center gap-2 text-content transition-colors hover:text-brand"
-      >
-        <Icon name="chevron-left" size={18} />
-        <span className="font-display text-lg font-semibold tracking-tight">{row.project}</span>
-      </button>
+      <div className="mb-4 flex items-center gap-2">
+        <button
+          type="button"
+          aria-label="Back to all projects"
+          onClick={onBack}
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-content transition-colors hover:bg-glass/10 hover:text-brand"
+        >
+          <Icon name="chevron-left" size={18} />
+        </button>
+
+        {renaming === null ? (
+          <>
+            <h1 className="font-display text-lg font-semibold tracking-tight text-content">
+              {row.project}
+            </h1>
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={!!titleMenu}
+              aria-label={`Actions for ${row.project}`}
+              data-ui="project-title-menu"
+              onClick={(e) => {
+                const b = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                setTitleMenu({ x: b.left, y: b.bottom + 6 });
+              }}
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-content-subtle transition-colors hover:bg-glass/10 hover:text-content"
+            >
+              <Icon name="chevron-down" size={16} />
+            </button>
+          </>
+        ) : (
+          /* Enter commits, Escape abandons, blur commits — the three ways out of
+             an inline edit, all of them ending the edit rather than leaving the
+             field open behind whatever you click next. */
+          <input
+            autoFocus
+            aria-label="Project name"
+            data-ui="project-rename-input"
+            value={renaming}
+            onChange={(e) => setRenaming(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") {
+                setRenaming(null);
+                e.currentTarget.blur();
+              }
+            }}
+            onBlur={() => {
+              if (renaming === null) return;
+              const next = renaming.trim();
+              if (next && next !== row.project) {
+                renameProject(row.id, next);
+                notify(`Renamed to “${next}”.`);
+              }
+              setRenaming(null);
+            }}
+            className="field-well font-display min-w-0 flex-1 rounded-lg border px-2.5 py-1 text-lg font-semibold tracking-tight text-content outline-none focus:border-brand/60"
+          />
+        )}
+      </div>
 
       <Tabs
         ariaLabel="Member scope"
@@ -352,6 +425,55 @@ function ProjectDetail({ row, onBack }: { row: AccessRow; onBack: () => void }) 
           empty={external ? "Nobody outside the org has access" : "No internal members"}
         />
       </div>
+
+      {/* The project's own menu. Restore is present but disabled unless the
+          project is actually in the trash — offering it live would imply there
+          is something to come back from. */}
+      {titleMenu && (
+        <ContextMenu
+          at={titleMenu}
+          onClose={() => setTitleMenu(null)}
+          /* Figma also shows a Restore item. It is left out until Trash can
+             actually hand a project back: ContextMenu has no disabled state, so
+             it would render as a live control that does nothing. */
+          items={[
+            { id: "rename", label: "Rename", icon: "edit" },
+            { id: "copy", label: "Copy Link", icon: "link" },
+            { id: "delete", label: "Permanently Delete", icon: "trash", danger: true, separated: true },
+          ]}
+          onSelect={(id) => {
+            if (id === "rename") setRenaming(row.project);
+            if (id === "copy") {
+              navigator.clipboard?.writeText(`${window.location.origin}/#project/${row.id}`);
+              notify("Project link copied.");
+            }
+            if (id === "delete") setDeleting(true);
+          }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={deleting}
+        onOpenChange={setDeleting}
+        title="Permanently Delete Project"
+        body="This action will permanently delete the project and all its data. This cannot be undone. Are you sure you want to proceed?"
+        confirmLabel="Confirm Delete"
+        onConfirm={() => {
+          deleteProject(row.id);
+          notify(`“${row.project}” was deleted.`);
+          onBack();
+        }}
+      />
+
+      <MemberDetails
+        member={detail}
+        project={row.project}
+        onClose={() => setDetail(null)}
+        onRemove={(m) => {
+          setDetail(null);
+          setRemoving(m);
+        }}
+      />
 
       {menu && (
         <ContextMenu
@@ -511,5 +633,110 @@ function Tally({
         {value}
       </span>
     </span>
+  );
+}
+
+/**
+ * MEMBER DETAILS — one person's standing on one project.
+ *
+ * The Action column used to open the same seat menu the Seats column already
+ * offers, which left two controls on a row doing one job. This is the other
+ * question a row raises: not "change their seat" but "what exactly do they
+ * have here, and since when".
+ *
+ * Read-only apart from the one destructive act, because everything else about a
+ * member belongs to the org — their seat is bought there, their name comes from
+ * their account. The only thing this project owns is whether they can open it.
+ */
+function MemberDetails({
+  member,
+  project,
+  onClose,
+  onRemove,
+}: {
+  member: AccessMember | null;
+  project: string;
+  onClose: () => void;
+  onRemove: (m: AccessMember) => void;
+}) {
+  if (!member) return null;
+  const pending = member.status === "pending";
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <aside
+        aria-label={`Details for ${pending ? member.email : member.name}`}
+        data-ui="member-details"
+        /* `glass-overlay`, not plain glass: this covers the roster and the page's
+           own controls rather than a 3D scene, and at the regular tier the
+           orange Add New Member button read straight through it. */
+        className="glass glass-overlay fixed right-0 top-0 z-50 flex h-screen w-[22rem] animate-panel-in flex-col !rounded-none border-y-0 border-r-0"
+      >
+        <header className="flex items-start gap-3 border-b border-glass/10 p-5">
+          <Avatar
+            name={member.name}
+            size={38}
+            className={cn(pending && "opacity-45 grayscale")}
+          />
+          <div className="min-w-0 flex-1">
+            <p className="type-body-strong flex items-center gap-1.5 truncate text-content">
+              {pending ? "Pending" : member.name}
+              {pending && <Chip tone="warning">Invited</Chip>}
+            </p>
+            <p className="type-body-dense truncate text-content-muted">{member.email}</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close details"
+            onClick={onClose}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-content-muted transition-colors hover:bg-glass/15 hover:text-content"
+          >
+            <Icon name="close" size={16} />
+          </button>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          <p className="type-body-strong text-content">Member Details</p>
+
+          {/* Two columns, because these are four facts rather than a form — a
+              stack of full-width rows would read as fields you can edit. */}
+          <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-4">
+            <Detail label="Access Permitted On">{member.since}</Detail>
+            <Detail label="Last Active On">{pending ? "—" : member.lastActive}</Detail>
+            <Detail label="Seat Type">
+              <span className="flex items-center gap-1.5">
+                <Chip tone={member.seat === "Viewer" ? "warning" : "brand"}>{member.seat}</Chip>
+              </span>
+            </Detail>
+            <Detail label="Member">
+              {member.scope === "external" ? "External Member" : "Internal Member"}
+            </Detail>
+          </dl>
+
+          <Button
+            variant="outline"
+            className="mt-6 w-full border-danger/50 text-danger hover:border-danger hover:text-danger"
+            data-ui="member-details-remove"
+            onClick={() => onRemove(member)}
+          >
+            {pending ? "Revoke this invitation" : "Remove from this Project"}
+          </Button>
+
+          <p className="type-caption mt-3 text-center text-content-subtle">
+            Removing only affects {project}. Their seat in the organization stays.
+          </p>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+function Detail({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="type-body-dense text-content-muted">{label}</dt>
+      <dd className="type-body mt-1 truncate text-content">{children}</dd>
+    </div>
   );
 }
