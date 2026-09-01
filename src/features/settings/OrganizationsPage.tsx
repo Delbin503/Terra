@@ -1,8 +1,16 @@
 import { useMemo, useState } from "react";
+import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
 import { DataTable, Select, type Column } from "@/components/ui";
 import { Chip, OrgMark, PageTitle, SearchField } from "./settings-parts";
-import { myOrganizations, seats, type OrgRow } from "./settings-data";
+import {
+  myOrganizations,
+  seats,
+  SEAT_ICON,
+  SEAT_LABEL,
+  SEAT_TONE,
+  type OrgRow,
+} from "./settings-data";
 
 /**
  * MY ORGANIZATIONS — every org this account belongs to, and its seat in each.
@@ -21,7 +29,7 @@ export function OrganizationsPage() {
       myOrganizations.filter(
         (o) =>
           o.name.toLowerCase().includes(query.trim().toLowerCase()) &&
-          (seatType === "all" || o.seat.toLowerCase() === seatType)
+          (seatType === "all" || o.seat === seatType)
       ),
     [query, seatType]
   );
@@ -52,13 +60,16 @@ export function OrganizationsPage() {
     {
       key: "seat",
       label: "Seats",
-      sortValue: (r) => r.seat,
+      sortValue: (r) => SEAT_LABEL[r.seat],
+      /* The seat's own glyph and tone, from the shared map — this drew every
+         row with the Owner's accent chip and person glyph, so an org you only
+         view looked exactly like the one you own. */
       render: (r) => (
         <span className="flex items-center gap-2">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent-soft text-accent">
-            <Icon name="person" size={16} />
+          <span className={cn("grid h-8 w-8 place-items-center rounded-lg", SEAT_TONE[r.seat])}>
+            <Icon name={SEAT_ICON[r.seat]} size={16} />
           </span>
-          <span className="type-body text-content">{r.seat}</span>
+          <span className="type-body text-content">{SEAT_LABEL[r.seat]}</span>
         </span>
       ),
     },
@@ -105,7 +116,7 @@ export function OrganizationsPage() {
             options={[
               { value: "all", label: "All" },
               { value: "owner", label: "Owner" },
-              { value: "admin", label: "Admin" },
+              { value: "full", label: "Full Access" },
               { value: "viewer", label: "Viewer" },
             ]}
           />

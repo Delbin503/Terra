@@ -65,6 +65,7 @@ export function MemberDrawer({ member, onClose }: { member: MemberRow | null; on
     seatLedger,
     setMemberSeat,
     removeMember,
+    resendInvite,
     grantAdmin,
     transferOwnership,
     buySeats,
@@ -151,9 +152,28 @@ export function MemberDrawer({ member, onClose }: { member: MemberRow | null; on
               is something you'd be doing TO someone else. */}
           {!isOwner && (
             <div className="mt-6 flex flex-col gap-2.5">
-              <Button variant="secondary" className="w-full" onClick={() => go("project-access")}>
-                Edit Project Access
-              </Button>
+              {/* A PENDING ROW HAS NO ACCESS TO EDIT YET. Offering "Edit Project
+                  Access" on an invitation nobody has accepted sends you to a
+                  page to arrange permissions for a person who may never arrive —
+                  the useful action at this stage is to nudge the invitation
+                  again. It swaps back the moment they accept. */}
+              {member.status === "pending" ? (
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => {
+                    resendInvite(member.id);
+                    notify(`Invitation resent to ${member.email}`);
+                  }}
+                >
+                  <Icon name="send" size={15} />
+                  Reinvite
+                </Button>
+              ) : (
+                <Button variant="secondary" className="w-full" onClick={() => go("project-access")}>
+                  Edit Project Access
+                </Button>
+              )}
               {member.role !== "Admin" && member.status === "active" && (
                 <Button variant="secondary" className="w-full" onClick={() => setAsk("admin")}>
                   Grant Admin Access

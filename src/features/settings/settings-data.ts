@@ -210,12 +210,22 @@ export interface OrgRow {
   initials: string;
   plan: string;
   members: number;
-  seat: string;
+  /** the SAME seat vocabulary the Members roster uses — an account's seat in an
+   *  org it joined has to read identically to that org's view of the same seat,
+   *  or the two screens are describing the same fact in two languages. */
+  seat: SeatKind;
   lastActive: string;
   joined: string;
   current?: boolean;
 }
 
+/**
+ * Every org this account belongs to. Only one of them is the one you own — the
+ * rest are places you were invited into, which is the normal shape of this list
+ * and the reason the page has a seat filter at all: with a single owned org
+ * there was nothing to filter and no way to see what a non-owner row looks
+ * like.
+ */
 export const myOrganizations: OrgRow[] = [
   {
     id: "gg",
@@ -223,10 +233,50 @@ export const myOrganizations: OrgRow[] = [
     initials: "GG",
     plan: "Free Plan",
     members: 1,
-    seat: "Owner",
+    seat: "owner",
     lastActive: "5 mins ago",
     joined: "—",
     current: true,
+  },
+  {
+    id: "metablock",
+    name: "MetaBlock Aldjada",
+    initials: "MA",
+    plan: "Pro Plan",
+    members: 12,
+    seat: "full",
+    lastActive: "2 hours ago",
+    joined: "12 Mar 2026",
+  },
+  {
+    id: "sigmawave",
+    name: "Sigmawave AI",
+    initials: "SA",
+    plan: "Free Plan",
+    members: 5,
+    seat: "viewer",
+    lastActive: "3 days ago",
+    joined: "28 Jan 2026",
+  },
+  {
+    id: "northgate",
+    name: "Northgate Robotics",
+    initials: "NR",
+    plan: "Enterprise Plan",
+    members: 48,
+    seat: "full",
+    lastActive: "a week ago",
+    joined: "04 Nov 2025",
+  },
+  {
+    id: "helio",
+    name: "Helio Simulation Lab",
+    initials: "HS",
+    plan: "Pro Plan",
+    members: 9,
+    seat: "viewer",
+    lastActive: "3 weeks ago",
+    joined: "17 Sep 2025",
   },
 ];
 
