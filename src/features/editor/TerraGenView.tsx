@@ -10,7 +10,8 @@ import { SceneWorld } from "./SceneCanvas";
 import { AxisEditor } from "./terragen-axes";
 import { AxisSwitch } from "./terragen-parts";
 import { WeatherSection } from "./terragen-weather";
-import { describeLayers } from "./weather";
+import { TimeOfDaySection } from "./terragen-time";
+import { dayPhase, describeLayers, formatClock } from "./weather";
 import { CameraSection } from "./terragen-camera";
 import { MasterSection, type GizmoMode } from "./terragen-master";
 import { ObjectPropertiesPanel, type SettingKey } from "./ObjectPropertiesPanel";
@@ -566,13 +567,14 @@ export function TerraGenView({
   // Weather sets multiply the sweep — the count comes off the scene, since that
   // is where weather lives (see weather.ts).
   const weatherSets = scene.savedWeather.filter((s) => s.inRun).length;
+  const timeSets = scene.savedTimes.filter((s) => s.inRun).length;
   // Recomputed as the scene changes rather than only at the review, so opening
   // the sheet after an edit never quotes a stale count.
   const editedMaterials = useMemo(
     () => countEditedSlots(buildMaterialPayload(scene.objects)),
     [scene.objects]
   );
-  const totals = computeTotals(order, assets, rig.frames, weatherSets);
+  const totals = computeTotals(order, assets, rig.frames, weatherSets, timeSets);
   const gates = preflight(
     order,
     {
@@ -835,6 +837,7 @@ export function TerraGenView({
             // four crates inside it as five objects overstates the scene.
             objects: scene.objects.filter((o) => isContentObject(o)).length,
             weatherSets,
+            timeSets,
             // What the run will carry from the Texture panel — see
             // `buildMaterialPayload`. Built from the scene at review time, so
             // the figure quoted here is the figure that dispatches.
@@ -1292,6 +1295,8 @@ function TerraGenDock({
   // what every other section is measured against.
   const [open, setOpen] = useState<SectionId | null>("master");
   const first = gates[0];
+  /** How many hours the run sweeps — read by the Time of Day row's summary. */
+  const timesInRun = scene.savedTimes.filter((s) => s.inRun).length;
 
   const toggleOpen = (id: SectionId) => setOpen((o) => (o === id ? null : id));
 
@@ -1471,6 +1476,32 @@ function TerraGenDock({
               onOpen={() => toggleOpen("weather")}
             >
               <WeatherSection scene={scene} />
+            </Section>
+
+            {/* TIME OF DAY — the fourth scene section, and the second that
+                multiplies the run.
+
+                It is not folded into Weather above it even though the sun's
+                state lives in the same object, because the two sweep
+                INDEPENDENTLY: three times under two conditions is six passes,
+                and one combined list could only name six of them by hand. See
+                TimeOfDaySection. */}
+            <Section
+              id="time"
+              label="Time of Day"
+              icon="render-time"
+              /* The clock, or how many hours the run sweeps — the closed row
+                 has to say whether this section is costing anything, the way
+                 the axis rows do. */
+              summary={
+                timesInRun > 1
+                  ? `${timesInRun} times in run`
+                  : `${formatClock(scene.weather.sun.minutes)} · ${dayPhase(scene.weather.sun.minutes)}`
+              }
+              open={open === "time"}
+              onOpen={() => toggleOpen("time")}
+            >
+              <TimeOfDaySection scene={scene} />
             </Section>
 
             {/* --- the axes -------------------------------------------- */}

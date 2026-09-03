@@ -346,7 +346,13 @@ export interface Change {
  */
 export function orderChanges(
   order: WorkOrder,
-  scene: { objects: number; weatherSets: number; materialSlots: number; materialObjects: number }
+  scene: {
+    objects: number;
+    weatherSets: number;
+    timeSets: number;
+    materialSlots: number;
+    materialObjects: number;
+  }
 ): Change[] {
   const rows: Change[] = [];
   const swaps = order.swaps.filter((s) => s.inRun).length;
@@ -392,6 +398,13 @@ export function orderChanges(
       value: formatCount(scene.weatherSets),
     });
   }
+  if (scene.timeSets > 0) {
+    rows.push({
+      icon: "render-time",
+      label: "Time sets in the run",
+      value: formatCount(scene.timeSets),
+    });
+  }
   if (annotations > 0) {
     rows.push({ icon: "capture", label: "Annotation types", value: formatCount(annotations) });
   }
@@ -408,6 +421,7 @@ export function orderChanges(
  *  on the scene and on the order respectively, so neither has an axis entry. */
 function multiplierIcon(id: Totals["multipliers"][number]["id"]): IconName {
   if (id === "weather") return "sunny";
+  if (id === "time") return "render-time";
   if (id.startsWith("swaps:")) return "retry";
   return AXIS_BY_ID[id as AxisId].icon;
 }

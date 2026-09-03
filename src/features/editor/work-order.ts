@@ -71,7 +71,7 @@ export type AxisId = "background" | "layouts";
  * configuration — see weather.ts — so neither is an `AxisId` any more, and the
  * subset math no longer multiplies by either.
  */
-export type SectionId = "master" | "camera" | "weather" | AxisId | "output";
+export type SectionId = "master" | "camera" | "weather" | "time" | AxisId | "output";
 
 export interface AxisMeta {
   id: AxisId;
@@ -592,10 +592,10 @@ export function axisSummary(o: WorkOrder, id: AxisId, assets: Asset[]): string {
 }
 
 export interface Multiplier {
-  /** an axis, or one of the two things that multiply like one without being an
-   *  axis: the scene-owned weather sets, and one object's stand-ins
-   *  (`swaps:<objectId>`, one row per object that has any) */
-  id: AxisId | "weather" | `swaps:${string}`;
+  /** an axis, or one of the things that multiply like one without being an
+   *  axis: the scene-owned weather and time-of-day sets, and one object's
+   *  stand-ins (`swaps:<objectId>`, one row per object that has any) */
+  id: AxisId | "weather" | "time" | `swaps:${string}`;
   label: string;
   count: number;
 }
@@ -662,7 +662,8 @@ export function computeTotals(
   o: WorkOrder,
   assets: Asset[],
   framesPerSubset: number,
-  weatherSets = 0
+  weatherSets = 0,
+  timeSets = 0
 ): Totals {
   const perSubset = Math.max(1, Math.round(framesPerSubset));
 
@@ -676,6 +677,12 @@ export function computeTotals(
   // is a sweep, and then it earns a row beside the axes that also multiply.
   if (weatherSets > 1) {
     multipliers.push({ id: "weather", label: "Weather sets", count: weatherSets });
+  }
+
+  // Times multiply against the weathers rather than with them: three hours under
+  // two conditions is six passes, which is why they are two rows and not one.
+  if (timeSets > 1) {
+    multipliers.push({ id: "time", label: "Time sets", count: timeSets });
   }
 
   /**

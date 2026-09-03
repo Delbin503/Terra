@@ -1769,7 +1769,14 @@ export function EditorView({
             // total comes from the order itself so the row's denominator is the
             // number the review screen just charged for.
             const weatherSets = scene.savedWeather.filter((s) => s.inRun).length;
-            const totals = computeTotals(order, assets.assets, rigState(scene).frames, weatherSets);
+            const timeSets = scene.savedTimes.filter((s) => s.inRun).length;
+            const totals = computeTotals(
+              order,
+              assets.assets,
+              rigState(scene).frames,
+              weatherSets,
+              timeSets
+            );
             // Credits travel with the row: the Work Orders table quotes what
             // this dispatch was charged, and this is the only place that figure
             // exists — see `WorkOrderRun.credits`.

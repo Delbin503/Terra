@@ -37,12 +37,16 @@ import {
   type CameraRig,
 } from "./camera-rig";
 import {
+  DEFAULT_SUN,
   DEFAULT_WEATHER,
+  makeSavedTime,
   makeSavedWeather,
   nextPresetName,
+  nextTimeName,
   patchWeather,
   resetLayers,
   toggleLayer,
+  type SavedTime,
   type SavedWeather,
   type SceneWeather,
   type WeatherLayerId,
@@ -227,6 +231,9 @@ export function useScene() {
   const [weather, setWeatherState] = useState<SceneWeather>(DEFAULT_WEATHER);
   /** Named states someone kept this session — §7 of the weather spec. */
   const [savedWeather, setSavedWeather] = useState<SavedWeather[]>([]);
+  /** Times of day kept for the run — see `SavedTime`. Session-scoped, like the
+   *  weather sets they multiply against. */
+  const [savedTimes, setSavedTimes] = useState<SavedTime[]>([]);
   // Mirrors of the two above, so save/load can read the live values without
   // nesting one setState inside another's updater — which StrictMode
   // double-invokes, and which saved two identically-named presets per click.
@@ -234,6 +241,8 @@ export function useScene() {
   weatherRef.current = weather;
   const savedWeatherRef = useRef(savedWeather);
   savedWeatherRef.current = savedWeather;
+  const savedTimesRef = useRef(savedTimes);
+  savedTimesRef.current = savedTimes;
   /** Scene clipboard for the layers panel's Copy / Paste. Snapshot by value. */
   const [clipboard, setClipboard] = useState<{ rootId: string; objects: SceneObject[] } | null>(
     null
@@ -419,6 +428,58 @@ export function useScene() {
       setSavedWeather((prev) =>
         prev.map((s) => (s.id === id ? { ...s, inRun: !s.inRun } : s))
       ),
+    []
+  );
+
+  /* ------------------------------------------------------------- time sets */
+
+  /**
+   * The time-of-day actions, mirroring the weather ones exactly.
+   *
+   * Deliberately a parallel set rather than a generic "saved sets" abstraction:
+   * the two lists multiply each other and are read in different places, and the
+   * shared shape is six lines of state — folding them together would cost more
+   * in indirection than it saves in lines.
+   */
+  const saveTime = useCallback(() => {
+    setSavedTimes((prev) => {
+      const { minutes } = weatherRef.current.sun;
+      return [...prev, makeSavedTime(nextTimeName(minutes, prev), minutes)];
+    });
+  }, []);
+
+  const loadTime = useCallback((id: string) => {
+    const hit = savedTimesRef.current.find((s) => s.id === id);
+    // The clock only: loading a time must disturb neither the conditions above
+    // it nor the sun's own intensity and shadow.
+    if (hit) setWeatherState((prev) => patchWeather(prev, { sun: { minutes: hit.minutes } }));
+  }, []);
+
+  const deleteTime = useCallback(
+    (id: string) => setSavedTimes((prev) => prev.filter((s) => s.id !== id)),
+    []
+  );
+
+  /** Write the live clock back over a set you loaded to edit — the same reason
+   *  `updateWeatherSet` exists: correcting a set must not fork it. */
+  const updateTimeSet = useCallback(
+    (id: string) =>
+      setSavedTimes((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, minutes: weatherRef.current.sun.minutes } : s))
+      ),
+    []
+  );
+
+  const toggleTimeInRun = useCallback(
+    (id: string) =>
+      setSavedTimes((prev) => prev.map((s) => (s.id === id ? { ...s, inRun: !s.inRun } : s))),
+    []
+  );
+
+  /** Back to midday. The clock only — Reset in the Time section must not clear
+   *  the weather conditions sitting in the section above it. */
+  const resetTime = useCallback(
+    () => setWeatherState((prev) => patchWeather(prev, { sun: { minutes: DEFAULT_SUN.minutes } })),
     []
   );
 
@@ -1426,6 +1487,13 @@ export function useScene() {
     updateWeatherSet,
     renameWeatherSet,
     toggleWeatherInRun,
+    savedTimes,
+    saveTime,
+    loadTime,
+    deleteTime,
+    updateTimeSet,
+    toggleTimeInRun,
+    resetTime,
   };
 }
 

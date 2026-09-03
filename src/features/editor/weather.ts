@@ -272,6 +272,30 @@ export function formatClock(minutes: number): string {
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
 
+/**
+ * WHAT TIME OF DAY THIS IS, in words.
+ *
+ * A clock reads exactly and a phase reads at a glance, and the two answer
+ * different questions: "12:40" is what you set, "Midday" is what the frame will
+ * look like. The closed section row and a saved set's subtitle want the second.
+ *
+ * The boundaries are the ones that matter to a RENDER rather than to a calendar:
+ * the light changes character at first light, at the golden hours either side of
+ * the day, and at dusk — which is why the bands are uneven.
+ */
+export function dayPhase(minutes: number): string {
+  const m = wrapMinutes(minutes);
+  if (m < 5 * 60) return "Night";
+  if (m < 7 * 60) return "Dawn";
+  if (m < 9 * 60) return "Morning";
+  if (m < 11 * 60) return "Late morning";
+  if (m < 14 * 60) return "Midday";
+  if (m < 17 * 60) return "Afternoon";
+  if (m < 19 * 60) return "Golden hour";
+  if (m < 21 * 60) return "Dusk";
+  return "Night";
+}
+
 /** The eight-point compass name for a bearing — "SW" reads faster than "225°". */
 const POINTS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
 
@@ -318,6 +342,63 @@ export interface SavedWeather {
   /** this set is one of the values the run sweeps */
   inRun: boolean;
 }
+
+/**
+ * A TIME OF DAY someone named and kept.
+ *
+ * The same bargain `SavedWeather` makes, over a different slice of the scene: a
+ * checked set is a value the run sweeps, so three of them render every subset
+ * three times. Kept as its own list rather than as more weather sets because
+ * they multiply EACH OTHER — two weathers across three times is six passes, not
+ * five — and because you nearly always want the same three times under whatever
+ * weather you happen to be testing.
+ *
+ * IT STORES THE CLOCK AND NOTHING ELSE. Not a whole `SceneWeather`, which would
+ * drag a copy of the cloud cover along and silently undo the weather you had
+ * set; and not the whole `Sun` either, because the intensity and the shadow are
+ * not things this panel varies — a set that carried them would be storing two
+ * constants and claiming they were part of the choice.
+ */
+export interface SavedTime {
+  id: string;
+  name: string;
+  /** minutes from midnight, as `Sun.minutes` */
+  minutes: number;
+  /** this set is one of the values the run sweeps */
+  inRun: boolean;
+}
+
+let savedTimeCounter = 0;
+
+export function makeSavedTime(name: string, minutes: number): SavedTime {
+  savedTimeCounter += 1;
+  return {
+    id: `time-${savedTimeCounter}`,
+    name,
+    minutes: wrapMinutes(minutes),
+    inRun: true,
+  };
+}
+
+/**
+ * "07:30 · Dawn", then " 2" if that is taken.
+ *
+ * The clock leads because it is the thing you just chose and the thing you would
+ * search for; the phase follows because a list of bare clock times is a list you
+ * have to decode one row at a time.
+ */
+export function nextTimeName(minutes: number, saved: SavedTime[]): string {
+  const stem = `${formatClock(minutes)} · ${dayPhase(minutes)}`;
+  const taken = new Set(saved.map((s) => s.name));
+  if (!taken.has(stem)) return stem;
+  let n = 2;
+  while (taken.has(`${stem} ${n}`)) n += 1;
+  return `${stem} ${n}`;
+}
+
+/** Where the sun starts, for the section's Reset. Midday, as DEFAULT_WEATHER
+ *  has it — the neutral read of a new scene. */
+export const DEFAULT_SUN: Sun = { ...DEFAULT_WEATHER.sun };
 
 let savedCounter = 0;
 
