@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useProgress } from "@react-three/drei";
 import { cn } from "@/lib/utils";
@@ -19,17 +19,31 @@ import { SceneCanvas, type CameraGuide, type CameraHandle } from "./SceneCanvas"
 import {
   atDistance,
   azimuthOf,
+  formatZoom,
   groundDistance,
   orbitPoint,
   orbitShots,
   planCapture,
   withVerticalSpan,
+  zoomOf,
 } from "./camera-rig";
 import { DispatchReview, orderChanges } from "./terragen-budget";
+import {
+  buildMaterialPayload,
+  countEditedSlots,
+  type MaterialPayload,
+} from "./material-payload";
 import { AssetLibrary } from "./AssetLibrary";
 import type { Asset } from "./assets-data";
 import type { AssetStore } from "./useAssets";
-import { OBJECT_COLORS, isContentObject, shapeForSeed, type SceneObject } from "./scene-types";
+import {
+  DEFAULT_MATERIAL,
+  OBJECT_COLORS,
+  UNNAMED_SLOT,
+  isContentObject,
+  shapeForSeed,
+  type SceneObject,
+} from "./scene-types";
 import type { SceneApi } from "./useScene";
 import type { WorkOrderStore } from "./useWorkOrder";
 import {
@@ -158,7 +172,7 @@ export function TerraGenView({
   /** workspace balance, for the affordability gate */
   credits: number;
   onClose: () => void;
-  onDispatch: (order: WorkOrder) => void;
+  onDispatch: (order: WorkOrder, materials: MaterialPayload) => void;
   /** rebuild the rig's framing around the current master */
   reframeRig: () => void;
 }) {
@@ -266,7 +280,16 @@ export function TerraGenView({
       name: swap.name,
       modelUrl: asset?.modelUrl,
       shape: shapeForSeed(asset?.seed ?? 0),
-      color: OBJECT_COLORS[Math.abs(asset?.seed ?? 0) % OBJECT_COLORS.length],
+      // A stand-in wears one colour picked from its own seed, so a swap preview
+      // reads as a different object rather than as the same grey blob moved.
+      // One slot: it is a preview of a placement, not something you can edit.
+      materials: [
+        {
+          ...DEFAULT_MATERIAL,
+          name: UNNAMED_SLOT,
+          color: OBJECT_COLORS[Math.abs(asset?.seed ?? 0) % OBJECT_COLORS.length],
+        },
+      ],
       ...pose,
     };
     return { swap, target, object };
@@ -543,6 +566,12 @@ export function TerraGenView({
   // Weather sets multiply the sweep — the count comes off the scene, since that
   // is where weather lives (see weather.ts).
   const weatherSets = scene.savedWeather.filter((s) => s.inRun).length;
+  // Recomputed as the scene changes rather than only at the review, so opening
+  // the sheet after an edit never quotes a stale count.
+  const editedMaterials = useMemo(
+    () => countEditedSlots(buildMaterialPayload(scene.objects)),
+    [scene.objects]
+  );
   const totals = computeTotals(order, assets, rig.frames, weatherSets);
   const gates = preflight(
     order,
@@ -613,6 +642,11 @@ export function TerraGenView({
           object={inspected.object}
           setting={swapSetting}
           camera={null}
+          // This inspector is Transform-only (`group="Transform"` above, and
+          // SWAP_GIZMO holds nothing else), so no material row can be picked
+          // here and nothing can call this. A stand-in's material belongs to
+          // the asset it stands in for, not to the substitution.
+          onMaterial={() => {}}
           onChange={(patch) => {
             if (inspected.swap) {
               // Only the three transform fields can reach a swap: a stand-in's
@@ -801,11 +835,19 @@ export function TerraGenView({
             // four crates inside it as five objects overstates the scene.
             objects: scene.objects.filter((o) => isContentObject(o)).length,
             weatherSets,
+            // What the run will carry from the Texture panel — see
+            // `buildMaterialPayload`. Built from the scene at review time, so
+            // the figure quoted here is the figure that dispatches.
+            materialSlots: editedMaterials.slots,
+            materialObjects: editedMaterials.objects,
           })}
           onCancel={() => setReviewing(false)}
           onConfirm={() => {
             setReviewing(false);
-            onDispatch(order);
+            // §3.1: every modified slot travels with the order. Built here, at
+            // the moment of dispatch, from the scene as it stands — nothing
+            // upstream has to have remembered to keep a payload in step.
+            onDispatch(order, buildMaterialPayload(scene.objects));
             setDispatched(true);
           }}
         />
@@ -1556,16 +1598,17 @@ function TerraGenDock({
   );
 }
 
-/** The camera row, closed: what it shoots and how far it reaches. Deliberately
+/** The camera row, closed: what it shoots and how far in it zooms. Deliberately
  *  no frame count — that is the bill, and the bill is stated once. */
 function cameraSummary(rig: ReturnType<typeof rigState>): string {
   if (!rig.hasMaster) return "No master object";
   if (!rig.hasRig) return `${rig.masterName} · no camera placed`;
-  const reach =
-    rig.nearDistance === rig.farDistance
-      ? `${rig.nearDistance} m`
-      : `${rig.nearDistance}–${rig.farDistance} m`;
-  return `${rig.masterName} · ${reach}`;
+  /* The same measure the Zoom Distance control edits, so the closed row and the
+     open one agree — the rig's own framing is 1x and the sweep zooms in from
+     there. A rig with nowhere to travel says so with one figure. */
+  const zoom = zoomOf(rig.farDistance, rig.nearDistance);
+  const reach = zoom <= 1.05 ? formatZoom(1) : `${formatZoom(1)}–${formatZoom(zoom)}`;
+  return `${rig.masterName} · zoom ${reach}`;
 }
 
 /** The output row, closed: what comes back, at what size, with how much on it. */

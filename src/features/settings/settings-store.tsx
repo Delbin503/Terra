@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -24,6 +25,12 @@ import {
   type PlanId,
 } from "./subscription-data";
 import { seedLedger, type CreditEntry } from "./credits-data";
+import {
+  creditsInvoice,
+  renewalInvoice,
+  seedInvoices,
+  type Invoice as InvoiceRecord,
+} from "./invoice-data";
 import type { Destination as AppDestination } from "@/features/home/Sidebar";
 
 /**
@@ -96,18 +103,39 @@ export interface SavedCard {
   holder: string;
   /** the one every charge goes to. Exactly one card carries it. */
   primary?: boolean;
+  /**
+   * WHERE THE CARD IS BILLED. Held beside the token because the processor is
+   * given it at authorisation time and an admin has to be able to correct it
+   * without retyping the number — which is the one thing they cannot do.
+   */
+  billing: BillingAddress;
 }
+
+/** The address a card authorises against. `apt` and `city` are optional in
+ *  practice, so they are stored as written rather than as null. */
+export interface BillingAddress {
+  address: string;
+  apt: string;
+  country: string;
+  city: string;
+  postal: string;
+}
+
+export const EMPTY_BILLING: BillingAddress = {
+  address: "",
+  apt: "",
+  country: "",
+  city: "",
+  postal: "",
+};
 
 /** How a card reads on a receipt — "Visa ···· 4242". */
 export const cardLabel = (c: SavedCard) => `${c.brand} ···· ${c.last4}`;
 
-export interface Invoice {
-  id: string;
-  due: string;
-  type: string;
-  status: string;
-  total: string;
-}
+/* An invoice is a receipt with a body, not four strings — see invoice-data.
+   Re-exported here because Billing has always asked the store for the type it
+   renders, and the store is still where the list lives. */
+export type { Invoice } from "./invoice-data";
 
 /** The seat ledger: what the plan bought, and what the roster has spent. */
 export interface SeatLedger {
@@ -137,8 +165,22 @@ interface SettingsStore {
    * plan picker or to fake it with a raw hash write from halfway down a form.
    */
   exit: (to?: AppDestination) => void;
-  /** the transient confirmation line under the top bar */
-  toast: string | null;
+  /**
+   * A plan somebody has already chosen, waiting for the checkout to pick it up.
+   *
+   * Two screens outside Subscription ask "which plan" — the Pricing page in the
+   * app shell, and the plan sheet on Payment Details — and both used to answer
+   * it by dropping you on a picker that asked again. This carries the answer
+   * across, and `clearPlanIntent` is how the checkout says it has taken it, so
+   * a Back out of the flow lands on the picker instead of bouncing straight
+   * back into the plan you just left.
+   */
+  planIntent: PlanId | null;
+  setPlanIntent: (plan: PlanId) => void;
+  clearPlanIntent: () => void;
+  /** the transient confirmation, top-right. A headline, and the sentence that
+   *  says what actually changed — see SettingsToast. */
+  toast: Toast | null;
   /** the org roster, as editable state — seats move, people leave */
   members: MemberRow[];
   seatLedger: SeatLedger;
@@ -173,7 +215,7 @@ interface SettingsStore {
   buySeats: (n: number) => void;
   subscription: Subscription;
   /** what the org has been billed — written by a purchase, read by Billing */
-  invoices: Invoice[];
+  invoices: InvoiceRecord[];
   /**
    * THE ONE BALANCE. Runs are priced in credits and credits are bought; there
    * is no second monthly allowance to reconcile against.
@@ -192,9 +234,24 @@ interface SettingsStore {
    * `SavedCard`. It is a parameter rather than state so there is no render in
    * which a full number is sitting in this store.
    */
-  addCard: (input: { number: string; expires: string; holder: string }) => void;
-  /** correct what a card says — the holder and the expiry, nothing else */
-  updateCard: (id: string, patch: { expires?: string; holder?: string }) => void;
+  addCard: (input: {
+    number: string;
+    expires: string;
+    holder: string;
+    billing: BillingAddress;
+    /** make it the card every charge goes to, ahead of whatever holds it now */
+    primary?: boolean;
+  }) => void;
+  /** correct what a card says — everything about it except the number */
+  updateCard: (
+    id: string,
+    patch: {
+      expires?: string;
+      holder?: string;
+      billing?: BillingAddress;
+      primary?: boolean;
+    }
+  ) => void;
   removeCard: (id: string) => void;
   /** make one the card charges go to */
   setPrimaryCard: (id: string) => void;
@@ -209,14 +266,31 @@ interface SettingsStore {
   }) => void;
   setAccount: (patch: Partial<SettingsAccount>) => void;
   setOrg: (patch: Partial<SettingsOrg>) => void;
-  notify: (message: string) => void;
+  notify: (title: string, body?: string) => void;
   dismissToast: () => void;
+}
+
+/**
+ * A confirmation.
+ *
+ * TWO PARTS, because the messages this app raises are two different sentences:
+ * "Default Payment Method Changed" is what happened, and "All future charges
+ * will use ···· 3432" is the consequence you are actually being told about.
+ * Squeezing both into one line either loses the consequence or buries the
+ * headline. `body` stays optional — most confirmations are still one clause.
+ */
+export interface Toast {
+  title: string;
+  body?: string;
 }
 
 const Ctx = createContext<SettingsStore | null>(null);
 
 let cardSeq = 1;
 const nextCardId = () => `card-${(cardSeq += 1)}`;
+
+/** The card every charge goes to: the primary, or the only one there is. */
+const primaryOf = (list: SavedCard[]) => list.find((c) => c.primary) ?? list[0] ?? null;
 
 /** Initials follow the name — an org renamed to "Acme" must not keep showing GG. */
 function initialsOf(name: string) {
@@ -229,11 +303,14 @@ function initialsOf(name: string) {
 export function SettingsProvider({
   children,
   start,
+  startPlan,
   onExit,
 }: {
   children: ReactNode;
   /** the page to open on, when a link arrives pointing at one */
   start?: SettingsPage;
+  /** the plan a link arrived asking to buy — `#settings/plans/pro` */
+  startPlan?: PlanId;
   /** how a page leaves Settings — see `exit` on the store */
   onExit?: (to?: AppDestination) => void;
 }) {
@@ -246,7 +323,7 @@ export function SettingsProvider({
     logo: null,
     planActive: true,
   });
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<Toast | null>(null);
   const [page, setPage] = useState<SettingsPage>(start ?? "profile");
 
   /* A link that arrives while Settings is ALREADY open still has to land. The
@@ -257,13 +334,25 @@ export function SettingsProvider({
   useEffect(() => {
     if (start) setPage(start);
   }, [start]);
+
+  const [planIntent, setPlanIntentState] = useState<PlanId | null>(startPlan ?? null);
+  /* Same reason as `start` above: a second `#settings/plans/<id>` link arriving
+     under an already-mounted shell has to land too. */
+  useEffect(() => {
+    if (startPlan) setPlanIntentState(startPlan);
+  }, [startPlan]);
+  const setPlanIntent = useCallback((plan: PlanId) => setPlanIntentState(plan), []);
+  const clearPlanIntent = useCallback(() => setPlanIntentState(null), []);
   const [subscription, setSubscription] = useState<Subscription>({
     plan: planIdFromLabel(seedOrg.plan),
     cycle: "monthly",
     extraSeats: 0,
     renewsOn: null,
   });
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  /* Seeded from the clock, like the credit ledger below and for the same
+     reason: an empty Invoices tab can't show what a row looks like, and one
+     dated to a fixed month reads as stale the day after it was written. */
+  const [invoices, setInvoices] = useState<InvoiceRecord[]>(() => seedInvoices(Date.now()));
   /* Seeded from the clock once, like the run history is, so the ledger is dated
      relative to whenever the app is opened rather than to a day in the past. */
   const [creditLog, setCreditLog] = useState<CreditEntry[]>(() => seedLedger(Date.now()));
@@ -273,10 +362,29 @@ export function SettingsProvider({
      is why the list below holds no number and the add form throws the one it
      is given away the moment it has read the end off it. */
   const [cards, setCards] = useState<SavedCard[]>([
-    { id: "card-1", brand: "Visa", last4: "4242", expires: "04/28", holder: "GG TOE", primary: true },
+    {
+      id: "card-1",
+      brand: "Visa",
+      last4: "4242",
+      expires: "04/28",
+      holder: "GG TOE",
+      primary: true,
+      billing: {
+        address: "1027 East Coast Parkway",
+        apt: "#01-18 Marine Cove",
+        country: "Singapore",
+        city: "Singapore",
+        postal: "449876",
+      },
+    },
   ]);
-  /** The card every charge goes to: the primary, or the only one there is. */
-  const card = cards.find((c) => c.primary) ?? cards[0] ?? null;
+  const card = primaryOf(cards);
+  /* The confirmations below name the card they are about ("···· 3432"), which
+     the setState updater cannot reach and a `cards` dependency would pay for by
+     rebuilding every card handler on every keystroke elsewhere. A ref reads the
+     list as it stands when the handler runs, which is what the message needs. */
+  const cardsRef = useRef(cards);
+  cardsRef.current = cards;
   const [members, setMembers] = useState<MemberRow[]>(seedMembers);
   const [projectAccess, setProjectAccessState] = useState<Record<string, AccessMember[]>>({});
   const [projectNames, setProjectNames] = useState<Record<string, string>>({});
@@ -284,10 +392,15 @@ export function SettingsProvider({
 
   /** Toasts replace rather than queue: two confirmations stacked up is noise,
    *  and the last thing you did is the one you're checking. */
-  const notify = useCallback((message: string) => {
-    setToast(message);
+  const notify = useCallback((title: string, body?: string) => {
+    setToast({ title, body });
     window.clearTimeout((notify as unknown as { t?: number }).t);
-    (notify as unknown as { t?: number }).t = window.setTimeout(() => setToast(null), 3200);
+    /* A two-line toast takes longer to read than a one-line one, so it stays
+       up longer rather than being dismissed mid-sentence. */
+    (notify as unknown as { t?: number }).t = window.setTimeout(
+      () => setToast(null),
+      body ? 4800 : 3200
+    );
   }, []);
 
   /**
@@ -300,13 +413,14 @@ export function SettingsProvider({
   const brandOf = (digits: string) => {
     if (/^4/.test(digits)) return "Visa";
     if (/^5[1-5]/.test(digits)) return "Mastercard";
+    if (/^35/.test(digits)) return "JCB";
     if (/^3[47]/.test(digits)) return "Amex";
     if (/^6/.test(digits)) return "Discover";
     return "Card";
   };
 
-  const addCard = useCallback(
-    ({ number, expires, holder }: { number: string; expires: string; holder: string }) => {
+  const addCard = useCallback<SettingsStore["addCard"]>(
+    ({ number, expires, holder, billing, primary }) => {
       const digits = number.replace(/\D/g, "");
       if (digits.length < 12) return;
       const added: SavedCard = {
@@ -315,19 +429,40 @@ export function SettingsProvider({
         last4: digits.slice(-4),
         expires,
         holder: holder.trim(),
+        billing,
       };
-      // The first card on file is the primary by definition — a card nothing
-      // charges is not a payment method, it is a note.
-      setCards((list) => (list.length ? [...list, added] : [{ ...added, primary: true }]));
-      notify(`${added.brand} ···· ${added.last4} added.`);
+      setCards((list) => {
+        // The first card on file is the primary by definition — a card nothing
+        // charges is not a payment method, it is a note. After that it is only
+        // primary if the person adding it asked for that.
+        const takesOver = primary || list.length === 0;
+        const next = takesOver ? list.map((c) => ({ ...c, primary: false })) : list;
+        return [...next, { ...added, primary: takesOver }];
+      });
+      notify(
+        "New Payment Method Added",
+        `A new payment method ending in ···· ${added.last4} has been added to your account.`
+      );
     },
     [notify]
   );
 
-  const updateCard = useCallback(
-    (id: string, patch: { expires?: string; holder?: string }) => {
-      setCards((list) => list.map((c) => (c.id === id ? { ...c, ...patch } : c)));
-      notify("Card updated.");
+  const updateCard = useCallback<SettingsStore["updateCard"]>(
+    (id, patch) => {
+      const { primary, ...rest } = patch;
+      setCards((list) =>
+        list.map((c) => {
+          const edited = c.id === id ? { ...c, ...rest } : c;
+          // Promoting one card demotes the rest in the same write, so the list
+          // is never briefly carrying two cards that both claim the charges.
+          return primary === undefined ? edited : { ...edited, primary: c.id === id ? primary : false };
+        })
+      );
+      const last4 = cardsRef.current.find((c) => c.id === id)?.last4 ?? "";
+      notify(
+        "Payment Details Updated Successfully",
+        `Your payment method ending in ···· ${last4} has been successfully updated. Future payments will use the updated details.`
+      );
     },
     [notify]
   );
@@ -342,16 +477,24 @@ export function SettingsProvider({
           ? next.map((c, i) => (i === 0 ? { ...c, primary: true } : c))
           : next;
       });
-      notify("Card removed.");
+      notify(
+        "Payment Method Removed",
+        `···· ${cardsRef.current.find((c) => c.id === id)?.last4 ?? ""} is no longer available for charges.`
+      );
     },
     [notify]
   );
 
-  const setPrimaryCard = useCallback(
-    (id: string) => {
+  const setPrimaryCard = useCallback<SettingsStore["setPrimaryCard"]>(
+    (id) => {
       setCards((list) => list.map((c) => ({ ...c, primary: c.id === id })));
+      const last4 = cardsRef.current.find((c) => c.id === id)?.last4 ?? "";
+      notify(
+        "Default Payment Method Changed",
+        `Your default payment method is now ···· ${last4}. All future charges will use this method.`
+      );
     },
-    []
+    [notify]
   );
 
   /**
@@ -383,17 +526,13 @@ export function SettingsProvider({
         ...log,
       ]);
       setInvoices((prev) => [
-        {
-          id,
-          due: new Date(at).toLocaleDateString(undefined, {
-            day: "numeric",
-            month: "short",
-            year: "numeric",
-          }),
-          type: `Credits — ${next.label}`,
-          status: "Paid",
-          total: next.usd.toLocaleString(undefined, { style: "currency", currency: "USD" }),
-        },
+        creditsInvoice({
+          at,
+          credits: next.credits,
+          usd: next.usd,
+          label: next.label,
+          method: cardLabel(card),
+        }),
         ...prev,
       ]);
       notify(`${next.credits.toLocaleString()} credits added — ${cardLabel(card)} charged.`);
@@ -443,14 +582,22 @@ export function SettingsProvider({
 
       // A free downgrade isn't a charge, so it doesn't leave an invoice.
       if (total > 0) {
+        /* The invoice prices ITSELF off the plan and the seats, rather than
+           being handed the checkout's total: the drawer shows the breakdown, and
+           a body built from one set of rates under a total taken from another is
+           a receipt that doesn't add up. */
         setInvoices((list) => [
-          {
-            id: `inv-${Date.now()}`,
-            due: date(today),
-            type: `${planLabel(plan)} · ${cycle === "annual" ? "Annual" : "Monthly"}`,
-            status: "Paid",
-            total: total.toLocaleString("en-US", { style: "currency", currency: "USD" }),
-          },
+          renewalInvoice({
+            at: today.getTime(),
+            plan,
+            cycle,
+            extraSeats,
+            status: "paid",
+            /* The card as it stands when the purchase lands — read off the ref
+               rather than closed over, so this handler isn't rebuilt on every
+               keystroke in the card form. */
+            method: primaryOf(cardsRef.current) ? cardLabel(primaryOf(cardsRef.current)!) : null,
+          }),
           ...list,
         ]);
       }
@@ -571,6 +718,9 @@ export function SettingsProvider({
       page,
       go,
       exit: onExit ?? (() => undefined),
+      planIntent,
+      setPlanIntent,
+      clearPlanIntent,
       toast,
       members,
       seatLedger,
@@ -610,6 +760,9 @@ export function SettingsProvider({
       page,
       go,
       onExit,
+      planIntent,
+      setPlanIntent,
+      clearPlanIntent,
       toast,
       members,
       seatLedger,

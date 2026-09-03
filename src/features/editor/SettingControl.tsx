@@ -4,13 +4,18 @@ import { GlassPanel } from "@/components/glass";
 import { Icon } from "@/components/icons";
 import { AxisNumber, AxisSlider, FactorCard } from "./controls-ui";
 import { NumberInput } from "./ui";
-import { OBJECT_COLORS, type SceneObject } from "./scene-types";
+import { materialOf, OBJECT_COLORS, type MaterialSlot, type SceneObject } from "./scene-types";
 import {
   DISTANCE_SHOTS_RANGE,
   SHOTS_RANGE,
+  ZOOM_STEP,
+  distanceAtZoom,
+  formatZoom,
   maxStops,
+  maxZoom,
   orbitSweep,
   stopGap,
+  zoomOf,
   type CameraRig,
 } from "./camera-rig";
 import { CaptureExplainer, type CaptureTopic } from "./CaptureExplainer";
@@ -41,8 +46,10 @@ const LABEL: Record<SettingKey, string> = {
   roughness: "Roughness Factor",
   specular: "Specular Control",
   normal: "Normal Intensity",
+  brightness: "Brightness",
+  skyInfluence: "Sky Influence",
   cameraMode: "Camera Mode",
-  distance: "Distance from Master",
+  distance: "Zoom Distance",
   height: "Camera Height",
   shotsPerDistance: "Shots per Distance",
   shotsPerRotation: "Shots per Rotation",
@@ -58,8 +65,10 @@ export function SettingControl({
   object,
   rig,
   setting,
+  slot = 0,
   camera,
   onChange,
+  onMaterial,
   onRigChange,
   onOrbit,
   onDistance,
@@ -71,6 +80,8 @@ export function SettingControl({
   /** the capture rig, when the selection is one of its cameras */
   rig?: CameraRig | null;
   setting: SettingKey;
+  /** which material slot the five factors write to */
+  slot?: number;
   /**
    * The camera's relationship to the master object, when there is one: the
    * master's turntable angle, the rig's near/far reach, and how close TerraGen
@@ -101,6 +112,8 @@ export function SettingControl({
     sweep: number;
   } | null;
   onChange: (patch: Partial<SceneObject>) => void;
+  /** the five factors go here instead: a material edit has to name its slot */
+  onMaterial: (patch: Partial<MaterialSlot>) => void;
   onRigChange?: (patch: Partial<CameraRig>) => void;
   /** swing the rig to this bearing around the master */
   onOrbit?: (deg: number) => void;
@@ -134,7 +147,14 @@ export function SettingControl({
     e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
-  const isCustom = !OBJECT_COLORS.includes(object.color);
+  const material = materialOf(object, slot);
+  const isSkySource = object.source === "environment" || object.source === "skybox";
+  // Only when there is more than one surface to confuse it with.
+  const showsSlot =
+    object.materials.length > 1 &&
+    (["color", "metallic", "roughness", "specular", "normal"] as SettingKey[]).includes(setting);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const isCustom = !(OBJECT_COLORS as readonly string[]).includes(material.color);
 
   /**
    * The explainer is asked for, not served.
@@ -178,8 +198,21 @@ export function SettingControl({
           >
             <Icon name="drag" size={13} className="shrink-0 text-content-subtle" />
             <span className="type-label truncate text-content">
-              {setting === "rotation" && camera ? "Orbit Rotation" : LABEL[setting]}
+              {setting === "rotation" && camera
+                ? "Orbit Rotation"
+                : setting === "brightness" && isSkySource
+                  ? "Sky Brightness"
+                  : LABEL[setting]}
             </span>
+            {/* WHICH SURFACE THIS IS. The panel floats over the viewport, far
+                from the slot list that set the target, and every slot's control
+                looks identical — without the element name you can drag
+                Roughness for a while before noticing it is the wrong one. */}
+            {showsSlot && (
+              <span className="type-caption shrink-0 rounded-full border border-glass/14 px-1.5 py-0.5 text-content-subtle">
+                Element {slot}
+              </span>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {setting === "scale" && (
@@ -343,11 +376,11 @@ export function SettingControl({
                   type="button"
                   aria-label={c}
                   data-ui={`color-${c}`}
-                  onClick={() => onChange({ color: c })}
+                  onClick={() => onMaterial({ color: c })}
                   style={{ background: c }}
                   className={cn(
                     "h-8 w-8 rounded-full ring-2 ring-offset-2 ring-offset-transparent transition-transform hover:scale-105",
-                    object.color === c ? "ring-brand" : "ring-transparent"
+                    material.color === c ? "ring-brand" : "ring-transparent"
                   )}
                 />
               ))}
@@ -361,7 +394,7 @@ export function SettingControl({
               className="flex cursor-pointer items-center gap-2.5 border-t border-glass/10 pt-3"
             >
               <span
-                style={{ background: object.color }}
+                style={{ background: material.color }}
                 className={cn(
                   "relative grid h-8 w-8 shrink-0 place-items-center rounded-full ring-2 ring-offset-2 ring-offset-transparent transition-transform hover:scale-105",
                   isCustom ? "ring-brand" : "ring-glass/25"
@@ -371,30 +404,55 @@ export function SettingControl({
                 <input
                   type="color"
                   aria-label="Custom colour"
-                  value={object.color}
-                  onChange={(e) => onChange({ color: e.target.value })}
+                  value={material.color}
+                  onChange={(e) => onMaterial({ color: e.target.value })}
                   className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                 />
               </span>
               <span className="min-w-0">
                 <span className="type-label block text-content">Custom</span>
-                <span className="type-eyebrow block tabular-nums text-content-subtle">{object.color}</span>
+                <span className="type-eyebrow block tabular-nums text-content-subtle">{material.color}</span>
               </span>
             </label>
           </div>
         )}
 
         {setting === "metallic" && (
-          <FactorCard label="Metallic" value={object.metalness} onChange={(v) => onChange({ metalness: v })} />
+          <FactorCard label="Metallic" value={material.metalness} onChange={(v) => onMaterial({ metalness: v })} />
         )}
         {setting === "roughness" && (
-          <FactorCard label="Roughness" value={object.roughness} onChange={(v) => onChange({ roughness: v })} />
+          <FactorCard label="Roughness" value={material.roughness} onChange={(v) => onMaterial({ roughness: v })} />
         )}
         {setting === "specular" && (
-          <FactorCard label="Specular" value={object.specular} onChange={(v) => onChange({ specular: v })} />
+          <FactorCard label="Specular" value={material.specular} onChange={(v) => onMaterial({ specular: v })} />
         )}
         {setting === "normal" && (
-          <FactorCard label="Normal" value={object.normal} onChange={(v) => onChange({ normal: v })} max={8} />
+          <FactorCard label="Normal" value={material.normal} onChange={(v) => onMaterial({ normal: v })} max={8} />
+        )}
+        {/* A splat's whole material. 1 is the capture as recorded, so the track
+            runs to 2 with the honest value at its midpoint — a 0–1 slider would
+            make "as captured" the maximum and leave no way to lift a dim
+            interior. The viewport follows the drag: brightness multiplies the
+            baked colours in real time (see SceneObjectMesh), which is the same
+            thing the scalar does in the GS render component downstream. */}
+        {/* How much of the sky lands on the objects. 0.35 — the value the canvas
+            rendered at while this was a constant — is the default, so opening
+            the control on an existing scene changes nothing until you drag it. */}
+        {setting === "skyInfluence" && (
+          <FactorCard
+            label="Sky Influence"
+            value={object.skyInfluence}
+            onChange={(v) => onChange({ skyInfluence: v })}
+          />
+        )}
+        {setting === "brightness" && (
+          <FactorCard
+            label="Brightness"
+            value={object.brightness}
+            onChange={(v) => onChange({ brightness: v })}
+            max={2}
+            unit="×"
+          />
         )}
 
         {/* ---- Capture settings (camera rigs only) ---- */}
@@ -547,22 +605,27 @@ export function SettingControl({
 }
 
 /**
- * How far each END of the sweep stands off the master — two handles, not one.
+ * HOW FAR THE SWEEP ZOOMS IN, against the framing the rig already has.
  *
  * The pair used to share a single distance, which made the rig a fixed-radius
  * arc: the cameras differed only in height and the capture never moved in or
- * out. Two handles restore the reach as something the sweep TRAVELS, and since
- * `planCapture` interpolates between the two camera poses, both numbers land in
- * the rendered frames rather than decorating the panel.
+ * out. A travelling near end restores the reach as something the sweep COVERS,
+ * and since `planCapture` interpolates between the two camera poses, the number
+ * lands in the rendered frames rather than decorating the panel.
  *
- * `onHandle` is what puts the afterimage in the viewport: while a handle is in
- * hand the scene ghosts BOTH cameras at the opposite end, so the envelope the
- * sweep covers is visible during the edit rather than inferred after it.
+ * IT READS AS ZOOM, NOT METRES. The rig's standing distance is 1x — the shot
+ * you framed — and the sweep travels in to some multiple of it. See `zoomOf` in
+ * camera-rig for why: metres are the right thing to STORE and the wrong thing
+ * to show, because 2.6 m is a close-up of a chair and a wide of a building, and
+ * the person setting this is choosing how much closer to get.
  *
- * Both sliders are bounded by real limits, not arbitrary ones:
- *   · Nearest — all but touching the master. TerraGen clamps here anyway, so
- *     the floor is shown rather than applied silently behind the user.
- *   · Furthest — where the master stops being the subject of the frame.
+ * The metres are still stated in the caption. Zoom is the control; the physical
+ * reach is the fact you check it against, and dropping it entirely would leave
+ * no way to tell whether 4x is inches or a city block.
+ *
+ * The near end is bounded by a real limit, not an arbitrary one: TerraGen
+ * clamps at all-but-touching the master, so the ceiling here is that clamp
+ * expressed as zoom, shown rather than applied silently behind the user.
  *
  * Exported because TerraGen's Camera Settings section shows the SAME control:
  * the Work Order edits the same rig from a different panel, and a second
@@ -581,37 +644,40 @@ export function DistanceControl({
   farDistance: number;
   nearLimit: number;
   masterName: string;
+  /** still METRES — this control converts, the rig stores geometry */
   onChange: (metres: number) => void;
   onHandle?: (h: "min" | "max" | null) => void;
 }) {
-  const ceiling = Math.max(nearLimit + 0.1, farDistance);
-  const value = Math.min(ceiling, Math.max(nearLimit, nearDistance));
-  const pct = ((value - nearLimit) / Math.max(0.1, ceiling - nearLimit)) * 100;
+  const ceiling = maxZoom(farDistance, nearLimit);
+  const zoom = Math.min(ceiling, Math.max(1, zoomOf(farDistance, nearDistance)));
+  /* The bar underneath fills from 1x to here, so it grows as you zoom in —
+     the same direction the handle travels. */
+  const pct = ((zoom - 1) / (ceiling - 1)) * 100;
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        {/* The far reach, stated not editable. It's where the pair is parked
-            and it's set by dragging the cameras — but the near end is only
-            meaningful against it, so it reads on the same line rather than in
-            a sentence underneath. */}
+        {/* The far end, stated not editable. It is always 1x by definition —
+            the rig's own framing is the thing everything else multiplies — so
+            it reads as the anchor of the scale rather than a number to set.
+            Where the rig actually STANDS is changed by dragging a camera. */}
         <div
           data-ui="camera-distance-far"
-          title="Furthest — where the rig stands. Drag a camera to change it."
+          title={`Where the rig stands — ${farDistance.toFixed(1)} m from ${masterName}. Drag a camera to change it.`}
           className="field-well type-numeric w-16 shrink-0 rounded-md border px-1.5 py-0.5 text-center text-content-subtle"
         >
-          {farDistance.toFixed(1)} m
+          {formatZoom(1)}
         </div>
 
         <input
           type="range"
-          aria-label="Nearest distance from master"
+          aria-label="Zoom distance"
           data-ui="camera-distance-near"
-          min={nearLimit}
+          min={1}
           max={ceiling}
-          step={0.1}
-          value={value}
-          onChange={(e) => onChange(parseFloat(e.target.value))}
+          step={ZOOM_STEP}
+          value={zoom}
+          onChange={(e) => onChange(distanceAtZoom(farDistance, parseFloat(e.target.value)))}
           onPointerDown={() => onHandle?.("min")}
           onPointerUp={() => onHandle?.(null)}
           onBlur={() => onHandle?.(null)}
@@ -619,23 +685,23 @@ export function DistanceControl({
         />
 
         <div className="field-well type-numeric w-16 shrink-0 rounded-md border px-1.5 py-0.5 text-center text-content">
-          {value.toFixed(1)} m
+          {formatZoom(zoom)}
         </div>
       </div>
 
       {/* The reach the sweep travels, drawn once. */}
       <div className="relative h-1.5 overflow-hidden rounded-full border border-glass/10 bg-glass/5">
         <div
-          className="absolute inset-y-0 bg-brand/50"
-          style={{ left: `${pct}%`, right: 0 }}
+          className="absolute inset-y-0 left-0 bg-brand/50"
+          style={{ width: `${pct}%` }}
           aria-hidden
         />
       </div>
 
       <p className="type-caption text-content-subtle">
-        The rig stands at {farDistance.toFixed(1)} m from {masterName} and sweeps in to here. While
-        this control is open the pair previews at the near end, with yellow markers where they
-        return to.
+        The rig stands {farDistance.toFixed(1)} m from {masterName} — that framing is 1x. The
+        capture zooms in to {formatZoom(zoom)} ({nearDistance.toFixed(1)} m). While this control is
+        open the pair previews at the near end, with yellow markers where they return to.
       </p>
     </div>
   );

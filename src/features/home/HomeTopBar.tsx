@@ -4,7 +4,8 @@ import { Icon } from "@/components/icons";
 import { Avatar, IconButton } from "@/components/ui";
 import { CreditsPanel } from "@/features/editor/CreditsMenu";
 import { useDismissable } from "@/features/editor/use-dismissable";
-import { credits, user } from "./data";
+import { useSettings } from "@/features/settings/settings-store";
+import { user } from "./data";
 import { useWorkspace } from "./workspace";
 
 /**
@@ -93,6 +94,7 @@ function CreditsChip() {
      whichever organization you switched into, so the panel has to name that
      one — otherwise switching orgs leaves a stale identity on the money. */
   const { org } = useWorkspace();
+  const { creditBalance } = useSettings();
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
   useDismissable(open, () => setOpen(false), wrap);
@@ -101,7 +103,7 @@ function CreditsChip() {
     <div ref={wrap} className="relative">
       <button
         type="button"
-        aria-label={`Credits: ${credits.balance.toLocaleString()}`}
+        aria-label={`Credits: ${creditBalance.toLocaleString()}`}
         aria-expanded={open}
         data-ui="web-credits"
         onClick={() => setOpen((o) => !o)}
@@ -111,13 +113,12 @@ function CreditsChip() {
         )}
       >
         <Icon name="credits" size={16} className="text-brand" />
-        <span className="type-body-strong tabular-nums">{credits.balance}</span>
+        <span className="type-body-strong tabular-nums">{creditBalance.toLocaleString()}</span>
       </button>
 
       {open && (
         <CreditsPanel
           workspace={org.name}
-          balance={credits.balance}
           onClose={() => setOpen(false)}
           /* Hung from the RIGHT edge: this chip sits in the right-hand cluster,
              and a panel opening leftward from it would run off the window. */

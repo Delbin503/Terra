@@ -3,9 +3,20 @@ import type { IconName } from "@/components/icons";
 /**
  * The asset kinds Terra works with.
  *
- * THE THREE CONTENT KINDS ARE `mesh`, `skybox` AND `environment` — a 3D Asset,
- * a Skybox and an HDRI Map in the language the library uses. They are what a
- * scene is built out of and the only things the All Assets filter offers.
+ * THE FOUR CONTENT KINDS ARE `mesh`, `skybox`, `environment` AND `splat` — a 3D
+ * Asset, a Skybox, an HDRI Map and a Gaussian Splat in the language the library
+ * uses. They are what a scene is built out of and the only things the All Assets
+ * filter offers.
+ *
+ * `splat` joined them last and belongs with the sky rather than with the mesh:
+ * a Gaussian splat is a captured PLACE — a radiance field of a real location —
+ * so like an HDRI and a skybox it is the world the scene sits in, not a thing
+ * standing in it. Every "is this the world?" test in the editor
+ * (`isWorldAsset`) treats the three alike.
+ *
+ * The catalogue SHIPS no splats any more — see `namePools.splat`. The kind stays
+ * because an uploaded capture is still a splat and still renders as one; only
+ * the seeded stand-ins are gone.
  *
  * `image` is not one of them any more. It survives because the pipeline emits
  * images that aren't library content — capture frames, MAT previews, reference
@@ -15,16 +26,16 @@ import type { IconName } from "@/components/icons";
  * `video` is retained because the scene layer still types objects by source
  * (see scene-types.ts); the library never browses it.
  */
-export type AssetType = "image" | "skybox" | "environment" | "video" | "mesh" | "camera";
+export type AssetType = "image" | "skybox" | "environment" | "splat" | "video" | "mesh" | "camera";
 
 /**
  * What the library is a catalogue OF.
  *
  * Order matters — it's the order the All Assets type filter lists them in, and
  * it runs biggest-thing-first: the object, then the light around it, then what
- * sits behind it.
+ * sits behind it, then the captured place that is all three at once.
  */
-export const CONTENT_TYPES: AssetType[] = ["mesh", "environment", "skybox"];
+export const CONTENT_TYPES: AssetType[] = ["mesh", "environment", "skybox", "splat"];
 
 export interface Asset {
   id: string;
@@ -41,6 +52,20 @@ export interface Asset {
   statusLabel?: string;
   /** path to a real GLB — when set, placing this asset loads the model instead of a placeholder shape */
   modelUrl?: string;
+  /**
+   * Path to a real equirectangular sky — when set, placing this asset REPLACES
+   * the sky the viewport renders instead of only tinting the shipped default.
+   *
+   * `.hdr`/`.exr` for an Environment, an ordinary image for a Skybox: that is
+   * the difference between the two categories made concrete. An HDRI carries
+   * light values above white, which is what lets it illuminate the objects; a
+   * skybox is a picture, and a picture can only ever be a backdrop.
+   *
+   * Absent on most of the catalogue, exactly as `modelUrl` is: those entries
+   * are named placeholders, and a placeholder that silently swapped the sky for
+   * some other file's would be worse than one that leaves it alone.
+   */
+  skyUrl?: string;
   /**
    * Produced by a Generate 3D run rather than shipped in the catalogue or
    * brought in by the user.
@@ -105,7 +130,10 @@ export const categories: Category[] = [
   { id: "all", label: "All Assets", icon: "grid" },
   // The subject. Also where a finished Generate 3D run lands.
   { id: "meshes", label: "3D Models", icon: "input-3d", type: "mesh" },
-  // The light: HDRI maps, which light and reflect onto the whole scene.
+  // The world around the subject: HDRI maps and Gaussian splats, both of which
+  // light and reflect onto the whole scene. `type` names the one this tab is
+  // built on; `filterByCategory` is what actually decides the set, because this
+  // tab is the one that holds two.
   { id: "environments", label: "Environments", icon: "environment", type: "environment" },
   // The backdrop: skyboxes, which sit behind the scene without lighting it.
   { id: "skyboxes", label: "Skyboxes", icon: "panorama", type: "skybox" },
@@ -159,6 +187,9 @@ export const typeIcon: Record<AssetType, IconName> = {
   // badge is the only thing telling them apart — both render as scenery.
   skybox: "panorama",
   environment: "environment",
+  // A splat is neither: it is a cloud of points, and the dot field says so at
+  // 14px where "scenery" would collide with both of the above.
+  splat: "splat",
   video: "video",
   mesh: "input-3d",
   camera: "camera",
@@ -175,6 +206,9 @@ export const typeBadge: Record<AssetType, string> = {
   image: "Image",
   skybox: "Skybox",
   environment: "Environment",
+  // "Gaussian Splat" does not fit the corner, and "Gaussian" alone names the
+  // maths rather than the thing. Splat is what everyone calls them anyway.
+  splat: "Splat",
   video: "Video",
   mesh: "3D Model",
   camera: "Rig",
@@ -221,10 +255,31 @@ const namePools: Record<AssetType, string[]> = {
   // previews, references the user brings in — and every one of them is filed
   // under Uploads rather than shipped as catalogue content.
   image: [],
-  skybox: ["Desert Dunes", "Coastal Cliff", "Neon Alley", "Foggy Pines", "Golden Field", "Harbor Dawn", "Canyon Pass"],
-  environment: ["Studio HDRI", "Sunset Field", "Overcast Sky", "Night City", "Forest Clearing", "Snow Plain", "Blue Hour"],
+  // "Anime Sky" leads because it names what every skybox here actually renders
+  // — see `CATALOGUE_SKY`. The rest are placeholder names over the same image.
+  skybox: ["Anime Sky", "Desert Dunes", "Coastal Cliff", "Neon Alley", "Foggy Pines", "Golden Field", "Harbor Dawn", "Canyon Pass"],
+  // "Cloud Bank" likewise, over the one shipped `.hdr`.
+  environment: ["Cloud Bank", "Studio HDRI", "Sunset Field", "Overcast Sky", "Night City", "Forest Clearing", "Snow Plain", "Blue Hour"],
+  /**
+   * NOTHING SEEDED. The catalogue used to ship six named captures — Warehouse
+   * Bay, Loading Dock, Rail Yard — filed under Environments beside the HDRIs.
+   * They were placeholder gradients standing in for radiance fields nobody has
+   * captured, and a card that promises a real place and delivers a coloured
+   * square costs trust rather than building it.
+   *
+   * The KIND survives, deliberately: `typeForFile` still files a dropped
+   * `.ply`/`.splat`/`.spz` here, Uploads still lists it, and the viewport still
+   * renders it as a point cloud (see SceneObjectMesh). What is gone is Terra
+   * pretending to ship any.
+   */
+  splat: [],
   video: [],
   mesh: [
+    // Carries three material slots (Body / Hydraulics / Cab Glass) — the one
+    // catalogue model that exercises the slot switcher. `robotic-hand` is a
+    // single-material export, so before this there was nothing shipped that
+    // could show Element 1 at all.
+    "Excavator Arm",
     "Sedan",
     "Robotic Hand",
     "Street Lamp",
@@ -243,6 +298,35 @@ const namePools: Record<AssetType, string[]> = {
 /** Real model overrides — placing these assets loads an actual GLB instead of a placeholder shape. */
 const modelUrls: Record<string, string> = {
   "Robotic Hand": "/models/robotic-hand.glb",
+  "Excavator Arm": "/models/excavator-arm.glb",
+};
+
+/**
+ * THE REAL FILE BEHIND EACH KIND OF SKY.
+ *
+ * One HDR and one image, and every catalogue entry of that kind gets it. That
+ * is a stand-in, and it is the honest kind: the names and thumbnails here were
+ * already placeholders — coloured gradients called "Desert Dunes" — and the
+ * thing being demonstrated is that CHOOSING a sky replaces the sky. Wiring one
+ * card and leaving seven inert taught the opposite: you picked Canyon Pass,
+ * confirmed the replacement, and the horizon did not move, which reads as a
+ * broken feature rather than as an unfinished catalogue.
+ *
+ * The pair is also what makes the two categories legible. An Environment is a
+ * true HDR whose light lands on the objects; a Skybox is an ordinary image that
+ * only draws behind them. Placing one after the other on the same scene is the
+ * fastest way to see the difference.
+ *
+ * The `.hdr` lives under the gitignored `public/hdri/` with the shipped default
+ * — see the README — so a fresh clone falls back to the default sky rather than
+ * failing to load. The skybox JPEG is small enough to commit.
+ *
+ * An UPLOADED sky overrides this per asset — see `handleFiles` in AssetLibrary,
+ * which keeps the dropped file's own URL.
+ */
+const CATALOGUE_SKY: Partial<Record<AssetType, string>> = {
+  environment: "/hdri/hdri-sky-751.hdr",
+  skybox: "/skybox/anime-sky.jpg",
 };
 
 // Deterministic seed counter — no Math.random, stable across renders.
@@ -254,12 +338,15 @@ function build(type: AssetType): Asset[] {
     type,
     seed: (seedCounter += 1) * 13,
     modelUrl: modelUrls[name],
+    skyUrl: CATALOGUE_SKY[type],
   }));
 }
 
 export const initialAssets: Asset[] = [
   ...build("skybox"),
   ...build("environment"),
+  // No `build("splat")` — see `namePools.splat`. A user's own capture still
+  // arrives through Uploads; the catalogue just stops shipping stand-ins.
   ...build("mesh"),
   ...build("camera"),
 ];
@@ -284,6 +371,13 @@ export function filterByCategory(assets: Asset[], cat: CategoryId): Asset[] {
   // one type-filter click away — listing them here too would bury the four
   // things you generated under eleven you didn't.
   if (cat === "meshes") return assets.filter((a) => a.type === "mesh" && a.generated);
+  // ENVIRONMENTS HOLDS BOTH KINDS. A Gaussian splat had its own tab for a
+  // while, which put a captured place and a photographed sky on opposite sides
+  // of the rail while they answer the same question — "what world is this scene
+  // in?". They are one category now, told apart by their badge inside it.
+  if (cat === "environments") {
+    return assets.filter((a) => a.type === "environment" || a.type === "splat");
+  }
   const type = categories.find((c) => c.id === cat)?.type;
   return type ? assets.filter((a) => a.type === type) : assets;
 }
@@ -318,6 +412,7 @@ const formatByType: Record<AssetType, string> = {
   image: "PNG",
   skybox: "EXR",
   environment: "HDR",
+  splat: "PLY",
   video: "MP4",
   mesh: "OBJ",
   camera: "RIG",
@@ -327,6 +422,7 @@ const descByType: Record<AssetType, string> = {
   image: "A generated reference image, ready to drop onto a plane or use as a texture in your scene.",
   skybox: "A panoramic backdrop that wraps the scene. It sets what the cameras see behind your objects without lighting them.",
   environment: "An HDRI environment that lights and reflects onto everything in the scene.",
+  splat: "A Gaussian splat — a real place captured as a radiance field. It drops in as the world around your objects, with one brightness control over it.",
   video: "A short looping clip you can project onto surfaces or use as a moving backdrop.",
   mesh: "A 3D model rigged in a neutral pose — ready to customize and place into your scene.",
   camera: "A capture rig. Drops in as a linked start and end camera that orbit the master object and shoot a turntable dataset between them.",

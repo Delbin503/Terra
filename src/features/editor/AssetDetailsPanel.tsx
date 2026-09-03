@@ -102,12 +102,13 @@ export function AssetDetailsPanel({
               <>
                 <Field label="Type" required>
                   <Select value={type} onChange={(e) => setType(e.target.value as AssetType)}>
-                    {/* The three content kinds first — they're what the
+                    {/* The four content kinds first — they're what the
                         catalogue is made of — then Image, which is a working
                         file that only ever lives under Uploads. */}
                     <option value="mesh">3D Asset</option>
                     <option value="skybox">Skybox</option>
                     <option value="environment">HDRI Map</option>
+                    <option value="splat">Gaussian Splat</option>
                     <option value="image">Image</option>
                   </Select>
                 </Field>

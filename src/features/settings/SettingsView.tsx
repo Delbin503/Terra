@@ -6,8 +6,7 @@ import { AppBackdrop } from "@/features/home/AppBackdrop";
 import type { Destination as AppDestination } from "@/features/home/Sidebar";
 import { OrgMark } from "./settings-parts";
 import { SETTINGS_NAV, type SettingsPage } from "./settings-data";
-import { SettingsProvider, useSettings } from "./settings-store";
-import { SettingsToast } from "./settings-toast";
+import { useSettings } from "./settings-store";
 import { ProfilePage } from "./ProfilePage";
 import { MessagePreferencesPage } from "./MessagePreferencesPage";
 import { OrganizationsPage } from "./OrganizationsPage";
@@ -29,19 +28,8 @@ import { PlansPage } from "./PlansPage";
  * frame — its own slim top bar, its own rail — and the way out is the back arrow
  * at the top of that rail, which is the only navigation the two shells share.
  */
-export function SettingsView({
-  onExit,
-  start,
-}: {
-  onExit: (to?: AppDestination) => void;
-  /** which page to open on — omitted, Settings opens where it always has */
-  start?: SettingsPage;
-}) {
-  return (
-    <SettingsProvider start={start} onExit={onExit}>
-      <SettingsShell onExit={onExit} />
-    </SettingsProvider>
-  );
+export function SettingsView({ onExit }: { onExit: (to?: AppDestination) => void }) {
+  return <SettingsShell onExit={onExit} />;
 }
 
 /** The screens whose content is a table rather than a column of prose. */
@@ -79,7 +67,6 @@ function SettingsShell({ onExit }: { onExit: (to?: AppDestination) => void }) {
       <main className="h-screen flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1600px] px-8 pb-20 pt-6">
           <SettingsTopBar onExit={onExit} />
-          <SettingsToast />
 
           {/* Most of Settings is a column of facts you READ, so it's held to a
               comfortable measure. The table screens are the exception: six

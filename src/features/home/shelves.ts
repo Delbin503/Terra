@@ -87,6 +87,24 @@ export const LAYOUTS: { value: Layout; label: string; icon: IconName }[] = [
 ];
 
 /**
+ * HOW THE SHELF IS ORDERED.
+ *
+ * Two orders, because there are only two questions a person asks of this list:
+ * "where is the one called X" and "what was I just working on". Anything else —
+ * by kind, by owner, by size — is a filter dressed as a sort, and the toolbar
+ * already carries the filters.
+ *
+ * `updated` is the default because the list is a workspace, not a catalogue:
+ * the thing you want is nearly always the thing you touched last.
+ */
+export type ProjectSort = "updated" | "alphabetical";
+
+export const SORTS: { value: ProjectSort; label: string; hint: string; icon: IconName }[] = [
+  { value: "updated", label: "Last Updated", hint: "Most recent first", icon: "render-time" },
+  { value: "alphabetical", label: "Alphabetical", hint: "A to Z", icon: "list" },
+];
+
+/**
  * Card-size range, as the minimum width a column may be. The initial value is
  * chosen so a full-width window lands on the four-up grid the design shows —
  * the slider is for going denser or bigger than that, not for finding it.

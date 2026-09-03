@@ -1,9 +1,28 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
-import { Button, Segmented, Select, Switch } from "@/components/ui";
-import { PageTitle, Panel, SectionTitle } from "./settings-parts";
-import { useSettings } from "./settings-store";
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  Segmented,
+} from "@/components/ui";
+import { PageTitle, Panel, ReceiptLine as Line, SectionTitle } from "./settings-parts";
+import {
+  CardBrandMark,
+  CardFields,
+  CheckField,
+  EMPTY_DRAFT,
+  billingFrom,
+  draftComplete,
+  isExpired,
+  maskedPan,
+  savedCardName,
+  type CardDraft,
+} from "./card-parts";
+import { useSettings, type BillingAddress, type SavedCard } from "./settings-store";
 import {
   COMPARE_ROWS,
   EXTRA_SEAT_PRICE,
@@ -33,6 +52,21 @@ import {
 
 type Stage = "picker" | "confirm" | "seats" | "payment" | "review" | "done";
 
+/**
+ * What the checkout will actually charge, whichever way it was answered.
+ *
+ * The payment step has two shapes — pick a card already on file, or type a new
+ * one — and Review has to read back the same six facts either way. Collapsing
+ * both into one value here is what keeps Review from growing a branch for
+ * "saved card" and a branch for "typed card" that then disagree about whether
+ * Apt is shown when it is empty.
+ */
+interface ChargeView extends BillingAddress {
+  brand: string;
+  last4: string;
+  holder: string;
+}
+
 /** The three steps the checkout rail draws once you're past the confirmation. */
 const STEPS: { id: Stage; label: string }[] = [
   { id: "seats", label: "Adjust Seats" },
@@ -40,44 +74,44 @@ const STEPS: { id: Stage; label: string }[] = [
   { id: "review", label: "Review" },
 ];
 
-interface CardDetails {
-  holder: string;
-  number: string;
-  expiry: string;
-  cvv: string;
-  address: string;
-  apt: string;
-  country: string;
-  city: string;
-  postal: string;
-}
-
-const EMPTY_CARD: CardDetails = {
-  holder: "",
-  number: "",
-  expiry: "",
-  cvv: "",
-  address: "",
-  apt: "",
-  country: "",
-  city: "",
-  postal: "",
-};
-
-const COUNTRIES = ["Singapore", "United States", "United Kingdom", "Australia", "Japan"];
-
 export function PlansPage() {
-  const { org, subscription, subscribe, notify, go } = useSettings();
+  const { org, subscription, subscribe, notify, go, cards, card: primaryCard, addCard, planIntent, clearPlanIntent } =
+    useSettings();
   const [stage, setStage] = useState<Stage>("picker");
   const [cycle, setCycle] = useState<BillingCycle>(subscription.cycle);
   /** the plan being bought — null while the picker is still the question */
   const [target, setTarget] = useState<PlanId | null>(null);
   const [extraSeats, setExtraSeats] = useState(subscription.extraSeats);
-  const [card, setCard] = useState<CardDetails>(EMPTY_CARD);
+  const [draft, setDraft] = useState<CardDraft>(EMPTY_DRAFT);
+  /**
+   * The saved card this purchase will go to, or null for the one being typed.
+   *
+   * It starts on the card that already pays for everything else, because that
+   * is the answer nine times out of ten and the tenth is one click away. An org
+   * with nothing on file starts at null, which is the form.
+   */
+  const [payWith, setPayWith] = useState<string | null>(primaryCard?.id ?? null);
   const [agreed, setAgreed] = useState(false);
 
   const current = subscription.plan;
   const spec = planSpec(target ?? current);
+
+  /**
+   * ARRIVING WITH THE PLAN ALREADY CHOSEN.
+   *
+   * The Pricing page and the plan sheet on Payment Details both ask the same
+   * question this page's own picker asks, and answering it twice is not a
+   * confirmation, it is a dead click on a screen you did not ask to see. So a
+   * plan carried in here skips straight to the diff — which is the first thing
+   * that tells you something you did not already know — and the intent is
+   * cleared as it is consumed so Back lands on the picker rather than bouncing.
+   */
+  useEffect(() => {
+    if (!planIntent) return;
+    setTarget(planIntent);
+    setStage("confirm");
+    clearPlanIntent();
+  }, [planIntent, clearPlanIntent]);
 
   const bill = useMemo(() => {
     const base = price(target ?? current, cycle);
@@ -87,11 +121,27 @@ export function PlansPage() {
     return { base, seats, subtotal, tax, total: Math.round((subtotal + tax) * 100) / 100 };
   }, [target, current, cycle, extraSeats]);
 
+  /**
+   * The date this purchase would renew on.
+   *
+   * Computed the same way `subscribe` computes the one it stores, because the
+   * sentence above Confirm Checkout is a promise about that stored date — a
+   * review screen that names a different day from the receipt is the one bug on
+   * this page nobody would report and everybody would notice.
+   */
+  const renewsOn = useMemo(() => {
+    const d = new Date();
+    if (cycle === "annual") d.setFullYear(d.getFullYear() + 1);
+    else d.setMonth(d.getMonth() + 1);
+    return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  }, [cycle]);
+
   /** Start over rather than resume: a cancelled checkout shouldn't leave a
    *  half-filled card behind for the next plan you look at. */
   function cancel() {
     setTarget(null);
-    setCard(EMPTY_CARD);
+    setDraft(EMPTY_DRAFT);
+    setPayWith(primaryCard?.id ?? null);
     setAgreed(false);
     setExtraSeats(subscription.extraSeats);
     setStage("picker");
@@ -116,8 +166,24 @@ export function PlansPage() {
 
   function checkout() {
     if (!target) return;
+    /* A card typed into the checkout is a card the org now has on file. It used
+       to be read for the charge and then forgotten, so the next purchase asked
+       for the same digits again and Payment Details still said "No card on
+       file" the moment after you had paid with one. */
+    if (!payWith) {
+      addCard({
+        number: draft.number,
+        expires: draft.expiry,
+        holder: draft.holder,
+        billing: billingFrom(draft),
+        primary: draft.makeDefault || cards.length === 0,
+      });
+    }
     subscribe({ plan: target, cycle, extraSeats, total: bill.total });
-    notify(`${planLabel(target)} is active.`);
+    notify(
+      "Plan Upgraded Successfully",
+      `Your subscription has been successfully upgraded. Enjoy the new features and increased quota included in your ${planLabel(target)}.`
+    );
     setStage("done");
   }
 
@@ -248,14 +314,19 @@ export function PlansPage() {
 
   // The three checkout steps share one frame: the stepper, the step, the summary.
   const step = STEPS.findIndex((s) => s.id === stage);
-  const cardComplete =
-    card.holder.trim() !== "" &&
-    card.number.replace(/\s/g, "").length >= 12 &&
-    card.expiry.trim() !== "" &&
-    card.cvv.trim().length >= 3 &&
-    card.address.trim() !== "" &&
-    card.country !== "" &&
-    card.postal.trim() !== "";
+  const saved = cards.find((c) => c.id === payWith) ?? null;
+  /* Choosing a card on file is already complete; typing one is not until every
+     required field is answered. Same gate either way, one boolean. */
+  const cardReady = payWith ? !!saved : draftComplete(draft);
+
+  const charge: ChargeView = saved
+    ? { brand: saved.brand, last4: saved.last4, holder: saved.holder, ...saved.billing }
+    : {
+        brand: "Card",
+        last4: draft.number.replace(/\D/g, "").slice(-4),
+        holder: draft.holder,
+        ...billingFrom(draft),
+      };
 
   return (
     <>
@@ -266,7 +337,7 @@ export function PlansPage() {
         <Stepper active={step} />
       </div>
 
-      <div className="mt-8 grid gap-5 lg:grid-cols-[1fr_20rem]">
+      <div className="mt-8 grid gap-5 lg:grid-cols-[1fr_22rem]">
         <div>
           {stage === "seats" && (
             <SeatsStep
@@ -275,9 +346,21 @@ export function PlansPage() {
               onExtraSeats={setExtraSeats}
             />
           )}
-          {stage === "payment" && <PaymentStep card={card} onCard={setCard} />}
+          {stage === "payment" && (
+            <PaymentStep
+              cards={cards}
+              payWith={payWith}
+              onPayWith={setPayWith}
+              draft={draft}
+              onDraft={(patch) => setDraft((d) => ({ ...d, ...patch }))}
+            />
+          )}
           {stage === "review" && (
-            <ReviewStep card={card} org={org.legalName} agreed={agreed} onAgreed={setAgreed} />
+            <ReviewStep
+              charge={charge}
+              org={org.legalName}
+              onEdit={() => setStage("payment")}
+            />
           )}
         </div>
 
@@ -287,7 +370,10 @@ export function PlansPage() {
           onCycle={setCycle}
           extraSeats={extraSeats}
           bill={bill}
-          showTax={stage === "review"}
+          review={stage === "review"}
+          renewsOn={renewsOn}
+          agreed={agreed}
+          onAgreed={setAgreed}
           action={
             stage === "review" ? (
               <Button variant="brand" className="w-full" disabled={!agreed} onClick={checkout}>
@@ -297,7 +383,7 @@ export function PlansPage() {
               <Button
                 variant="brand"
                 className="w-full"
-                disabled={stage === "payment" && !cardComplete}
+                disabled={stage === "payment" && !cardReady}
                 onClick={() => setStage(stage === "seats" ? "payment" : "review")}
               >
                 {stage === "seats" ? "Next: Payment Information" : "Next: Review"}
@@ -406,13 +492,18 @@ function PlanCard({
       </div>
 
       <div className="mt-auto p-5 pt-0">
+        {/* THE THREE VERBS ARE THE THREE DIRECTIONS. "Switch Plan" was doing
+            duty for a downgrade, which is the one move on this row that takes
+            something away — so it says so, and wears the outline the product
+            uses for a destructive-but-reversible action rather than the neutral
+            one it shares with "cancel". */}
         <Button
           variant={here ? "secondary" : up ? "brand" : "outline"}
-          className="w-full"
+          className={cn("w-full", !here && !up && "border-danger/40 text-danger hover:border-danger hover:text-danger")}
           disabled={here}
           onClick={onChoose}
         >
-          {here ? "Current Plan" : up ? "Upgrade Plan" : "Switch Plan"}
+          {here ? "Current Plan" : up ? "Upgrade Plan" : "Downgrade Plan"}
         </Button>
       </div>
     </Panel>
@@ -560,144 +651,184 @@ function SeatsStep({
   );
 }
 
+/**
+ * PAY WITH WHAT, exactly.
+ *
+ * The step used to be a blank form every time, which meant an org that had
+ * already given Terra a card was asked for it again on every upgrade — and then
+ * asked to look at a screen called Payment Details afterwards that listed the
+ * card it had just retyped. So the cards on file lead: the one that pays for
+ * everything else is preselected, the others are one click away, and the form
+ * is the LAST option rather than the only one.
+ *
+ * An org with nothing on file skips the chooser entirely. A list of no cards
+ * above a "use a new card" row is a question with one answer.
+ */
 function PaymentStep({
-  card,
-  onCard,
+  cards,
+  payWith,
+  onPayWith,
+  draft,
+  onDraft,
 }: {
-  card: CardDetails;
-  onCard: (c: CardDetails) => void;
+  cards: SavedCard[];
+  payWith: string | null;
+  onPayWith: (id: string | null) => void;
+  draft: CardDraft;
+  onDraft: (patch: Partial<CardDraft>) => void;
 }) {
-  const set = (patch: Partial<CardDetails>) => onCard({ ...card, ...patch });
+  const adding = payWith === null;
+
   return (
     <>
-      <SectionTitle>Enter your payment details</SectionTitle>
+      <SectionTitle>
+        {cards.length ? "Choose how to pay" : "Enter your payment details"}
+      </SectionTitle>
 
-      <Panel className="mt-5">
-        <p className="type-body-strong text-content">Card Information</p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <Field
-            label="Card Holder Name"
-            required
-            value={card.holder}
-            placeholder="e.g. John Doe"
-            onChange={(v) => set({ holder: v })}
-          />
-          <Field
-            label="Card Number"
-            required
-            value={card.number}
-            placeholder="1234 1234 1234 1234"
-            inputMode="numeric"
-            onChange={(v) => set({ number: v })}
-          />
-          <Field
-            label="Expiry Date"
-            required
-            value={card.expiry}
-            placeholder="MM / YY"
-            onChange={(v) => set({ expiry: v })}
-          />
-          <Field
-            label="Security Code/CVV"
-            required
-            value={card.cvv}
-            placeholder="123"
-            inputMode="numeric"
-            onChange={(v) => set({ cvv: v })}
-          />
-        </div>
+      {cards.length > 0 && (
+        <div className="mt-5 flex flex-col gap-2.5" role="radiogroup" aria-label="Payment method">
+          {cards.map((c) => (
+            <PayWithRow
+              key={c.id}
+              selected={payWith === c.id}
+              onSelect={() => onPayWith(c.id)}
+              data-ui={`pay-with-${c.id}`}
+            >
+              <CardBrandMark brand={c.brand} className="mt-0.5" />
+              <span className="min-w-0 flex-1">
+                <span className="type-body-strong flex flex-wrap items-center gap-2 text-content">
+                  <span className="truncate">{savedCardName(c)}</span>
+                  {c.primary && (
+                    <span className="type-caption-strong shrink-0 rounded bg-glass/25 px-1.5 py-px text-content">
+                      Default Payment
+                    </span>
+                  )}
+                </span>
+                <span className="type-body-dense mt-0.5 flex flex-wrap items-center gap-2">
+                  <span className="text-content-muted">{maskedPan(c.last4)}</span>
+                  <span aria-hidden className="h-3 w-px bg-line/20" />
+                  <span className={isExpired(c.expires) ? "text-danger" : "text-content-subtle"}>
+                    Expires On {c.expires}
+                  </span>
+                </span>
+              </span>
+            </PayWithRow>
+          ))}
 
-        <p className="type-body-strong mt-6 text-content">Billing Address</p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <Field
-            label="Billing Address"
-            required
-            value={card.address}
-            placeholder="e.g. 123 Main Street"
-            onChange={(v) => set({ address: v })}
-          />
-          <Field
-            label="Apt, Unit, Suite, etc"
-            value={card.apt}
-            placeholder="e.g. Apartment, suite, etc."
-            onChange={(v) => set({ apt: v })}
-          />
-          <label className="block">
-            <span className="type-body-strong block text-content">
-              Country <span className="text-danger">*</span>
+          <PayWithRow selected={adding} onSelect={() => onPayWith(null)} data-ui="pay-with-new">
+            <span className="mt-0.5 grid h-6 w-[34px] shrink-0 place-items-center rounded border border-dashed border-line/25 text-content-muted">
+              <Icon name="create" size={13} />
             </span>
-            <Select
-              aria-label="Country"
-              value={card.country}
-              onChange={(v) => set({ country: v })}
-              options={[
-                { value: "", label: "Select country" },
-                ...COUNTRIES.map((c) => ({ value: c, label: c })),
-              ]}
-              className="mt-1.5 h-10 w-full"
-            />
-          </label>
-          <div className="grid grid-cols-2 gap-3">
-            <Field
-              label="City"
-              value={card.city}
-              placeholder="e.g. San Francisco"
-              onChange={(v) => set({ city: v })}
-            />
-            <Field
-              label="Postal Code"
-              required
-              value={card.postal}
-              placeholder="e.g. 94102"
-              onChange={(v) => set({ postal: v })}
-            />
-          </div>
+            <span className="min-w-0 flex-1">
+              <span className="type-body-strong block text-content">Use a new card</span>
+              <span className="type-body-dense mt-0.5 block text-content-subtle">
+                It is saved to this organization for future charges.
+              </span>
+            </span>
+          </PayWithRow>
         </div>
-      </Panel>
+      )}
+
+      {adding && (
+        <Panel className="mt-5">
+          <CardFields draft={draft} onDraft={onDraft} wide defaultLocked={cards.length === 0} />
+        </Panel>
+      )}
     </>
   );
 }
 
-function ReviewStep({
-  card,
-  org,
-  agreed,
-  onAgreed,
+/** One choice in the chooser. The whole row is the control, at every width. */
+function PayWithRow({
+  selected,
+  onSelect,
+  children,
+  ...rest
 }: {
-  card: CardDetails;
+  selected: boolean;
+  onSelect: () => void;
+  children: ReactNode;
+} & { "data-ui"?: string }) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      {...rest}
+      className={cn(
+        "flex items-start gap-3 rounded-xl border px-4 py-3.5 text-left transition-colors",
+        selected
+          ? "border-brand bg-glass/10"
+          : "border-glass/10 bg-glass/5 hover:border-line/20"
+      )}
+    >
+      {children}
+      <span
+        aria-hidden
+        className={cn(
+          "mt-1 grid h-4 w-4 shrink-0 place-items-center rounded-full border-2 transition-colors",
+          selected ? "border-brand" : "border-line/25"
+        )}
+      >
+        {selected && <span className="h-2 w-2 rounded-full bg-brand" />}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * READ IT BACK BEFORE YOU PAY.
+ *
+ * Every fact here came from the step before it, so the panel's own action is
+ * Edit Details rather than a set of live fields: this screen exists to be
+ * checked, and a form you can check and change at the same time is one you
+ * check less carefully. Edit Details walks back to the step that owns the
+ * fields, which is also where Back goes — one way in, one way out.
+ */
+function ReviewStep({
+  charge,
+  org,
+  onEdit,
+}: {
+  charge: ChargeView;
   org: string;
-  agreed: boolean;
-  onAgreed: (v: boolean) => void;
+  onEdit: () => void;
 }) {
-  const masked = card.number.replace(/\s/g, "").slice(-4).padStart(16, "•");
   return (
     <>
       <SectionTitle>Let's make sure everything looks right</SectionTitle>
 
       <Panel className="mt-5 p-0">
-        <p className="type-body-strong border-b border-glass/10 px-5 py-3.5 text-content">
-          Details
-        </p>
+        <div className="flex items-center gap-4 border-b border-glass/10 px-5 py-3.5">
+          <p className="type-body-strong min-w-0 flex-1 text-content">Details</p>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="type-body-strong shrink-0 text-brand transition-colors hover:text-brand-hover"
+          >
+            Edit Details
+          </button>
+        </div>
         <dl className="flex flex-col gap-4 p-5">
           <Detail label="Organization Name" value={org} />
-          <Detail label="Card Number" value={masked.replace(/(.{4})/g, "$1 ").trim()} />
-          <Detail label="Card Holder Name" value={card.holder} />
-          <Detail label="Billing Address" value={card.address} />
-          <Detail label="Apt, Unit, Suite, etc" value={card.apt || "N/A"} />
-          <Detail label="City" value={card.city || "N/A"} />
-          <Detail label="Country" value={card.country} />
-          <Detail label="Postal Code" value={card.postal} />
+          <Detail
+            label="Card Number"
+            value={
+              <span className="flex items-center gap-2.5">
+                <CardBrandMark brand={charge.brand} />
+                {maskedPan(charge.last4)}
+              </span>
+            }
+          />
+          <Detail label="Card Holder Name" value={charge.holder} />
+          <Detail label="Billing Address" value={charge.address} />
+          <Detail label="Apt, Unit, Suite, etc" value={charge.apt || "N/A"} />
+          <Detail label="City" value={charge.city || "N/A"} />
+          <Detail label="Country" value={charge.country} />
+          <Detail label="Postal Code" value={charge.postal} />
         </dl>
       </Panel>
-
-      <label className="mt-4 flex items-center gap-3">
-        <Switch checked={agreed} onChange={onAgreed} label="Agree to the terms" />
-        <span className="type-body text-content-muted">
-          I agree to both the{" "}
-          <span className="text-brand">Terms of Service</span> and{" "}
-          <span className="text-brand">Privacy Policy</span>
-        </span>
-      </label>
     </>
   );
 }
@@ -711,14 +842,28 @@ function Detail({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-/** The running total, pinned beside every step so the price never leaves. */
+/**
+ * The running total, pinned beside every step so the price never leaves.
+ *
+ * IT IS TWO PANELS WEARING ONE FRAME. Through seats and payment it is "Your Pro
+ * Plan" — the thing you are buying, with the term still switchable, because the
+ * cheapest moment to change your mind about annual-vs-monthly is before you
+ * have typed a card. At Review it becomes "Overview" and stops being editable:
+ * the tax and the total arrive, the renewal date is stated, and the terms box
+ * and Confirm Checkout sit under them. The switch moving out of reach at Review
+ * is the point — the figure you are agreeing to must not be able to change
+ * while you are agreeing to it.
+ */
 function OrderSummary({
   plan,
   cycle,
   onCycle,
   extraSeats,
   bill,
-  showTax,
+  review,
+  renewsOn,
+  agreed,
+  onAgreed,
   action,
   back,
 }: {
@@ -727,62 +872,78 @@ function OrderSummary({
   onCycle: (c: BillingCycle) => void;
   extraSeats: number;
   bill: { base: number; seats: number; subtotal: number; tax: number; total: number };
-  showTax: boolean;
+  /** the last step — totals in full, and the agreement */
+  review: boolean;
+  renewsOn: string;
+  agreed: boolean;
+  onAgreed: (v: boolean) => void;
   action: ReactNode;
   back: ReactNode;
 }) {
   const spec = planSpec(plan);
   return (
-    <Panel className="h-fit lg:sticky lg:top-6">
-      <p className="font-display text-lg font-semibold text-content">Your {spec.name} Plan</p>
+    <Panel className="h-fit lg:sticky lg:top-6" data-ui="order-summary">
+      <p className="font-display text-lg font-semibold text-content">
+        {review ? "Overview" : `Your ${spec.name} Plan`}
+      </p>
 
-      <Segmented
-        ariaLabel="Billing cycle"
-        className="mt-3 w-full"
-        value={cycle}
-        onChange={onCycle}
-        options={[
-          { value: "monthly", label: "Monthly" },
-          { value: "annual", label: "Annual" },
-        ]}
-      />
+      {!review && <CycleChoice cycle={cycle} onCycle={onCycle} />}
 
-      <div className="mt-4 flex flex-col gap-3">
+      <div className="mt-5 flex flex-col gap-4">
         <Line
           label={`${spec.seats.full} Full seat${spec.seats.full === 1 ? "" : "s"}`}
-          note={`Included with ${spec.name.toLowerCase()}`}
+          note={`Included with ${spec.name.toLowerCase()} · ${money(bill.base)}/ month`}
           value={`${money(bill.base)}/ mo`}
+          rule
         />
+
+        <p className="type-body-lg-strong text-content">Additional Seats:</p>
+
         {extraSeats > 0 && (
           <Line
-            label={`${extraSeats} extra Full seat${extraSeats === 1 ? "" : "s"}`}
-            note={`${money(EXTRA_SEAT_PRICE)} / month × ${extraSeats}`}
+            label={`${extraSeats} Full seat${extraSeats === 1 ? "" : "s"}`}
+            note={`${money(EXTRA_SEAT_PRICE)}/ month × ${extraSeats}`}
             value={`${money(bill.seats)}/ mo`}
+            rule
           />
         )}
         {spec.seats.viewers === "unlimited" && (
-          <Line label="Viewer seats" note="Unlimited, edit-only" value="Free" />
+          <Line label="Viewer seats" note="Free/ month · unlimited" value="Free" muted rule />
         )}
       </div>
 
-      <div className="mt-4 border-t border-glass/10 pt-4">
+      <div className="mt-4 flex flex-col gap-4 border-t border-glass/10 pt-4">
         <Line
           label="Subtotal"
-          note={showTax ? undefined : "See your total (including taxes) in Review"}
+          note={review ? undefined : "See your total (Including taxes) in Review"}
           value={`${money(bill.subtotal)}/ mo`}
-          strong
         />
-        {showTax && (
+        {review && (
           <>
-            <div className="mt-3">
-              <Line label="Tax" note={`${(TAX_RATE * 100).toFixed(1)}%`} value={money(bill.tax)} />
-            </div>
-            <div className="mt-3">
-              <Line label="Total due today" value={money(bill.total)} strong />
-            </div>
+            <Line label="Tax" note={`${(TAX_RATE * 100).toFixed(1)}%`} value={money(bill.tax)} />
+            <Line label="Total due today" value={money(bill.total)} strong />
           </>
         )}
       </div>
+
+      {review && (
+        <div className="mt-5 flex flex-col gap-4">
+          <p className="type-body text-content-muted">
+            Your new billing cycle will begin today, and you&rsquo;ll be charged the
+            full {cycle === "annual" ? "annual" : "monthly"} rate for the {spec.name}{" "}
+            plan. Your next renewal will be on{" "}
+            <span className="type-body-strong text-content">{renewsOn}</span>.
+          </p>
+          {/* The agreement gates the button beside it, so it sits above it
+              rather than out on the step: a checkbox in one column disabling a
+              control in another is how people end up hunting for what is wrong. */}
+          <CheckField
+            checked={agreed}
+            onChange={onAgreed}
+            label="I agree to both Terms of Services and Privacy Policy"
+          />
+        </div>
+      )}
 
       <div className="mt-5 flex flex-col gap-2">
         {action}
@@ -792,31 +953,54 @@ function OrderSummary({
   );
 }
 
-function Line({
-  label,
-  note,
-  value,
-  strong,
+/**
+ * Annual or monthly, as two radios rather than a segmented track.
+ *
+ * The picker upstairs uses `Segmented`, which is right there: it switches what
+ * the three cards are SHOWING. This one commits the term of a purchase, and the
+ * design draws it as a choice between two options with the saving attached to
+ * one of them — which is what a radio group is and what a two-up toggle is not.
+ */
+function CycleChoice({
+  cycle,
+  onCycle,
 }: {
-  label: string;
-  note?: string;
-  value: string;
-  strong?: boolean;
+  cycle: BillingCycle;
+  onCycle: (c: BillingCycle) => void;
 }) {
   return (
-    <div className="flex items-start gap-3">
-      <span className="min-w-0 flex-1">
-        <span className={cn("block", strong ? "type-body-strong text-content" : "type-body text-content")}>
-          {label}
-        </span>
-        {note && <span className="type-caption block text-content-subtle">{note}</span>}
-      </span>
-      <span className={cn("shrink-0 tabular-nums", strong ? "type-body-strong" : "type-body")}>
-        {value}
-      </span>
+    <div role="radiogroup" aria-label="Billing cycle" className="mt-4 flex flex-col gap-3">
+      {(["annual", "monthly"] as BillingCycle[]).map((c) => (
+        <div key={c} className="flex items-center gap-4">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={cycle === c}
+            onClick={() => onCycle(c)}
+            className="flex items-center gap-2.5 text-left"
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border-2 transition-colors",
+                cycle === c ? "border-brand" : "border-line/25"
+              )}
+            >
+              {cycle === c && <span className="h-2 w-2 rounded-full bg-brand" />}
+            </span>
+            <span className="type-body text-content">{c === "annual" ? "Annual" : "Monthly"}</span>
+          </button>
+          {c === "annual" && (
+            <span className="type-caption-strong rounded-md bg-success-soft px-3 py-1 text-success">
+              Save up to 30%
+            </span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
+
 
 /* --------------------------------------------------------------- the receipt */
 
@@ -887,35 +1071,73 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** One labelled input, at the height the checkout forms use. */
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  required,
-  inputMode,
+/* ------------------------------------------------------- the picker, as a sheet */
+
+/**
+ * CHOOSE A PLAN, WITHOUT LEAVING THE PAGE YOU ASKED FROM.
+ *
+ * Payment Details used to answer "View Plans" by throwing you out of Settings
+ * to the marketing Pricing page — a good instinct badly aimed. The reason that
+ * link existed was that Settings' picker and the public one had drifted; the
+ * fix for two pickers is not to send billing to the one with the sales copy,
+ * because now an admin reviewing the card on file is standing on a landing page
+ * and has to find their way back.
+ *
+ * So the SAME picker the checkout uses opens over Payment Details, and choosing
+ * from it hands the plan to the checkout exactly as the Pricing page does — one
+ * flow, two doors. The drift the old comment worried about is handled at the
+ * source instead: both pickers read `PLANS`, and both now end in this checkout.
+ */
+export function ChoosePlanDialog({
+  open,
+  onOpenChange,
 }: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  required?: boolean;
-  inputMode?: "numeric" | "text";
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
 }) {
+  const { subscription, setPlanIntent, go } = useSettings();
+
   return (
-    <label className="block">
-      <span className="type-body-strong block text-content">
-        {label}
-        {required && <span className="text-danger"> *</span>}
-      </span>
-      <input
-        value={value}
-        inputMode={inputMode}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className="field-well type-body mt-1.5 h-10 w-full rounded-lg border px-3 text-content outline-none transition-colors placeholder:text-content-subtle focus:border-brand"
-      />
-    </label>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="w-[64rem] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-4rem)] overflow-y-auto"
+        data-ui="choose-plan"
+      >
+        <DialogTitle className="type-title">Choose a Plan</DialogTitle>
+        <DialogDescription className="mt-2">
+          Select the plan that fits your needs. You can upgrade, downgrade, or add
+          seats anytime — we&rsquo;ll adjust your next payment automatically.
+        </DialogDescription>
+
+        <div className="mt-5 grid items-stretch gap-4 lg:grid-cols-3">
+          {PLANS.map((p) => (
+            <PlanCard
+              key={p.id}
+              plan={p.id}
+              cycle={subscription.cycle}
+              current={subscription.plan}
+              onChoose={() => {
+                /* The sheet closes and the checkout opens holding the answer.
+                   Leaving it open behind the flow would put two live pickers on
+                   screen, one of which is already out of date. */
+                setPlanIntent(p.id);
+                onOpenChange(false);
+                go("plans");
+              }}
+            />
+          ))}
+        </div>
+
+        <p className="type-body mt-6 text-center text-content-subtle">
+          Looking for a custom plan that fits your organisation&rsquo;s workflow?{" "}
+          <a
+            href="mailto:sales@terra.ai?subject=Custom%20plan"
+            className="text-brand transition-colors hover:text-brand-hover"
+          >
+            Reach out to us
+          </a>
+        </p>
+      </DialogContent>
+    </Dialog>
   );
 }

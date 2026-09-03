@@ -3,7 +3,11 @@ import type { AssetType } from "./assets-data";
 import {
   isMaster,
   makeCameraRig,
+  isWorldAsset,
+  makeMaterialSlot,
+  UNNAMED_SLOT,
   makeSceneObject,
+  type MaterialSlot,
   nextObjectId,
   type ObjectRole,
   makeGroup,
@@ -12,7 +16,7 @@ import {
 import { subtreeIds } from "./scene-tree";
 import {
   centreOf,
-  materialPart,
+  paintAllSlots,
   posesDiffer,
   reparentPose,
   type GroupPose,
@@ -100,14 +104,14 @@ function cloneSubtree(source: SceneObject[], rootId: string) {
  *
  * A camera is exempt because the capture rig orbits the master and routinely
  * stands OUTSIDE the room looking into it — clamping one would fight the sweep
- * the whole time. An HDRI or skybox is exempt because it is the world, not a
- * thing in it; a sky pushed inside a living room is a nonsense.
+ * the whole time. A world asset is exempt because it IS the room; a sky pushed
+ * inside a living room is a nonsense, and so is a captured warehouse.
  */
 const isContainable = (o: { source: AssetType; group?: true }) =>
   // A group is not a thing in the room, it is a name for some things in it. Its
   // contents are each clamped on their own; clamping the container as well would
   // move all of them to keep a centroid inside a wall it was never against.
-  !o.group && o.source !== "camera" && o.source !== "environment" && o.source !== "skybox";
+  !o.group && o.source !== "camera" && !isWorldAsset(o.source);
 
 /** Everything undo has to put back. */
 interface Snapshot {
@@ -538,8 +542,8 @@ export function useScene() {
    * gesture rather than interrupting one.
    */
   const add = useCallback(
-    (name: string, source: AssetType, position?: Vec3, modelUrl?: string) => {
-      const obj = makeSceneObject(name, source, position, modelUrl);
+    (name: string, source: AssetType, position?: Vec3, modelUrl?: string, skyUrl?: string) => {
+      const obj = makeSceneObject(name, source, position, modelUrl, skyUrl);
       const vol = containRef.current;
       const placed =
         vol && isContainable(obj)
@@ -642,10 +646,15 @@ export function useScene() {
        * followed along on SOME of those routes would be a group that quietly
        * came apart.
        *
-       * Two kinds of patch cascade, and only two. A transform re-places every
-       * descendant (`group-transform.ts` does the arithmetic). A material paints
-       * them. A rename, a lock, a role or a description stops at the container,
-       * which is the whole point of having one.
+       * ONE kind of patch cascades here: a transform, which re-places every
+       * descendant (`group-transform.ts` does the arithmetic). A rename, a lock,
+       * a role or a description stops at the container, which is the whole point
+       * of having one.
+       *
+       * Material used to cascade here too. It moved to `updateMaterial`, which
+       * is the only route that can write one now — a patch of five loose fields
+       * could ride along inside any `update`, but a slot edit has to say WHICH
+       * slot, and that is a different signature.
        */
       if (target.group) {
         const before: GroupPose = {
@@ -659,18 +668,13 @@ export function useScene() {
           scale: next.scale ?? target.scale,
         };
         const moved = posesDiffer(before, after);
-        const paint = materialPart(next);
-        if (moved || paint) {
+        if (moved) {
           const kids = new Set(subtreeIds(prev, id));
           kids.delete(id);
           return prev.map((o) => {
             if (o.id === id) return { ...o, ...next };
             if (!kids.has(o.id)) return o;
-            return {
-              ...o,
-              ...(moved ? reparentPose(o, before, after) : null),
-              ...(paint ?? null),
-            };
+            return { ...o, ...reparentPose(o, before, after) };
           });
         }
       }
@@ -698,6 +702,104 @@ export function useScene() {
         };
       });
     });
+  }, []);
+
+  /**
+   * EDIT ONE MATERIAL SLOT.
+   *
+   * The only way a material is written now. `update` takes everything else about
+   * an object; this takes the one thing that needs to say WHICH surface, because
+   * an excavator's roughness is a question with three answers.
+   *
+   * THE §3.1 GUARANTEE LIVES HERE, and it lives here by being unremarkable: the
+   * function rewrites exactly one entry of `materials` and copies the rest
+   * through untouched. Switching the slot you are looking at calls nothing at
+   * all — it moves a cursor in the panel — so there is no path on which viewing
+   * slot 2 can disturb slot 1. The bug the spec is guarding against is the one
+   * where switching re-reads defaults into the object; there is nothing here to
+   * re-read from.
+   *
+   * A GROUP PAINTS EVERYTHING IT HOLDS, every slot of every descendant. That is
+   * what a group's Texture panel has always meant, and a slot index chosen on
+   * the container would have no meaning on contents whose files disagree about
+   * how many they have.
+   */
+  const updateMaterial = useCallback(
+    (id: string, slot: number, patch: Partial<MaterialSlot>) => {
+      setObjects((prev) => {
+        const target = prev.find((o) => o.id === id);
+        if (!target) return prev;
+
+        if (target.group) {
+          const kids = new Set(subtreeIds(prev, id));
+          return prev.map((o) => (kids.has(o.id) ? paintAllSlots(o, patch) : o));
+        }
+
+        const i = Math.min(Math.max(slot, 0), target.materials.length - 1);
+        return prev.map((o) =>
+          o.id === id
+            ? { ...o, materials: o.materials.map((m, n) => (n === i ? { ...m, ...patch } : m)) }
+            : o
+        );
+      });
+    },
+    []
+  );
+
+  /**
+   * PAINT AN OBJECT — every slot of it.
+   *
+   * What "make it metallic" means when it arrives as a sentence rather than as
+   * a slider. The assistant is talking about the thing, not about one of its
+   * elements, and nothing in "make the excavator matte" chooses between its
+   * paintwork and its glass. Aiming a chat restyle at whichever slot the panel
+   * happened to be pointed at would make the same sentence do different things
+   * depending on where the user last clicked.
+   *
+   * The Texture panel is where one element is singled out; this is the bulk
+   * instrument, and it is the same one a group edit uses.
+   */
+  const paintMaterial = useCallback((id: string, patch: Partial<MaterialSlot>) => {
+    setObjects((prev) => {
+      const target = prev.find((o) => o.id === id);
+      if (!target) return prev;
+      const ids = target.group ? new Set(subtreeIds(prev, id)) : new Set([id]);
+      return prev.map((o) => (ids.has(o.id) ? paintAllSlots(o, patch) : o));
+    });
+  }, []);
+
+  /**
+   * THE FILE SAYS HOW MANY SLOTS THERE ARE.
+   *
+   * A placed GLB carries one nominal slot until the loader has actually read it;
+   * `SceneObjectMesh` calls this once the model is in hand, with the material
+   * names it found. Slot counts are a property of the asset, not something the
+   * editor can invent — a fixed three would be wrong for every model that isn't.
+   *
+   * IT WILL NOT OVERWRITE EDITS. The seed only runs while the object still has
+   * its single untouched placeholder slot. A second load of the same url — a
+   * duplicate placed, an undo, React re-running an effect — finds real slots
+   * already there and leaves them alone, which is the difference between this
+   * and a bug that wipes your work every time the model remounts.
+   */
+  const discoverMaterials = useCallback((id: string, names: string[]) => {
+    if (names.length === 0) return;
+    setObjects((prev) =>
+      prev.map((o) => {
+        if (o.id !== id) return o;
+        const virgin = o.materials.length === 1 && o.materials[0].name === UNNAMED_SLOT;
+        if (!virgin) return o;
+        // The one placeholder slot's values carry into the first real slot: the
+        // model may have been recoloured while it loaded, and that edit belongs
+        // to the surface the user was looking at.
+        return {
+          ...o,
+          materials: names.map((n, i) =>
+            i === 0 ? { ...o.materials[0], name: n } : makeMaterialSlot(n)
+          ),
+        };
+      })
+    );
   }, []);
 
   /**
@@ -753,6 +855,46 @@ export function useScene() {
     setSelectedId((cur) => (cur && gone.includes(cur) ? null : cur));
     setSelectedIds((cur) => (cur.length === 0 ? cur : cur.filter((id) => !gone.includes(id))));
   }, []);
+
+  /**
+   * SWAP ONE OBJECT FOR ANOTHER — one edit, not two.
+   *
+   * Built for the backdrop swap (see BackdropReplaceDialog), and it exists
+   * because doing it as `remove` then `add` is subtly wrong rather than merely
+   * verbose. Both are discrete commands, so both commit with an empty tag, and
+   * an empty tag never folds (see `commit`) — the swap lands as TWO history
+   * entries with a state between them where the old sky is gone and the new one
+   * has not arrived. One undo would drop you into a scene with no backdrop at
+   * all, which is not a state anybody asked for and not what "undo the replace"
+   * means.
+   *
+   * So it is one `setObjects` under one commit: undo puts the previous backdrop
+   * back, exactly as it was.
+   *
+   * Selection follows the swap rather than being dropped. Replacing the thing
+   * you had selected is still an act on that slot in the scene — the same
+   * reasoning that makes Paste and Duplicate focus what they made.
+   */
+  const replaceWith = useCallback(
+    (id: string, name: string, source: AssetType, position?: Vec3, modelUrl?: string, skyUrl?: string) => {
+      const obj = makeSceneObject(name, source, position, modelUrl, skyUrl);
+      const vol = containRef.current;
+      const placed =
+        vol && isContainable(obj)
+          ? { ...obj, position: clampIntoVolume(vol, obj.position, halfExtent(obj)) }
+          : obj;
+
+      setObjects((prev) =>
+        prev.some((o) => o.id === id)
+          ? prev.map((o) => (o.id === id ? placed : o))
+          : [...prev, placed]
+      );
+      setSelectedId((cur) => (cur === id ? placed.id : cur));
+      setSelectedIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : cur));
+      return placed.id;
+    },
+    []
+  );
 
   /**
    * Copy an object (with anything nested inside it) onto the scene clipboard.
@@ -1179,10 +1321,21 @@ export function useScene() {
       updateOne: (id: string, patch: Partial<SceneObject>) => (
         commit(`updateOne:${id}:${Object.keys(patch).join(",")}`), updateOne(id, patch)
       ),
+      // The slot rides in the coalesce tag, so dragging Roughness on Element 0
+      // and then on Element 1 leaves two undo steps rather than folding into
+      // one — they are edits to two different surfaces.
+      updateMaterial: (id: string, slot: number, patch: Partial<MaterialSlot>) => (
+        commit(`material:${id}:${slot}:${Object.keys(patch).join(",")}`),
+        updateMaterial(id, slot, patch)
+      ),
+      paintMaterial: (id: string, patch: Partial<MaterialSlot>) => (
+        commit(`paint:${id}:${Object.keys(patch).join(",")}`), paintMaterial(id, patch)
+      ),
       updateRig: (rigId: string, patch: Partial<CameraRig>) => (
         commit(`rig:${rigId}:${Object.keys(patch).join(",")}`), updateRig(rigId, patch)
       ),
       remove: (...a: Parameters<typeof remove>) => (commit(), remove(...a)),
+      replaceWith: (...a: Parameters<typeof replaceWith>) => (commit(), replaceWith(...a)),
       removeMany: (...a: Parameters<typeof removeMany>) => (commit(), removeMany(...a)),
       duplicate: (...a: Parameters<typeof duplicate>) => (commit(), duplicate(...a)),
       duplicateMany: (...a: Parameters<typeof duplicateMany>) => (
@@ -1252,6 +1405,11 @@ export function useScene() {
     redo,
     canUndo: past.current.length > 0,
     canRedo: future.current.length > 0,
+    // Reading a model's slot list off the file it was placed from is not an
+    // edit — it is the placement finishing — so it is untracked. Putting it in
+    // the history would give every placed GLB a phantom undo step that lands
+    // between the object arriving and its own materials being known.
+    discoverMaterials,
     env,
     setEnv,
     // Weather is deliberately NOT in `tracked`: undo covers the scene graph, and

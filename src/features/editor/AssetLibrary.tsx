@@ -49,11 +49,78 @@ export interface PickRequest {
   onCancel: () => void;
 }
 
+/**
+ * The formats that can actually BECOME the sky.
+ *
+ * Not a taste call — it is what the renderer can load. drei picks its loader off
+ * the extension (`RGBELoader` for hdr, `EXRLoader` for exr, a JPEG decoder for
+ * jpg) and returns null for anything else, which throws inside the canvas
+ * rather than failing softly. So a dropped PNG panorama stays an Image: an
+ * upload that lands in the wrong category is a nuisance, and one that takes the
+ * viewport down with it is a bug.
+ */
+const SKY_EXT = ["hdr", "exr", "jpg", "jpeg"];
+
+const extOf = (file: File) => file.name.split(".").pop()?.toLowerCase() ?? "";
+
+/**
+ * Is this upload a file that could BE the sky?
+ *
+ * An `.hdr`/`.exr` always is. A JPEG only might be — most uploads are reference
+ * photos — which is why the aspect ratio decides (see `panoramaCheck`) rather
+ * than the extension alone. Either way the file's own URL is worth keeping: an
+ * upload whose bytes the app threw away cannot be placed as anything, which is
+ * what used to happen to every dropped HDRI.
+ */
+const couldBeSky = (file: File) => SKY_EXT.includes(extOf(file));
+
+/**
+ * The file's own URL, tagged so the renderer can tell what it is.
+ *
+ * A blob URL carries no extension — `blob:http://host/uuid` — and drei reads the
+ * extension to choose a loader, so an untagged one throws "Unrecognized file
+ * extension" and takes the canvas with it. The real extension rides along as a
+ * fragment, which blob resolution ignores (the bytes still fetch) and
+ * `split(".").pop()` still finds.
+ */
+const taggedBlobUrl = (file: File) => `${URL.createObjectURL(file)}#.${extOf(file)}`;
+
+/**
+ * An equirectangular panorama is 2:1, and that is the only signal a dropped
+ * file gives us.
+ *
+ * Reading the ratio is worth the async hop because the alternative is filing a
+ * 2000×1000 sky under Images, where nothing can place it as a sky and the only
+ * way out is knowing to retype it by hand. The tolerance is loose — captures
+ * come off stitchers a pixel or two out — and anything else stays an Image,
+ * which is the safe answer: a reference photo wrongly promoted to a skybox
+ * would replace the horizon the moment it was placed.
+ */
+function panoramaCheck(file: File): Promise<boolean> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img.naturalHeight > 0 && Math.abs(img.naturalWidth / img.naturalHeight - 2) < 0.02);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(false);
+    };
+    img.src = url;
+  });
+}
+
 /** Extension → the asset kind we file an upload under. */
 function typeForFile(file: File): AssetType {
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (["glb", "gltf", "obj", "fbx", "usdz"].includes(ext)) return "mesh";
   if (["hdr", "exr"].includes(ext)) return "environment";
+  // The three formats a capture pipeline actually hands back. Without this a
+  // dropped .ply lands in Uploads as an "Image" and can never be placed as the
+  // world it is.
+  if (["ply", "splat", "spz"].includes(ext)) return "splat";
   if (["mp4", "mov", "webm"].includes(ext)) return "video";
   return "image";
 }
@@ -62,8 +129,8 @@ function typeForFile(file: File): AssetType {
  * AssetLibrary — the editor's asset browser (bottom dock). Terra glass idiom.
  *
  * Categories: All Assets (the whole catalogue, with a type filter over it) ·
- * Environments (HDRI maps) · Skyboxes · Uploads (My Assets / Folders) ·
- * 3D Models · Utilities. Each view keeps the same header shape — search, tag
+ * Environments (HDRI maps and Gaussian splats) · Skyboxes · Uploads (My Assets /
+ * Folders) · 3D Models · Utilities. Each view keeps the same header shape — search, tag
  * filter, one primary action — so moving between them doesn't move the
  * controls; only the action changes (Generate 3D / Upload / Create Folder).
  *
@@ -175,8 +242,8 @@ export function AssetLibrary({
   const tagOptions = useMemo(() => collectTags(scope), [scope]);
   // Only the types this view actually contains, so the menu never offers a
   // filter that would empty the grid. Sorted by CONTENT_TYPES rather than by
-  // first appearance, so All Assets always reads 3D Asset · Skybox · HDRI Map
-  // regardless of what order the catalogue happens to be in.
+  // first appearance, so All Assets always reads 3D Asset · HDRI Map · Skybox ·
+  // Splat regardless of what order the catalogue happens to be in.
   const typeOptions = useMemo(() => {
     const seen: AssetType[] = [];
     scope.forEach((a) => {
@@ -260,16 +327,39 @@ export function AssetLibrary({
 
   /* ---------------------------------------------------------------- uploads */
 
+  /**
+   * Take the dropped files.
+   *
+   * THE FILE IS KEPT NOW. Every upload used to become a name and a placeholder
+   * thumbnail with the bytes dropped on the floor — so dropping in your own
+   * HDRI produced an Environment card that confirmed a replacement and left the
+   * horizon exactly as it was. A sky upload keeps its own object URL, which is
+   * what `SceneCanvas` renders when the asset is placed (see `skyUrl`), and it
+   * overrides the catalogue's shared stand-in file.
+   *
+   * The panorama check runs AFTER the card exists rather than gating it. Reading
+   * an image's dimensions is a decode, and a batch of them should not hold the
+   * grid empty while it finishes: the card lands immediately as an Image and
+   * becomes a Skybox a beat later if the ratio says so.
+   */
   const handleFiles = (list: FileList | null) => {
     if (!list || list.length === 0) return;
     const files = Array.from(list);
-    files.forEach((file) =>
-      store.add({
+    files.forEach((file) => {
+      const type = typeForFile(file);
+      const sky = couldBeSky(file);
+      const asset = store.add({
         name: file.name.replace(/\.[^.]+$/, ""),
-        type: typeForFile(file),
+        type,
         uploaded: true,
-      })
-    );
+        skyUrl: sky ? taggedBlobUrl(file) : undefined,
+      });
+      if (sky && type === "image") {
+        void panoramaCheck(file).then((is) => {
+          if (is) store.update(asset.id, { type: "skybox" });
+        });
+      }
+    });
     goUploadView("assets");
     flash(`${files.length} ${files.length === 1 ? "file" : "files"} uploaded`);
   };
@@ -320,7 +410,7 @@ export function AssetLibrary({
         multiple
         hidden
         data-ui="asset-upload-input"
-        accept="image/*,video/*,.glb,.gltf,.obj,.fbx,.usdz,.hdr,.exr"
+        accept="image/*,video/*,.glb,.gltf,.obj,.fbx,.usdz,.hdr,.exr,.ply,.splat,.spz"
         onChange={(e) => {
           handleFiles(e.target.files);
           e.target.value = "";
@@ -595,7 +685,7 @@ export function AssetLibrary({
                           : category === "skyboxes"
                             ? "No skyboxes yet. Upload a panorama to sit behind your scene."
                             : category === "environments"
-                              ? "No environments yet. Upload an HDRI to light the scene."
+                              ? "No environments yet. Upload an HDRI or a .ply capture to light the scene."
                               : "Nothing here yet."
                 }
                 actionLabel={

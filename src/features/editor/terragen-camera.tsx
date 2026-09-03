@@ -88,7 +88,7 @@ const norm360 = (v: number) => ((v % 360) + 360) % 360;
  * The rig's own settings, edited in place — the SAME controls Terra Web shows.
  *
  * WHY THEY ARE THE EDITOR'S, LITERALLY. Selecting a camera in the editor opens
- * Camera Mode, Distance from Master, Camera Height, Orbit Rotation, Shots per
+ * Camera Mode, Zoom Distance, Camera Height, Orbit Rotation, Shots per
  * Distance and Shots per Rotation. This section used to show a shorter, differently
  * worded set — "Nearest/Farthest", "Climb", no orbit, no stop arithmetic — so the
  * same rig had two vocabularies depending on which panel you had open, and the
@@ -244,7 +244,7 @@ function RigControls({
         />
       </Group>
 
-      <Group title="Distance from master">
+      <Group title="Zoom distance" hint="how far in the sweep travels">
         <DistanceControl
           nearDistance={rig.nearDistance}
           farDistance={rig.farDistance}

@@ -305,20 +305,16 @@ export const user = {
   plan: orgs[0].plan,
 };
 
-/**
- * THE BALANCE, AND ONLY THE BALANCE.
+/*
+ * THE BALANCE IS NOT HERE ANY MORE.
  *
- * `images` and `videos` used to sit here as monthly allowances with a `used`
- * and a `total`, and the sidebar drew a meter for each. They are gone: a run is
- * priced in credits, so the one number that decides whether you can start one
- * is the one number worth showing. Two meters that could disagree with the
- * price on the dispatch screen were two chances to be wrong about the only
- * question a balance is asked.
+ * It was a frozen `credits.balance` that the rail and the top bar read, beside
+ * a second constant in the editor and a third in the settings store — three
+ * numbers for one fact, none of which a top-up could move. The balance is a
+ * property of the org, so it lives with the rest of the account state (see
+ * settings-store), which is mounted above the router in App and therefore
+ * readable by every surface that shows a credit figure.
  *
- * What was generated is a different question with a different time base, and it
- * is answered properly in Settings → Terra Balance → Usage History.
+ * What was GENERATED is a different question with a different time base, and it
+ * is answered in Settings → Terra Balance → Usage History.
  */
-export const credits = {
-  /** the spendable balance shown in the top bar and the sidebar */
-  balance: 3728,
-};

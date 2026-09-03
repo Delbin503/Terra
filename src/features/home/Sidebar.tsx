@@ -3,7 +3,8 @@ import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/icons";
 import { Avatar, ConfirmDialog, IconButton, Tooltip } from "@/components/ui";
 import { useDismissable } from "@/features/editor/use-dismissable";
-import { credits } from "./data";
+import { useSettings } from "@/features/settings/settings-store";
+import { TopUpDialog } from "@/features/settings/TopUpDialog";
 import { SHELVES, type Shelf } from "./shelves";
 import { useWorkspace } from "./workspace";
 
@@ -77,7 +78,11 @@ export function Sidebar({
   unread: number;
 }) {
   const { org } = useWorkspace();
+  /* The live balance, not the frozen constant this rail used to read: a top-up
+     taken from the button below has to move the number above it. */
+  const { creditBalance } = useSettings();
   const [signingOut, setSigningOut] = useState(false);
+  const [topUp, setTopUp] = useState(false);
 
   return (
     <aside
@@ -207,12 +212,18 @@ export function Sidebar({
               <Icon name="credits" size={13} className="shrink-0 text-brand" />
               <span className="type-caption-strong text-content-muted">Credits</span>
               <span className="type-numeric-sm ml-auto text-content">
-                <b className="font-medium">{credits.balance.toLocaleString()}</b>
+                <b className="font-medium">{creditBalance.toLocaleString()}</b>
               </span>
             </div>
 
+            {/* Add Credits IS the purchase, not a link to the page that holds
+                it. It had no handler at all, and pointing it at Terra Balance
+                would have landed you on a screen whose own Top Up button opens
+                exactly this dialog — one press instead of three. */}
             <button
               type="button"
+              data-ui="rail-add-credits"
+              onClick={() => setTopUp(true)}
               className="type-button-xs mt-3 flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-glass/15 bg-glass/10 text-content transition-colors hover:border-brand hover:text-brand"
             >
               <Icon name="payment" size={14} />
@@ -220,6 +231,8 @@ export function Sidebar({
             </button>
           </div>
         )}
+
+        <TopUpDialog open={topUp} onOpenChange={setTopUp} />
 
         <div className={cn("grid gap-1.5", collapsed ? "grid-cols-1 justify-items-center" : "grid-cols-3")}>
           <IconButton

@@ -176,7 +176,16 @@ export function DataTable<T>({
           {sorted.length} entries
         </span>
 
+        {/* BOTH ENDS, not just the neighbours. Nine pages of invoices with only
+            prev/next means eight clicks to reach the oldest one, and the oldest
+            row is exactly what someone paging back through a year is after. */}
         <div className="ml-auto flex items-center gap-2">
+          <PageStep
+            label="First page"
+            icon="page-first"
+            disabled={current <= 1}
+            onClick={() => setPage(1)}
+          />
           <PageStep
             label="Previous page"
             icon="chevron-left"
@@ -196,6 +205,12 @@ export function DataTable<T>({
             disabled={current >= pages}
             onClick={() => setPage(current + 1)}
           />
+          <PageStep
+            label="Last page"
+            icon="page-last"
+            disabled={current >= pages}
+            onClick={() => setPage(pages)}
+          />
         </div>
       </div>
     </div>
@@ -209,7 +224,7 @@ function PageStep({
   onClick,
 }: {
   label: string;
-  icon: "chevron-left" | "chevron-right";
+  icon: "chevron-left" | "chevron-right" | "page-first" | "page-last";
   disabled: boolean;
   onClick: () => void;
 }) {

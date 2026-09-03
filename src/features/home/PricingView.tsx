@@ -304,9 +304,13 @@ function PlanCard({ plan, cycle }: { plan: PricingPlan; cycle: BillingCycle }) {
           className={cn("w-full !rounded-lg", CARD.action)}
           data-ui={`plan-upgrade-${plan.id}`}
           /* Settings owns the checkout — seats, card, review — so the sell ends
-             here and the transaction starts there. */
+             here and the transaction starts there. THE PLAN GOES WITH IT: this
+             button used to land on Settings' own picker, which asked the same
+             question this card had just been pressed to answer. The id in the
+             hash is what turns that second picker into the diff for the plan
+             you actually chose. */
           onClick={() => {
-            window.location.hash = "#settings/plans";
+            window.location.hash = `#settings/plans/${plan.id}`;
           }}
         >
           Upgrade Plan

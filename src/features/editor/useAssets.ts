@@ -23,6 +23,8 @@ export interface AssetInit {
   /** came out of a Generate 3D run — drives the Gen3D badge */
   generated?: boolean;
   modelUrl?: string;
+  /** an uploaded sky's own file — see `handleFiles` in AssetLibrary */
+  skyUrl?: string;
 }
 
 export interface AssetStore {
@@ -70,7 +72,19 @@ export function useAssets(): AssetStore {
   }, []);
 
   const remove = useCallback<AssetStore["remove"]>((id) => {
-    setAssets((prev) => prev.filter((a) => a.id !== id));
+    setAssets((prev) => {
+      /* AN UPLOADED SKY OWNS A BLOB. `URL.createObjectURL` pins the file in
+         memory until it is revoked, so deleting the asset has to hand it back —
+         otherwise a session spent trying HDRIs holds every one of them, and
+         they are the largest files this app touches. Only `blob:` URLs: the
+         catalogue's paths are static files and revoking one is meaningless. */
+      const gone = prev.find((a) => a.id === id);
+      // The `#.hdr` tag that rides on an uploaded sky's URL (see
+      // `taggedBlobUrl`) is not part of the blob's identity, so it comes off
+      // before revoking — otherwise the revoke silently matches nothing.
+      if (gone?.skyUrl?.startsWith("blob:")) URL.revokeObjectURL(gone.skyUrl.split("#")[0]);
+      return prev.filter((a) => a.id !== id);
+    });
     setFolders((prev) => prev.map((f) => ({ ...f, assetIds: f.assetIds.filter((x) => x !== id) })));
   }, []);
 

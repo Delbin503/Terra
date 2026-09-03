@@ -42,9 +42,20 @@ After cloning, place the `.exr` here so the viewport isn't black:
 public/hdri/aarfontein_dusk_4k.exr
 ```
 
-Any equirectangular `.exr`/`.hdr` works — update the path in
-`src/features/editor/SceneCanvas.tsx` (`<Environment files=… />`) if you use a
-different file. The 3D model at `public/models/robotic-hand.glb` **is** committed.
+Any equirectangular `.exr`/`.hdr` works — change `DEFAULT_SKY` in
+`src/features/editor/SceneCanvas.tsx` if you use a different file.
+
+The library's **Cloud Bank** environment carries a second, real HDRI, in the
+same gitignored folder:
+
+```
+public/hdri/hdri-sky-751.hdr
+```
+
+Without it that one asset falls back to the default sky; everything else works.
+The **Anime Sky** skybox it pairs with is an ordinary JPEG at
+`public/skybox/anime-sky.jpg` and **is** committed, as is the 3D model at
+`public/models/robotic-hand.glb`.
 
 ## Structure
 

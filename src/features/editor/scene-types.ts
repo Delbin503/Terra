@@ -1,5 +1,5 @@
 import type { AssetType } from "./assets-data";
-import { OBJECT_SWATCHES } from "./scene-palette";
+import { DEFAULT_OBJECT_COLOR, OBJECT_SWATCHES } from "./scene-palette";
 
 /** Placeholder geometry variants (until real GLB assets are wired in). */
 export type ObjectShape = "sphere" | "cylinder" | "cone" | "torus" | "capsule" | "ico" | "dodec";
@@ -104,14 +104,29 @@ export const ROLE_CHIP: Record<ObjectRole, string> = {
 export const isMaster = (o: { role: ObjectRole }) => o.role === "master";
 
 /**
+ * THE WORLD, RATHER THAN A THING IN IT.
+ *
+ * An HDRI lights the scene, a skybox sits behind it, and a Gaussian splat is a
+ * captured place that does both — none of the three is an object you arrange,
+ * clamp inside a room, sweep up with a marquee or hand a dataset role to.
+ *
+ * It exists because that sentence was written out three times, in three files,
+ * as three copies of `source !== "environment" && source !== "skybox"` — so
+ * adding splats would have meant finding all three and hoping there wasn't a
+ * fourth. There was very nearly a fourth.
+ */
+export const isWorldAsset = (source: AssetType) =>
+  source === "environment" || source === "skybox" || source === "splat";
+
+/**
  * Roles a given object is allowed to take — cameras and backdrops take none.
  *
- * A camera is the thing pointed AT the subject. An HDRI lights the scene and a
- * skybox sits behind it; neither is a subject a dataset axis can vary, so
+ * A camera is the thing pointed AT the subject. The world assets are what the
+ * subject stands in; none of them is a subject a dataset axis can vary, so
  * offering them a role would be offering a setting that changes nothing.
  */
 export const canTakeRole = (source: AssetType) =>
-  source !== "camera" && source !== "environment" && source !== "skybox";
+  source !== "camera" && !isWorldAsset(source);
 
 /**
  * AN OBJECT WITH A BODY.
@@ -129,6 +144,79 @@ export const canTakeRole = (source: AssetType) =>
 export const isContentObject = (o: { source: AssetType; group?: true }) =>
   !o.group && canTakeRole(o.source);
 
+/**
+ * ONE ASSIGNABLE MATERIAL ON A MESH.
+ *
+ * A GLB is not one surface. The modeller splits its faces into groups and gives
+ * each group its own material — painted steel, polished rams, tinted glass —
+ * and Unreal exposes those groups as Element 0, Element 1, Element 2, each with
+ * its own Material Instance. Editing "the object's roughness" can only ever mean
+ * one of them, so the material stopped being a field on the object and became a
+ * list of these.
+ *
+ * `name` is the material's OWN name in the file. It is the identity — what a
+ * reload matches on and what the dispatch payload names — while the panel labels
+ * rows "Element N", because that is the vocabulary the engine end speaks.
+ */
+export interface MaterialSlot {
+  name: string;
+  color: string;
+  metalness: number;
+  roughness: number;
+  specular: number;
+  normal: number;
+}
+
+/**
+ * What an HDRI contributes before anyone touches it.
+ *
+ * 0.35 is not a taste call — it is the value `SceneCanvas` has been rendering
+ * at since the environment map was added, hard-coded into the `<Environment>`
+ * element. Exposing the control had to start from what the scene already looked
+ * like, or every existing project would have relit itself the day the slider
+ * shipped.
+ */
+export const DEFAULT_SKY_INFLUENCE = 0.35;
+
+/** What every slot starts as, and the values "unedited" is measured against. */
+export const DEFAULT_MATERIAL: Omit<MaterialSlot, "name"> = {
+  // Straight from the palette rather than through `OBJECT_COLORS` below, which
+  // is only a re-export of it and is declared further down this file.
+  color: DEFAULT_OBJECT_COLOR,
+  metalness: 0.1,
+  roughness: 0.8,
+  specular: 0.5,
+  normal: 1,
+};
+
+/** The name a slot carries before a real file has told us better. */
+export const UNNAMED_SLOT = "Material";
+
+export const makeMaterialSlot = (name = UNNAMED_SLOT): MaterialSlot => ({
+  name,
+  ...DEFAULT_MATERIAL,
+});
+
+/**
+ * The slot being edited, clamped.
+ *
+ * Never returns undefined: a scene object always has at least one slot, and the
+ * index is UI state that can outlive the slot list it was pointing into — a GLB
+ * finishing its load replaces one slot with three, and a deselect-reselect can
+ * arrive with the old index still in hand.
+ */
+export const materialOf = (o: SceneObject, slot = 0): MaterialSlot =>
+  o.materials[Math.min(Math.max(slot, 0), o.materials.length - 1)] ?? makeMaterialSlot();
+
+/** Has anyone touched this slot? Drives the edited dot and what the payload
+ *  carries — TerraGen is sent modified slots, not every slot. */
+export const slotEdited = (m: MaterialSlot): boolean =>
+  m.color !== DEFAULT_MATERIAL.color ||
+  m.metalness !== DEFAULT_MATERIAL.metalness ||
+  m.roughness !== DEFAULT_MATERIAL.roughness ||
+  m.specular !== DEFAULT_MATERIAL.specular ||
+  m.normal !== DEFAULT_MATERIAL.normal;
+
 /** A 3D object placed in the viewport. Transform is stored UI-friendly:
  *  position in metres, rotation in degrees, scale as multipliers. */
 export interface SceneObject {
@@ -138,6 +226,18 @@ export interface SceneObject {
   shape: ObjectShape;
   /** path to a real GLB — when set, this renders instead of the placeholder shape */
   modelUrl?: string;
+  /**
+   * The equirectangular sky this object IS, when it is a real one.
+   *
+   * A SKY IS NOT A BODY, so this is the whole of its geometry: an HDRI or a
+   * skybox has no mesh, no place to stand and nothing to scale — it is a
+   * texture wrapped around everything else, and `SceneCanvas` renders it by
+   * handing this path to `<Environment>` rather than by drawing an object.
+   *
+   * Absent means the shipped default sky keeps rendering, which is what most of
+   * the catalogue's named placeholders do — see `skyUrl` on `Asset`.
+   */
+  skyUrl?: string;
   position: [number, number, number];
   rotationDeg: [number, number, number];
   scale: [number, number, number];
@@ -200,13 +300,57 @@ export interface SceneObject {
    */
   smartTags?: string[];
   manualTags?: string[];
-  // material (Texture panel) — each factor is always active; its slider value
-  // alone drives the material (0 is the "off" end of the range).
-  color: string;
-  metalness: number;
-  roughness: number;
-  specular: number;
-  normal: number;
+  /**
+   * MATERIAL, PER SLOT (Texture panel). Always at least one entry.
+   *
+   * It was five flat fields until slots arrived, which could express "this
+   * object is rough" and nothing else — an excavator whose glass and whose
+   * paintwork had to share one roughness. Each factor is still always active;
+   * its slider value alone drives that slot (0 is the "off" end of the range).
+   *
+   * A placeholder shape has exactly one slot. A real GLB gets its slots the
+   * moment the file finishes loading and tells us how many it has — see
+   * `discoverMaterials` in useScene.
+   */
+  materials: MaterialSlot[];
+  /**
+   * A SPLAT'S ONE DIAL — how bright the captured field renders.
+   *
+   * It sits beside the five PBR factors rather than in a structure of its own
+   * because it is the same kind of statement about the same kind of thing: what
+   * this object looks like. A splat has no albedo to tint and no microsurface to
+   * roughen — it is baked light — so the five above mean nothing to it and this
+   * one means nothing to a mesh. Every object still carries both sets, exactly
+   * as every object already carries a colour it may never show.
+   *
+   * 1 is the capture as it was recorded; the range runs 0–2 so a dim interior
+   * can be lifted and a blown-out yard pulled back.
+   *
+   * An HDRI and a skybox read it as Sky Brightness — the same statement about
+   * the same kind of thing, so it is the same field rather than a second one
+   * that would have to be kept in step with it.
+   */
+  brightness: number;
+  /**
+   * HOW MUCH OF THE SKY LANDS ON THE OBJECTS.
+   *
+   * Separate from `brightness`, because they are genuinely two questions: how
+   * bright the sky itself renders, and how much it lights and reflects onto
+   * everything standing in front of it. Turning an HDRI down to a dim backdrop
+   * while it still floods the scene is a real thing to want, and one dial can't
+   * say it.
+   *
+   * EVERY WORLD ASSET CARRIES IT — HDRI, skybox and splat alike. It was on the
+   * HDRI alone at first, on the reasoning that a skybox is a backdrop that does
+   * not light the scene. That is how the two asset types differ in the
+   * catalogue, but it is not a reason to withhold the control: the spec gives
+   * Sky Influence to skyboxes and to Gaussian splats too, and a captured place
+   * standing around your objects plainly does cast light on them.
+   *
+   * Drives `environmentIntensity` in SceneCanvas — the ambient contribution and
+   * reflection intensity landing on everything in the scene.
+   */
+  skyInfluence: number;
 }
 
 /**
@@ -224,6 +368,7 @@ export const SOURCE_LABEL: Record<AssetType, string> = {
   image: "Image",
   skybox: "Skybox",
   environment: "Environment",
+  splat: "Gaussian Splat",
   video: "Video",
   camera: "Camera",
 };
@@ -276,11 +421,9 @@ export function makeCameraRig(
         which === "start"
           ? "Start of the capture sweep. The master turns a full revolution here before the rig steps toward Camera 2."
           : "End of the capture sweep. The rig stops climbing once another step would overshoot this point.",
-      color: OBJECT_COLORS[0],
-      metalness: 0.1,
-      roughness: 0.8,
-      specular: 0.5,
-      normal: 1,
+      materials: [makeMaterialSlot()],
+      brightness: 1,
+      skyInfluence: DEFAULT_SKY_INFLUENCE,
     };
   };
   return [build("start", startPos), build("end", endPos)];
@@ -312,11 +455,9 @@ export function makeGroup(name: string, position: [number, number, number]): Sce
     role: "none",
     description:
       "A group. Moving, turning or scaling it carries everything inside; a texture set here paints all of them.",
-    color: OBJECT_COLORS[0],
-    metalness: 0.1,
-    roughness: 0.8,
-    specular: 0.5,
-    normal: 1,
+    materials: [makeMaterialSlot()],
+    brightness: 1,
+    skyInfluence: DEFAULT_SKY_INFLUENCE,
   };
 }
 
@@ -334,7 +475,8 @@ export function makeSceneObject(
   name: string,
   source: AssetType,
   position: [number, number, number] = [0, 0.5, 0],
-  modelUrl?: string
+  modelUrl?: string,
+  skyUrl?: string
 ): SceneObject {
   counter += 1;
   return {
@@ -343,15 +485,29 @@ export function makeSceneObject(
     source,
     shape: SHAPES[counter % SHAPES.length],
     modelUrl,
+    skyUrl,
     position,
     rotationDeg: [0, 0, 0],
     scale: [1, 1, 1],
     role: "none",
-    description: `${SOURCE_LABEL[source]} asset placed in the scene. Customize its transform and material to suit your world.`,
-    color: OBJECT_COLORS[0],
-    metalness: 0.1,
-    roughness: 0.8,
-    specular: 0.5,
-    normal: 1,
+    /* A world asset has no material to customise — a splat's whole appearance is
+       one brightness, and telling someone to edit a material it doesn't have
+       sends them looking for a panel that isn't there.
+
+       AND A SKY HAS NO TRANSFORM EITHER. This sentence used to tell everything
+       filed under Environments to "move and scale it to sit around your
+       objects", which is true of a captured place and false of an HDRI: there
+       is nothing to move, and the panel that would have moved it is gone (see
+       ObjectToolbar). A description that names controls the object does not
+       have is the most expensive kind of wrong — it sends someone hunting. */
+    description:
+      source === "environment" || source === "skybox"
+        ? `${SOURCE_LABEL[source]} wrapped around the whole scene. It has no position — set how bright it renders and how much of it lands on your objects.`
+        : isWorldAsset(source)
+          ? `${SOURCE_LABEL[source]} placed in the scene. Move and scale it to sit around your objects, and set how bright it renders.`
+          : `${SOURCE_LABEL[source]} asset placed in the scene. Customize its transform and material to suit your world.`,
+    materials: [makeMaterialSlot()],
+    brightness: 1,
+    skyInfluence: DEFAULT_SKY_INFLUENCE,
   };
 }

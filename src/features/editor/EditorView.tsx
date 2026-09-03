@@ -47,6 +47,7 @@ import { useWorkOrder } from "./useWorkOrder";
 import type { WorkOrderRunStore } from "./work-order-runs";
 import { WorkOrdersDialog } from "./WorkOrdersDialog";
 import { CameraPlaceDialog } from "./CameraPlaceDialog";
+import { BackdropReplaceDialog } from "./BackdropReplaceDialog";
 import { CaptureRunPanel } from "./CaptureRunPanel";
 import {
   atDistance,
@@ -60,10 +61,11 @@ import {
   planCapture,
   spanLimit,
   withVerticalSpan,
+  zoomOf,
   type CapturePlan,
 } from "./camera-rig";
 import { computeTotals, rigState } from "./work-order";
-import { terraCredits } from "./account-data";
+import { useSettings } from "@/features/settings/settings-store";
 import type { Asset, AssetType, CategoryId } from "./assets-data";
 
 type GizmoMode = "translate" | "rotate" | "scale";
@@ -120,6 +122,10 @@ export function EditorView({
      It lives here so a rename reaches all of them at once rather than being a
      private edit inside the bar that the rest of the editor never hears about. */
   const [projectName, setProjectName] = useState(initialProjectName);
+  /* The balance a dispatch is priced against, read from the account store above
+     the router rather than from a frozen constant — a top-up taken from the
+     credit popover has to change what the review screen says you can afford. */
+  const { creditBalance } = useSettings();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
   const cameraRef = useRef<CameraHandle | null>(null);
@@ -137,6 +143,18 @@ export function EditorView({
   /** the layer tree — its own switch, so opening the library can't close it */
   const [layersOpen, setLayersOpen] = useState(false);
   const [editTab, setEditTab] = useState<EditTab | null>(null);
+  /**
+   * WHICH MATERIAL SLOT THE TEXTURE PANEL IS POINTED AT.
+   *
+   * View state, not object state — it is where you are looking, not what the
+   * object is, and §3.1's guarantee is about the values surviving a switch,
+   * which they do because switching this writes nothing to the scene.
+   *
+   * It lives here rather than in the panel because two panels share it: the
+   * list that picks the slot and the floating control that edits it have to
+   * agree on which element is in hand.
+   */
+  const [matSlot, setMatSlot] = useState(0);
   const [activeSetting, setActiveSetting] = useState<SettingKey | null>(null);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
   const [gen3dOpen, setGen3dOpen] = useState(false);
@@ -229,6 +247,22 @@ export function EditorView({
   const [previewTab, setPreviewTab] = useState<MatPreview | null>(null);
   /** drop point of a camera awaiting the focus-on-master question */
   const [pendingCamera, setPendingCamera] = useState<[number, number, number] | null>(null);
+  /**
+   * A BACKDROP DROP WAITING ON AN ANSWER.
+   *
+   * Held whole — name, type, where it landed — rather than as a flag, because
+   * the answer arrives after the drop gesture is over and the placement has to
+   * be replayable exactly as it was made, cursor position included.
+   */
+  const [pendingBackdrop, setPendingBackdrop] = useState<{
+    name: string;
+    type: AssetType;
+    point?: [number, number, number];
+    /** the sky file it brings with it, which is the whole point of the swap */
+    skyUrl?: string;
+    /** the object it would displace */
+    current: SceneObject;
+  } | null>(null);
   /** the capture currently running, frozen at the moment Generate was pressed */
   const [capture, setCapture] = useState<CapturePlan | null>(null);
   const [titleDark, setTitleDark] = useState(false);
@@ -422,7 +456,18 @@ export function EditorView({
    * render, only on the next object you pick.
    */
   useEffect(() => {
-    if (selectedId) setEditTab("object");
+    /* A SKY OPENS ON ITS APPEARANCE, because that is the only tab it has — see
+       ObjectToolbar. Landing on "object" would open an empty Transform panel
+       beside a toolbar with no tile to leave it by. */
+    if (selectedId) {
+      const src = scene.objects.find((o) => o.id === selectedId)?.source;
+      setEditTab(src === "environment" || src === "skybox" ? "texture" : "object");
+    }
+    // Back to Element 0 with each new object. The cursor is about the thing in
+    // hand, and carrying "I was editing element 2" onto whatever you click next
+    // aims the sliders somewhere you did not choose. (`materialOf` clamps, so a
+    // stale index is safe — this is about intent, not about crashing.)
+    setMatSlot(0);
   }, [selectedId]);
 
   /**
@@ -496,7 +541,14 @@ export function EditorView({
   // A camera isn't an asset in the ordinary sense — it drops in as a linked
   // start/end rig, and if there's a master to aim at we ask where the rig
   // should begin before committing it.
-  const place = (name: string, type: AssetType, point?: [number, number, number], modelUrl?: string) => {
+  const place = (
+    name: string,
+    type: AssetType,
+    point?: [number, number, number],
+    modelUrl?: string,
+    /** the equirectangular file a real sky asset brings — see `skyUrl` */
+    skyUrl?: string
+  ) => {
     setTool(null);
     if (type === "camera") {
       const at = point ?? [0, 1.5, 0];
@@ -504,7 +556,45 @@ export function EditorView({
       else scene.addCameraRig(at);
       return;
     }
-    scene.add(name, type, point, modelUrl);
+    /**
+     * ONE SKY PER SCENE — see BackdropReplaceDialog.
+     *
+     * An HDRI and a skybox contest the same slot, so either kind already in the
+     * scene makes either kind a question. A splat is exempt: it is a body in the
+     * world, and two of them are simply two places.
+     */
+    if (type === "environment" || type === "skybox") {
+      const current = scene.objects.find(
+        (o) => o.source === "environment" || o.source === "skybox"
+      );
+      if (current) {
+        setPendingBackdrop({ name, type, point, skyUrl, current });
+        return;
+      }
+    }
+    scene.add(name, type, point, modelUrl, skyUrl);
+  };
+
+  /**
+   * Take the answer.
+   *
+   * `replaceWith` rather than a remove followed by an add: the two are separate
+   * commits, so undoing the swap would land in the state between them — the old
+   * backdrop already gone, the new one not yet placed. One call, one history
+   * entry, and one undo puts the previous sky back. See `replaceWith`.
+   */
+  const resolveBackdrop = (replace: boolean) => {
+    const pending = pendingBackdrop;
+    setPendingBackdrop(null);
+    if (!pending || !replace) return;
+    scene.replaceWith(
+      pending.current.id,
+      pending.name,
+      pending.type,
+      pending.point,
+      undefined,
+      pending.skyUrl
+    );
   };
 
   /**
@@ -531,7 +621,7 @@ export function EditorView({
     // The placeholder can be gone by the time the pass lands — deleted, or the
     // scene reset — in which case the asset just gets placed normally.
     if (!id || !scene.objects.some((o) => o.id === id)) {
-      place(asset.name, asset.type, undefined, asset.modelUrl);
+      place(asset.name, asset.type, undefined, asset.modelUrl, asset.skyUrl);
       return;
     }
     scene.update(id, {
@@ -561,11 +651,13 @@ export function EditorView({
     let name = "3D object";
     let type: AssetType = "mesh";
     let modelUrl: string | undefined;
+    let skyUrl: string | undefined;
     try {
       const p = JSON.parse(raw);
       name = p.name ?? name;
       type = p.type ?? type;
       modelUrl = p.modelUrl;
+      skyUrl = p.skyUrl;
     } catch {
       /* ignore */
     }
@@ -598,7 +690,7 @@ export function EditorView({
         landedOutside = !!vol && vol.contain && !isOverFootprint(vol, hit.x, hit.z);
       }
     }
-    place(name, type, point, modelUrl);
+    place(name, type, point, modelUrl, skyUrl);
     setSpaceToast(landedOutside ? `${name} snapped into ${vol!.name}` : null);
   };
 
@@ -1249,7 +1341,7 @@ export function EditorView({
                   }
             }
             onClose={() => setTool(null)}
-            onPlace={(a) => place(a.name, a.type, undefined, a.modelUrl)}
+            onPlace={(a) => place(a.name, a.type, undefined, a.modelUrl, a.skyUrl)}
             onDefineSpace={() => {
               // Straight into define mode, library closed: the gesture is the
               // point, and a tile that only opened a panel would be one more
@@ -1344,7 +1436,7 @@ export function EditorView({
               store={assets}
               projectName={projectName}
               onClose={() => setAgentOpen(false)}
-              onPlaceAsset={(a) => place(a.name, a.type, undefined, a.modelUrl)}
+              onPlaceAsset={(a) => place(a.name, a.type, undefined, a.modelUrl, a.skyUrl)}
               onOpenGenerate3D={() => {
                 setAgentOpen(false);
                 setGen3dOpen(true);
@@ -1545,8 +1637,17 @@ export function EditorView({
               }
               active={activeSetting}
               onSelect={selectSetting}
+              slot={matSlot}
+              onSlot={setMatSlot}
               orbit={cameraRelation?.orbit ?? null}
-              distance={cameraRelation?.nearDistance ?? null}
+              /* The row reads zoom, not metres — the panel is told the
+                 multiple rather than deriving it, so there is one place that
+                 knows how far/near becomes "3.9x". */
+              zoom={
+                cameraRelation
+                  ? zoomOf(cameraRelation.farDistance, cameraRelation.nearDistance)
+                  : null
+              }
               height={cameraRelation?.span ?? null}
             />
           )}
@@ -1583,7 +1684,9 @@ export function EditorView({
                 }
               : null
           }
+          slot={matSlot}
           onChange={applyTransform}
+          onMaterial={(patch) => scene.updateMaterial(selected.id, matSlot, patch)}
           onRigChange={(patch) =>
             scene.selectedRig && scene.updateRig(scene.selectedRig.id, patch)
           }
@@ -1604,6 +1707,17 @@ export function EditorView({
             // The app is a hash router — clearing the hash IS going home.
             window.location.hash = "";
           }}
+        />
+      )}
+
+      {pendingBackdrop && (
+        <BackdropReplaceDialog
+          currentName={pendingBackdrop.current.name}
+          currentType={pendingBackdrop.current.source}
+          incomingName={pendingBackdrop.name}
+          incomingType={pendingBackdrop.type}
+          onReplace={() => resolveBackdrop(true)}
+          onKeep={() => resolveBackdrop(false)}
         />
       )}
 
@@ -1640,7 +1754,7 @@ export function EditorView({
           assets={assets.assets}
           assetStore={assets}
           projectName={projectName}
-          credits={terraCredits}
+          credits={creditBalance}
           reframeRig={() => {
             // One rig today, so this frames the first — the model allows more,
             // and the panel's camera axes read rig[0] the same way.
@@ -1650,7 +1764,7 @@ export function EditorView({
             }
           }}
           onClose={() => setTerraGenOpen(false)}
-          onDispatch={(order) => {
+          onDispatch={(order, materials) => {
             // The dispatch now lands somewhere the user can find it again. The
             // total comes from the order itself so the row's denominator is the
             // number the review screen just charged for.
@@ -1663,6 +1777,12 @@ export function EditorView({
               project: projectName,
               total: totals.frames,
               credits: totals.credits,
+              // The material state this run was dispatched with. It rides on the
+              // row because a run is the record of what was sent: a dataset
+              // rendered with a teal cab is not the same dataset as one rendered
+              // with the default, and the row is the only place that fact could
+              // survive the scene being edited afterwards.
+              materials,
             });
           }}
         />

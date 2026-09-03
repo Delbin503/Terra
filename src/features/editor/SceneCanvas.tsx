@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Line, OrbitControls, GizmoHelper, Html, TransformControls } from "@react-three/drei";
-import { Mesh, Object3D, Plane, Vector3, type Camera, type Group, type Ray } from "three";
+import {
+  Mesh,
+  Object3D,
+  Plane,
+  Vector3,
+  type Camera,
+  type Group,
+  type Ray,
+  type ShaderMaterial,
+} from "three";
 
 /** Reused by the rig handles' orbit plane — allocating per pointer event would
  *  churn a Vector3 every frame of a drag. */
@@ -16,10 +25,102 @@ import type { SceneApi } from "./useScene";
 import { VolumeBox, VolumeDraw, VolumeHandles, type VolumeGizmo } from "./VolumeBox";
 import { ancestorIds, subtreeIds } from "./scene-tree";
 import { radiusOf } from "./group-transform";
-import type { SceneObject } from "./scene-types";
+import { DEFAULT_SKY_INFLUENCE, type SceneObject } from "./scene-types";
 import { contactWalls, type SceneVolume, type Vec3 } from "./scene-volume";
 
+/**
+ * The sky a scene renders with nothing placed.
+ *
+ * Not a fallback for a broken path — a starting point. An empty scene still has
+ * to be lit and still has to have a horizon, and the alternative to shipping
+ * one is a black viewport that reads as a loading failure. It is also what the
+ * catalogue's named placeholder skies keep rendering, since they carry no file
+ * of their own; see `skyUrl` in assets-data.
+ *
+ * Gitignored along with the rest of `public/hdri/` — see the README.
+ */
+const DEFAULT_SKY = "/hdri/aarfontein_dusk_4k.exr";
+
 const R2D = 180 / Math.PI;
+
+/**
+ * SKY BRIGHTNESS, ON THE THING THAT IS ACTUALLY THE SKY.
+ * -----------------------------------------------------
+ * `<Environment backgroundIntensity>` sets `scene.backgroundIntensity`, which
+ * scales the cube map three draws behind everything. That is NOT what this
+ * viewport shows: because the environment is used with `ground`, drei renders a
+ * GroundProjectedEnv mesh, and the horizon you see is that mesh's own shader
+ * sampling the HDRI directly. It never reads `backgroundIntensity`, so the
+ * control appeared to do nothing at all — the slider moved, the payload changed,
+ * the picture didn't.
+ *
+ * three-stdlib's shader has no intensity uniform to set, so one is added: the
+ * fragment shader has exactly one line that writes a colour, and this multiplies
+ * it. Patched once per material and then only the uniform is written, so a drag
+ * doesn't recompile a shader sixty times a second.
+ *
+ * IT IS TIED TO A SHADER WE DO NOT OWN, so it is written to fail loudly rather
+ * than quietly: if the mesh or that line ever stops being findable — a drei or
+ * three-stdlib upgrade — it says so once instead of leaving a dead slider.
+ */
+function SkyBrightness({ value }: { value: number }) {
+  const scene = useThree((s) => s.scene);
+  const material = useRef<ShaderMaterial | null>(null);
+  const tries = useRef(0);
+
+  useFrame(() => {
+    if (material.current) {
+      material.current.uniforms.terraSkyBrightness.value = value;
+      return;
+    }
+    // The mesh mounts a frame or two after this does, so it is looked for over
+    // the first second and then given up on.
+    if (tries.current > 90) return;
+    tries.current += 1;
+
+    let found: ShaderMaterial | null = null;
+    scene.traverse((o) => {
+      if (found) return;
+      const mat = (o as Mesh).material as ShaderMaterial | undefined;
+      // Identified by its uniforms rather than by class or name: it is
+      // constructed inside drei and neither of those is stable.
+      if (mat?.uniforms?.radius && mat.uniforms.height && mat.uniforms.map) found = mat;
+    });
+    if (!found) {
+      if (tries.current === 90) {
+        console.warn(
+          "[Terra] Sky Brightness is not wired: the ground-projected environment mesh was not found."
+        );
+      }
+      return;
+    }
+
+    const mat = found as ShaderMaterial;
+    const WRITE = "gl_FragColor = vec4( outcolor, 1.0 );";
+    if (!mat.fragmentShader.includes(WRITE)) {
+      console.warn(
+        "[Terra] Sky Brightness is not wired: the ground projection shader no longer has the line it patches."
+      );
+      tries.current = 999;
+      return;
+    }
+    mat.uniforms.terraSkyBrightness = { value };
+    mat.fragmentShader = mat.fragmentShader.replace(
+      WRITE,
+      "gl_FragColor = vec4( outcolor * terraSkyBrightness, 1.0 );"
+    );
+    // Declared alongside the uniforms the shader already has.
+    mat.fragmentShader = mat.fragmentShader.replace(
+      "uniform float radius;",
+      "uniform float radius;\n            uniform float terraSkyBrightness;"
+    );
+    mat.needsUpdate = true;
+    material.current = mat;
+  });
+
+  return null;
+}
+
 
 /** How far the orientation cube's outermost ink reaches from its centre. The
  *  overlay chrome needs it too — the view readout hangs under the cube. */
@@ -86,6 +187,46 @@ export function SceneWorld({
 }) {
   const reg = register ?? noop;
   const sel = onSelect ?? noop;
+
+  /**
+   * What the sky is doing, from whatever world assets are standing in for it.
+   *
+   * TWO DIFFERENT QUESTIONS, ANSWERED BY DIFFERENT OBJECTS, so they are looked
+   * up separately rather than both taken off one "the backdrop" object.
+   *
+   * Brightness is the exposure of the SKY TEXTURE, so only the two assets that
+   * are a sky texture can set it. A splat is excluded on purpose: its brightness
+   * already drives its own point cloud (see SceneObjectMesh), and letting it
+   * also scale the horizon would make one slider do two unrelated jobs.
+   *
+   * Influence is the ambient landing on the objects, and any world asset casts
+   * that — a captured warehouse lights what stands in it exactly as an HDRI
+   * does. First one placed wins, preferring the sky assets, because two worlds
+   * in one scene is already a scene that needs deciding rather than averaging.
+   *
+   * Nothing placed means the values the canvas has always rendered at.
+   *
+   * AND WHICH SKY IT IS. `files` used to be a hardcoded path, so placing an
+   * Environment or a Skybox changed the exposure of the shipped default and
+   * nothing else — you chose "Anime Sky", the horizon stayed a South African
+   * dusk, and the only honest reading was that the asset had not been placed.
+   * The placed object's own file wins now; the default is what renders when
+   * nothing is placed, or when what is placed is one of the catalogue's named
+   * placeholders (see `skyUrl` in assets-data).
+   */
+  const sky = useMemo(() => {
+    const visible = (src: SceneObject["source"]) =>
+      scene.objects.find((o) => o.source === src && !o.hidden);
+    const hdri = visible("environment");
+    const skybox = visible("skybox");
+    const texture = hdri ?? skybox;
+    const lighting = hdri ?? skybox ?? visible("splat");
+    return {
+      brightness: texture?.brightness ?? 1,
+      influence: lighting?.skyInfluence ?? DEFAULT_SKY_INFLUENCE,
+      files: texture?.skyUrl ?? DEFAULT_SKY,
+    };
+  }, [scene.objects]);
   return (
     <>
       <directionalLight
@@ -95,10 +236,25 @@ export function SceneWorld({
         castShadow
       />
 
+      {/* THE SKY, AND HOW MUCH OF IT LANDS ON THINGS.
+          Both numbers used to be constants. They are now the two controls on a
+          placed HDRI: Sky Brightness is the backdrop's own exposure, Sky
+          Influence is what it contributes to everything standing in front of it.
+          With nothing placed the scene falls back to exactly what it rendered
+          before the controls existed, so an untouched project looks untouched. */}
+      {/* Sky Brightness has to be applied by hand — see SkyBrightness. */}
+      <SkyBrightness value={sky.brightness} />
+
+      {/* KEYED ON THE FILE. drei picks its loader from the extension at mount
+          (RGBELoader for .hdr, a gainmap decoder for .jpg — see useEnvironment),
+          so swapping the path on a live instance asks one loader's texture to
+          come out of another's. Remounting is the honest way to change sky. */}
       <Environment
-        files="/hdri/aarfontein_dusk_4k.exr"
+        key={sky.files}
+        files={sky.files}
         background
-        environmentIntensity={0.35}
+        backgroundIntensity={sky.brightness}
+        environmentIntensity={sky.influence}
         ground={{ height: 15, radius: 60, scale: 400 }}
       />
 
@@ -123,6 +279,15 @@ export function SceneWorld({
         .map((o) => (substitute && o.id === substitute.id ? substitute : o))
         .filter((o) => o.id !== hideId && !hideIds?.includes(o.id) && !o.hidden)
         .filter((o) => !(hideCameras && o.source === "camera"))
+        /* A SKY HAS NO BODY IN THE SCENE. An HDRI and a skybox were drawing a
+           placeholder solid — a box standing on the ground, hoverable,
+           outlined, with a gizmo — while the thing they actually are was the
+           horizon behind it. Two objects for one asset, and the one you could
+           click was the one that did nothing. Their presence is the
+           `<Environment>` above; they are selected from the layers tree, which
+           is where a thing with no body belongs. A splat keeps its cloud: a
+           captured place IS a body, standing somewhere you can move it to. */
+        .filter((o) => o.source !== "environment" && o.source !== "skybox")
         .map((o) =>
           o.source === "camera" ? (
             <CameraObjectMesh
@@ -142,6 +307,7 @@ export function SceneWorld({
               }
               onSelect={sel}
               register={reg}
+              onMaterials={scene.discoverMaterials}
             />
           )
         )}

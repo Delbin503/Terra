@@ -9,6 +9,8 @@ import { MoveDialog, type MoveRequest } from "./MoveDialog";
 import {
   CARD_SIZE,
   LAYOUTS,
+  SORTS,
+  type ProjectSort,
   initialScope,
   shelfSpec,
   type Layout,
@@ -32,6 +34,24 @@ import type { Folder, Project } from "./data";
 
 const matches = (name: string, query: string) =>
   name.toLowerCase().includes(query.trim().toLowerCase());
+
+/**
+ * PUT A LIST IN ORDER.
+ *
+ * Alphabetical is `localeCompare`, so accented names file where a reader would
+ * look for them rather than where their code points fall.
+ *
+ * LAST UPDATED IS THE SOURCE ORDER, and that is not a shortcut — it is what the
+ * workspace's own list means. Projects arrive most-recently-edited first (see
+ * `projects` in data.ts, whose `editedLabel` runs from "4 days ago" down to
+ * "a month ago"), and there is no timestamp on a project to sort by instead.
+ * The day one arrives, this becomes a comparison on it and nothing else here
+ * changes; a copy of the array either way, since sorting in place would
+ * quietly reorder the workspace itself.
+ */
+function ordered<T extends { name: string }>(list: T[], sort: ProjectSort): T[] {
+  return sort === "alphabetical" ? [...list].sort((a, b) => a.name.localeCompare(b.name)) : list;
+}
 
 /** Where the right-click menu was opened, and on what. */
 interface MenuAt {
@@ -256,6 +276,9 @@ export function ProjectsView({
     setMenu({ kind, id, x: e.clientX, y: e.clientY });
   };
 
+  /** Which order the shelf is in — see SORTS. */
+  const [sort, setSort] = useState<ProjectSort>("updated");
+
   /** Cards size themselves from the slider rather than a column count. */
   const gridStyle = {
     gridTemplateColumns: `repeat(auto-fill, minmax(${cardSize}px, 1fr))`,
@@ -267,15 +290,18 @@ export function ProjectsView({
     if (openFolder) list = list.filter((p) => p.folderId === openFolder.id);
     else if (shelf === "favourites") list = list.filter((p) => p.favourite);
     else if (scope === "shared") list = list.filter((p) => p.shared);
-    return list.filter((p) => matches(p.name, query));
-  }, [projects, openFolder, shelf, scope, query]);
+    return ordered(list.filter((p) => matches(p.name, query)), sort);
+  }, [projects, openFolder, shelf, scope, query, sort]);
 
   const shownFolders = useMemo(() => {
     let list = folders;
     if (shelf === "favourites") list = list.filter((f) => f.favourite);
     else if (scope === "shared") list = list.filter((f) => f.shared);
-    return list.filter((f) => matches(f.name, query));
-  }, [folders, shelf, scope, query]);
+    // Folders take the same order. The control sits on the search field, which
+    // is showing on the Folders shelf too — a sort that silently applied to
+    // only one of the two bodies would be a control that lies on the other.
+    return ordered(list.filter((f) => matches(f.name, query)), sort);
+  }, [folders, shelf, scope, query, sort]);
 
   /** Folders are the body on the Folders shelf, and on Favourites when asked. */
   const showingFolders =
@@ -362,14 +388,13 @@ export function ProjectsView({
                 aria-label={openFolder ? "Search project" : spec.searchLabel}
                 className="type-body min-w-0 flex-1 bg-transparent text-content outline-none placeholder:text-content-subtle"
               />
-              {/* The design's filter glyph. It labels the field's scope rather
-                  than opening anything — the filter flow isn't designed yet. */}
-              <Icon
-                name="filter"
-                size={16}
-                aria-hidden
-                className="shrink-0 text-content-subtle"
-              />
+              {/* THE GLYPH NOW DOES SOMETHING.
+                  It sat here inert for a while, labelling the field's scope
+                  while the filter flow went undesigned — a control-shaped thing
+                  that ignored every click. Sorting is what it should always
+                  have opened: it belongs to the same list the search box
+                  narrows, so it belongs on the same field. */}
+              <SortMenu value={sort} onChange={setSort} />
             </label>
 
             {/* A folder is already a scope, so it carries no second filter. */}
@@ -666,6 +691,113 @@ function FolderTitle({
                 </span>
               </button>
             ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * SortMenu — the search field's trailing glyph, and what it opens.
+ *
+ * A menu rather than a segmented pair: the two orders are a choice of one, the
+ * trigger has ~16px inside a field that is already full, and the labels
+ * ("Last Updated") do not shorten into a chip without becoming a guess.
+ *
+ * It lives INSIDE the search `<label>`, which is why the trigger stops the
+ * click from propagating: without that, every press on it would also focus the
+ * input the label is bound to, and the menu would open with the caret blinking
+ * behind it.
+ */
+function SortMenu({
+  value,
+  onChange,
+}: {
+  value: ProjectSort;
+  onChange: (v: ProjectSort) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = SORTS.find((o) => o.value === value) ?? SORTS[0];
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        data-ui="projects-sort"
+        aria-label={`Sort — ${current.label}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={`Sort — ${current.label}`}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className={cn(
+          "grid h-6 w-6 place-items-center rounded-md transition-colors",
+          open ? "bg-surface-raised text-content" : "text-content-subtle hover:text-content"
+        )}
+      >
+        <Icon name="filter" size={16} />
+      </button>
+
+      {open && (
+        <>
+          {/* Closes on any click outside, including one aimed at the grid
+              underneath — a menu you have to dismiss with a second, accurate
+              click on the trigger is a menu that feels stuck. */}
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div
+            role="menu"
+            data-ui="projects-sort-menu"
+            /* The same surface `ContextMenu` uses, not a glass tier: this page
+               is the solid home shell, and a menu here covers other chrome —
+               the layout switch and the New Project button sit right behind it.
+               Glass over controls smears them without hiding them. */
+            className="absolute right-0 top-[calc(100%+10px)] z-50 w-52 rounded-xl border border-line/12 bg-surface-overlay p-1.5 shadow-pop"
+          >
+            <p className="type-eyebrow px-2.5 pb-1 pt-1 text-content-muted">Sort by</p>
+            {SORTS.map((o) => {
+              const on = o.value === value;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={on}
+                  data-ui={`projects-sort-${o.value}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onChange(o.value);
+                    // One order at a time, so choosing is the whole errand.
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors",
+                    on ? "bg-brand/12" : "hover:bg-surface-raised"
+                  )}
+                >
+                  <Icon
+                    name={o.icon}
+                    size={15}
+                    className={cn("shrink-0", on ? "text-brand" : "text-content-subtle")}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className={cn("type-body block", on ? "text-content" : "text-content-muted")}>
+                      {o.label}
+                    </span>
+                    <span className="type-caption block text-content-subtle">{o.hint}</span>
+                  </span>
+                  <Icon
+                    name="check"
+                    size={14}
+                    className={cn("shrink-0 text-brand", on ? "" : "invisible")}
+                  />
+                </button>
+              );
+            })}
           </div>
         </>
       )}

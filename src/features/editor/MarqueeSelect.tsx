@@ -4,7 +4,7 @@ import { Icon } from "@/components/icons";
 import { GlassBar } from "@/components/glass";
 import { READOUT } from "./scene-palette";
 import { subtreeIds } from "./scene-tree";
-import type { SceneObject } from "./scene-types";
+import { isWorldAsset, type SceneObject } from "./scene-types";
 import type { CameraHandle } from "./SceneCanvas";
 import type { SceneApi } from "./useScene";
 
@@ -55,12 +55,13 @@ const normalize = (r: Rect) => ({
  * What a box is allowed to catch.
  *
  * Cameras are out: a rig is one instrument with a capture plan attached, and it
- * is not a thing you sweep up with the furniture. The environment and the skybox
- * are out because they are the world rather than things in it. Hidden objects are
- * out because a selection you cannot see is a selection you cannot check.
+ * is not a thing you sweep up with the furniture. World assets — HDRI, skybox,
+ * splat — are out because they ARE the world rather than things in it. Hidden
+ * objects are out because a selection you cannot see is a selection you cannot
+ * check.
  */
 const isCatchable = (o: SceneObject) =>
-  !o.hidden && o.source !== "camera" && o.source !== "environment" && o.source !== "skybox";
+  !o.hidden && o.source !== "camera" && !isWorldAsset(o.source);
 
 export function MarqueeSelect({
   scene,

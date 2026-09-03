@@ -19,9 +19,21 @@ export type EditTab = "object" | "texture" | "capture";
  * leaves the object selected. `tab === null` is therefore a normal resting
  * state — the object is still yours, you just want to look at it.
  *
+ * A SKY GETS ONE TILE. An HDRI and a skybox have no body — no position to
+ * move, nothing to turn, nothing to scale — so there is no Object tab for them
+ * to open, and offering one led straight to three sliders that moved a texture
+ * wrapped around the whole world. What they do have is an appearance: how
+ * bright the sky renders and how much of it lands on everything else. A
+ * Gaussian splat keeps both tiles, because a splat IS a body — a captured place
+ * standing at a position you can move.
+ *
  * A camera gets a different set: Capture instead of Texture, and no Role tile
  * at all — a capture rig can't be the scene's hero or its clutter, it's the
  * thing pointed AT them.
+ *
+ * A Gaussian splat keeps the same two tiles but the second one reads
+ * "Appearance": what sits behind it is one brightness scalar, and a tile
+ * promising Texture opens a panel with no texture in it.
  */
 export function ObjectToolbar({
   tab,
@@ -42,6 +54,14 @@ export function ObjectToolbar({
   onSetRole: (role: ObjectRole) => void;
 }) {
   const isCamera = source === "camera";
+  const isSplat = source === "splat";
+  const isSky = source === "environment" || source === "skybox";
+  const appearance = {
+    icon: (isSplat || isSky ? "sunny" : "texture") as IconName,
+    label: isSplat || isSky ? "Appearance" : "Texture",
+    onClick: () => onTab("texture"),
+    active: tab === "texture",
+  };
   const tiles: {
     icon: IconName;
     label: string;
@@ -53,10 +73,17 @@ export function ObjectToolbar({
         { icon: "camera", label: "Object", onClick: () => onTab("object"), active: tab === "object" },
         { icon: "capture", label: "Capture", onClick: () => onTab("capture"), active: tab === "capture" },
       ]
-    : [
-        { icon: "input-3d", label: "Object", onClick: () => onTab("object"), active: tab === "object" },
-        { icon: "texture", label: "Texture", onClick: () => onTab("texture"), active: tab === "texture" },
-      ];
+    : isSky
+      ? [appearance]
+      : [
+          {
+            icon: isSplat ? "splat" : "input-3d",
+            label: "Object",
+            onClick: () => onTab("object"),
+            active: tab === "object",
+          },
+          appearance,
+        ];
 
   return (
     <div

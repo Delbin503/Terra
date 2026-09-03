@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { creditsFor } from "./work-order";
+import type { MaterialPayload } from "./material-payload";
 
 /**
  * WORK ORDER RUNS — what happened to the orders you dispatched.
@@ -55,6 +56,18 @@ export interface WorkOrderRun {
   startedAt: number;
   /** how long this attempt is simulated to take, ms */
   durationMs: number;
+  /**
+   * The material state this run was dispatched with — every modified slot, the
+   * sky's two parameters, any splat brightness. Built by `buildMaterialPayload`
+   * at the moment of dispatch.
+   *
+   * STORED FOR THE SAME REASON `credits` IS. It is what was SENT, and the scene
+   * it was read from carries on being edited afterwards — so a run row is the
+   * only place the materials this dataset was actually rendered with can
+   * survive. Absent on runs dispatched before materials travelled with an
+   * order, which is why it is optional rather than an empty payload.
+   */
+  materials?: MaterialPayload;
 }
 
 /** 0–100. A finished run reads 100 even if the pipeline stopped a frame short,
@@ -255,6 +268,8 @@ export interface RunInit {
   total: number;
   /** what the dispatch review charged for this order */
   credits: number;
+  /** the scene's modified materials, packaged for TerraGen */
+  materials?: MaterialPayload;
 }
 
 export interface WorkOrderRunStore {
@@ -317,6 +332,7 @@ export function useWorkOrderRuns(projectName: string): WorkOrderRunStore {
       status: "running",
       startedAt: Date.now(),
       durationMs: durationFor(init.total),
+      materials: init.materials,
     };
     // Newest first: the run you just dispatched is the one you opened the list
     // to look at.

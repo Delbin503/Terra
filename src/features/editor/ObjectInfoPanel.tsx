@@ -24,11 +24,12 @@ import {
   ROLE_PILL_TONE,
   SOURCE_LABEL,
   canTakeRole,
+  materialOf,
   type SceneObject,
 } from "./scene-types";
 import { defaultManualTags, defaultSmartTags, type AssetType } from "./assets-data";
 
-const TYPES: AssetType[] = ["mesh", "skybox", "environment", "image", "video"];
+const TYPES: AssetType[] = ["mesh", "skybox", "environment", "splat", "image", "video"];
 
 /** A stable number from an object id, so its default tags don't reshuffle. */
 function seedOf(id: string): number {
@@ -66,6 +67,10 @@ export function ObjectInfoPanel({
   onDelete: () => void;
 }) {
   const seed = seedOf(object.id);
+  // The card answers "what is this thing?", and for an object with several
+  // materials the honest one-line answer is the first one — the Texture panel is
+  // where the other elements are inspected, one at a time.
+  const material = materialOf(object, 0);
   const smart = object.smartTags ?? defaultSmartTags(seed);
   const manual = object.manualTags ?? defaultManualTags(seed);
 
@@ -122,7 +127,7 @@ export function ObjectInfoPanel({
             fallback={
               <div
                 className="grid h-full w-full place-items-center"
-                style={{ background: object.color }}
+                style={{ background: material.color }}
               >
                 <Icon name="input-3d" size={28} className="text-white/70" />
               </div>
@@ -227,9 +232,9 @@ export function ObjectInfoPanel({
                     <span className="inline-flex items-center gap-1.5">
                       <span
                         className="h-3 w-3 rounded-full ring-1 ring-glass/25"
-                        style={{ background: object.color }}
+                        style={{ background: material.color }}
                       />
-                      <span className="type-code-sm uppercase">{object.color}</span>
+                      <span className="type-code-sm uppercase">{material.color}</span>
                     </span>
                   }
                 />

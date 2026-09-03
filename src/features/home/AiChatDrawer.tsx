@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
-import { credits } from "./data";
+import { useSettings } from "@/features/settings/settings-store";
 import { useWorkspace } from "./workspace";
 
 /**
@@ -46,6 +46,7 @@ export function AiChatDrawer({
   onCreateWorld: () => void;
 }) {
   const { projects, folders } = useWorkspace();
+  const { creditBalance } = useSettings();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [showContext, setShowContext] = useState(true);
@@ -73,7 +74,7 @@ export function AiChatDrawer({
   function reply(asked: string): string {
     const q = asked.toLowerCase();
     if (q.includes("credit")) {
-      return `You have ${credits.balance.toLocaleString()} credits left. Credits pay for every dataset run and don't reset monthly — a world costs 129, and Settings → Terra Balance shows what you've generated so far.`;
+      return `You have ${creditBalance.toLocaleString()} credits left. Credits pay for every dataset run and don't reset monthly — a world costs 129, and Settings → Terra Balance shows what you've generated so far.`;
     }
     if (q.includes("lately") || q.includes("recent") || q.includes("made")) {
       const recent = projects.slice(0, 3).map((p) => p.name);

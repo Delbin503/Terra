@@ -5,8 +5,10 @@ export const workspace = {
   name: user.workspace, // "MetaBlock AI"
 };
 
-/** Terra credits balance for the workspace. */
-export const terraCredits = 3728;
+/* The credit balance used to be a constant here too — see the note in
+   features/home/data.ts. It belongs to the account store now, so the editor's
+   credit popover and the dispatch review read the same figure the home rail and
+   Settings do, and a top-up moves all four. */
 
 /** The signed-in user — owner of this project. */
 export const owner = {

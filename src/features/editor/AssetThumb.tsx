@@ -49,6 +49,8 @@ function AssetThumbArt({ type, seed }: { type: AssetType; seed: number }) {
         <MeshMotif />
       ) : type === "camera" ? (
         <CameraMotif />
+      ) : type === "splat" ? (
+        <SplatMotif seed={seed} hillNear={hillNear} hillFar={hillFar} />
       ) : (
         <SceneMotif type={type} hillNear={hillNear} hillFar={hillFar} hue={h} />
       )}
@@ -97,6 +99,47 @@ function SceneMotif({
           <path d="M55 51 L71 60 L55 69 Z" fill="#fff" opacity="0.92" />
         </>
       )}
+    </>
+  );
+}
+
+/**
+ * A CAPTURE, NOT A PAINTING.
+ *
+ * The scene motif says "scenery" — a horizon, hills, a sun — which is exactly
+ * what a splat is NOT: it is a place someone walked through with a camera, and
+ * what you get back is a cloud of points that is dense where they stood close
+ * and sparse where they didn't. So the thumbnail is that cloud: the same hills
+ * underneath, dissolved into points that thin out toward the edges of the walk.
+ *
+ * Deterministic from the seed like every other thumbnail here — the same asset
+ * has to draw the same cloud each time it appears, or the grid shimmers on
+ * every re-render.
+ */
+function SplatMotif({ seed, hillNear, hillFar }: { seed: number; hillNear: string; hillFar: string }) {
+  // A cheap LCG, seeded per asset. Math.random would reshuffle on every paint.
+  let n = (seed * 2654435761) % 2147483647;
+  const rand = () => ((n = (n * 48271) % 2147483647) / 2147483647);
+
+  const points = Array.from({ length: 150 }, () => {
+    const x = rand() * 120;
+    // Points gather around the horizon band, where a walked capture has the
+    // most coverage, and thin toward the sky.
+    const y = 42 + rand() * 70 + (rand() - 0.5) * 16;
+    // Density falls off toward the frame edges — the walk had a middle.
+    const edge = 1 - Math.abs(x - 60) / 60;
+    return { x, y, r: 0.7 + rand() * 1.5, o: (0.25 + rand() * 0.6) * (0.45 + edge * 0.55) };
+  });
+
+  return (
+    <>
+      {/* The place, still readable underneath — a cloud with nothing behind it
+          reads as noise rather than as somewhere. */}
+      <path d="M0 78 Q 34 60 66 74 T 120 70 V120 H0 Z" fill={hillFar} opacity="0.4" />
+      <path d="M0 96 Q 40 78 78 92 T 120 88 V120 H0 Z" fill={hillNear} opacity="0.5" />
+      {points.map((p, i) => (
+        <circle key={i} cx={p.x} cy={p.y} r={p.r} fill="#fff" opacity={p.o} />
+      ))}
     </>
   );
 }

@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Button, Select } from "@/components/ui";
 import { EditButton, PageTitle, Panel, SectionTitle } from "./settings-parts";
-import { cardLabel, useSettings } from "./settings-store";
+import { useSettings } from "./settings-store";
 import { PaymentMethodsDialog } from "./PaymentMethodsDialog";
+import { ChoosePlanDialog } from "./PlansPage";
+import { CardBrandMark, maskedPan } from "./card-parts";
 import { planSpec } from "./subscription-data";
 
 /**
@@ -13,10 +15,12 @@ import { planSpec } from "./subscription-data";
  * in the card panel next to a "View Details" link.
  */
 export function PaymentDetailsPage() {
-  const { org, exit, subscription, cards, card } = useSettings();
+  const { org, subscription, cards, card } = useSettings();
   const [who, setWho] = useState("owner-admins");
   /** the cards sheet — the second question this page is asked */
   const [methods, setMethods] = useState(false);
+  /** the plan sheet — the first one */
+  const [plans, setPlans] = useState(false);
 
   return (
     <>
@@ -37,12 +41,11 @@ export function PaymentDetailsPage() {
                 {planSpec(subscription.plan).pitch}
               </p>
             </div>
-            {/* OUT to the Pricing page, not across to Settings → Subscription.
-                Two plan pickers exist and only one of them is the one people
-                are shown everywhere else in the product; sending the org's
-                billing screen to the older copy is how the two drift. The
-                checkout still lives in Settings — Pricing hands back to it. */}
-            <Button variant="brand" size="sm" onClick={() => exit("pricing")}>
+              {/* The plans open OVER this page rather than throwing an admin out
+                of Settings to the marketing site to read them — see
+                ChoosePlanDialog. Picking one lands in the same checkout the
+                Pricing page hands off to, so there is still one transaction. */}
+            <Button variant="brand" size="sm" data-ui="view-plans" onClick={() => setPlans(true)}>
               View Plans
             </Button>
           </div>
@@ -60,11 +63,19 @@ export function PaymentDetailsPage() {
                   none — and the answer to "what am I charged on" is the one
                   thing a payment panel should be able to state without being
                   opened. */}
-              <p className="type-body mt-1 text-content-muted">
-                {cards.length
-                  ? `${cards.length} card${cards.length === 1 ? "" : "s"} on file — charges go to ${cardLabel(card ?? cards[0])}.`
-                  : "No card on file. Add one to top up credits or change plan."}
-              </p>
+              {card ? (
+                <p className="type-body mt-1 flex flex-wrap items-center gap-2 text-content-muted">
+                  <CardBrandMark brand={card.brand} />
+                  <span>
+                    {maskedPan(card.last4)} · {cards.length} card
+                    {cards.length === 1 ? "" : "s"} on file
+                  </span>
+                </p>
+              ) : (
+                <p className="type-body mt-1 text-content-muted">
+                  No card on file. Add one to top up credits or change plan.
+                </p>
+              )}
             </div>
             <Button
               variant="secondary"
@@ -112,6 +123,7 @@ export function PaymentDetailsPage() {
       </Panel>
 
       <PaymentMethodsDialog open={methods} onOpenChange={setMethods} />
+      <ChoosePlanDialog open={plans} onOpenChange={setPlans} />
     </>
   );
 }

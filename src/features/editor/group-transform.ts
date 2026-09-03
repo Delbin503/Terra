@@ -26,7 +26,7 @@
  */
 
 import { Euler, Quaternion, Vector3 } from "three";
-import type { SceneObject } from "./scene-types";
+import type { MaterialSlot, SceneObject } from "./scene-types";
 
 type Vec3 = [number, number, number];
 
@@ -155,16 +155,18 @@ export const MATERIAL_KEYS = ["color", "metalness", "roughness", "specular", "no
 
 export type MaterialKey = (typeof MATERIAL_KEYS)[number];
 
-/** The material half of a patch, or null if it doesn't touch one. */
-export function materialPart(patch: Partial<SceneObject>): Partial<SceneObject> | null {
-  const out: Partial<SceneObject> = {};
-  let any = false;
-  for (const k of MATERIAL_KEYS) {
-    if (patch[k] !== undefined) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (out as any)[k] = patch[k];
-      any = true;
-    }
-  }
-  return any ? out : null;
+/**
+ * PAINT A PATCH ONTO EVERY SLOT OF AN OBJECT.
+ *
+ * What a group edit means, now that objects have several materials. The group
+ * itself has one nominal slot and its contents have as many as their files gave
+ * them, so "paint the group teal" cannot mean "write slot 0" — a three-slot
+ * excavator inside the group would come out teal on its body and untouched
+ * everywhere else, which reads as the edit half-failing.
+ *
+ * So it is all slots, on every descendant. A group is a bulk instrument; the way
+ * to paint one element of one object is to select that object.
+ */
+export function paintAllSlots(o: SceneObject, patch: Partial<MaterialSlot>): SceneObject {
+  return { ...o, materials: o.materials.map((m) => ({ ...m, ...patch })) };
 }

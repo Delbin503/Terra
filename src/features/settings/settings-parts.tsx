@@ -307,3 +307,184 @@ export function DateField({ label }: { label: string }) {
   );
 }
 
+
+/**
+ * A RIGHT-HAND DRAWER — a record you read, beside the row that opened it.
+ *
+ * Not a dialog: a dialog is centred and takes the screen, which is right for a
+ * decision and wrong for a detail. These open against the Action column that
+ * summoned them, so the row you clicked stays under your eye and the table
+ * behind them is still the thing you are working through.
+ *
+ * The scrim DIMS rather than merely catching the click. A transparent catcher
+ * over a table leaves two competing surfaces at the same brightness, and the
+ * one you can't interact with looks like the one you can.
+ *
+ * SOLID, NOT GLASS — the `solid` surface tier Dialog offers for the same reason
+ * (see components/ui/dialog). Glass is right over the 3D canvas, where what
+ * shows through is a scene; these open over a dense table, and a receipt read
+ * through six columns of somebody else's figures is a receipt you cannot check.
+ */
+export function SideDrawer({
+  label,
+  onClose,
+  children,
+  footer,
+  width = "30rem",
+}: {
+  /** what the drawer is about, for the accessible name */
+  label: string;
+  onClose: () => void;
+  children: ReactNode;
+  /** pinned to the bottom edge, out of the scroll — the actions */
+  footer?: ReactNode;
+  width?: string;
+}) {
+  /* Escape closes it. A panel that covers a third of the window and can only be
+     dismissed by finding its own small button is a modal without saying so. */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-[55] bg-black/70 backdrop-blur-sm animate-fade-in"
+        onClick={onClose}
+        aria-hidden
+      />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        style={{ width }}
+        className="fixed right-0 top-0 z-[56] flex h-screen max-w-[calc(100vw-1.5rem)] flex-col border-l border-line/12 bg-surface-overlay shadow-lg animate-panel-in"
+      >
+        {/* One scroller, so a long receipt moves under a header and a footer that
+            stay put — the close control and the action are the two things you
+            must not have to scroll to reach. */}
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+        {footer && <div className="border-t border-glass/10 p-6">{footer}</div>}
+      </aside>
+    </>
+  );
+}
+
+/** The drawer's own header: an icon, a title with a state chip, and the close. */
+export function DrawerHeader({
+  icon,
+  tone = "brand",
+  title,
+  subtitle,
+  badge,
+  onClose,
+}: {
+  icon: IconName;
+  tone?: "brand" | "success" | "warning" | "danger";
+  title: string;
+  subtitle?: string;
+  badge?: ReactNode;
+  onClose: () => void;
+}) {
+  const tones = {
+    brand: "bg-brand-soft text-brand",
+    success: "bg-success-soft text-success",
+    warning: "bg-warning-soft text-warning",
+    danger: "bg-danger-soft text-danger",
+  };
+  return (
+    <div className="flex items-start gap-3 border-b border-glass/10 p-6">
+      <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-full", tones[tone])}>
+        <Icon name={icon} size={19} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="flex flex-wrap items-center gap-2">
+          <span className="font-display text-lg font-semibold text-content">{title}</span>
+          {badge}
+        </p>
+        {subtitle && <p className="type-body mt-0.5 text-content-muted">{subtitle}</p>}
+      </div>
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        data-ui="drawer-close"
+        className="-mr-1 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-content-subtle transition-colors hover:bg-glass/15 hover:text-content"
+      >
+        <Icon name="close" size={16} />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * A LABELLED FACT — the read-only twin of a form field.
+ *
+ * The drawers state things you cannot change (an invoice number, the card a
+ * charge went to) and the design draws them as fields: a small label with the
+ * value under it. They are NOT inputs, so they get no well and no border —
+ * a box around a value you can't edit is a control that doesn't respond.
+ */
+export function FactField({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <p className="type-body-dense text-content-muted">{label}</p>
+      <p className="type-body-strong mt-0.5 truncate text-content">{value}</p>
+    </div>
+  );
+}
+
+/**
+ * ONE LINE OF A RECEIPT — a label, the rate it came from, and the figure.
+ *
+ * Shared by the checkout's order summary and the invoice drawer because they are
+ * the same object read at two moments: the summary is the receipt before you
+ * agree to it. Two copies of this drifted in exactly the way that matters —
+ * a subtotal that lines up in one column and not the other.
+ */
+export function ReceiptLine({
+  label,
+  note,
+  value,
+  strong,
+  muted,
+  rule,
+}: {
+  label: string;
+  note?: string;
+  value: string;
+  strong?: boolean;
+  /** a figure that is not a charge — "Free" */
+  muted?: boolean;
+  /** the hairline the design puts under each seat line */
+  rule?: boolean;
+}) {
+  return (
+    <div className={cn("flex items-start gap-3", rule && "border-b border-glass/10 pb-4")}>
+      <span className="min-w-0 flex-1">
+        <span
+          className={cn(
+            "block",
+            strong ? "type-body-lg-strong text-content" : "type-body-lg text-content"
+          )}
+        >
+          {label}
+        </span>
+        {note && <span className="type-body-dense mt-0.5 block text-content-subtle">{note}</span>}
+      </span>
+      <span
+        className={cn(
+          "shrink-0 tabular-nums",
+          strong ? "type-body-lg-strong text-content" : "type-body-lg",
+          muted ? "text-content-muted" : "text-content"
+        )}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}

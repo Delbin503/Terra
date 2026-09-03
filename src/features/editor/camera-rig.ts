@@ -104,6 +104,46 @@ export function orbitShots(startDeg: number, endDeg: number, shots: number): num
   return Array.from({ length: n }, (_, i) => startDeg + step * i);
 }
 
+/* --------------------------------------------------------------------- zoom */
+
+/**
+ * ZOOM, NOT METRES — how the near end of the sweep is READ and EDITED.
+ *
+ * The rig's own standing distance is the frame you composed: it is what the far
+ * shot looks like, and every closer shot is that frame magnified. So the near
+ * end reads as a multiple of it — 1x is the rig where it stands, 2x is half the
+ * distance, 4x a quarter — which is the number a person can actually picture.
+ * "2.6 m" could be a close-up or a wide shot depending on how big the object is
+ * and where the rig happens to be; "3.9x" is the same amount of zoom either way.
+ *
+ * THE MODEL STAYS METRIC. `nearDistance` is still metres, because that is what
+ * positions a camera, plans a stop and prints in the Work Order. Zoom is a lens
+ * on that number, converted at the edges — which is why these are two functions
+ * and not a stored field that could disagree with the geometry.
+ */
+export const ZOOM_STEP = 0.1;
+
+/** How magnified the near end is against the rig's own framing. */
+export const zoomOf = (farDistance: number, nearDistance: number) =>
+  farDistance / Math.max(0.001, nearDistance);
+
+/** The metres a zoom asks for. */
+export const distanceAtZoom = (farDistance: number, zoom: number) =>
+  farDistance / Math.max(1, zoom);
+
+/**
+ * The most zoom the rig can reach before TerraGen's own floor stops it.
+ *
+ * Floored at 1x plus a step so the slider always has somewhere to travel: a rig
+ * parked on top of its own near limit would otherwise hand the control a range
+ * of zero and a handle that cannot move.
+ */
+export const maxZoom = (farDistance: number, nearLimit: number) =>
+  Math.max(1 + ZOOM_STEP, zoomOf(farDistance, nearLimit));
+
+/** One decimal, always — "1.0x", "3.9x". */
+export const formatZoom = (zoom: number) => `${zoom.toFixed(1)}x`;
+
 export const DISTANCE_SHOTS_RANGE = { min: 1, max: 12, step: 1 };
 export const SHOTS_RANGE = { min: 4, max: 120, step: 1 };
 

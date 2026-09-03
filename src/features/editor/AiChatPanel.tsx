@@ -69,15 +69,15 @@ export function AiChatPanel({ scene, onClose }: { scene: SceneApi; onClose: () =
     if (!sel) return null;
     const color = Object.keys(COLORS).find((c) => new RegExp(`\\b${c}\\b`).test(t));
     if (color) {
-      scene.update(sel.id, { color: COLORS[color] });
+      scene.paintMaterial(sel.id, { color: COLORS[color] });
       return `Changed ${sel.name} to ${color}.`;
     }
     if (/\b(metal|metallic|shiny|chrome|reflective)\b/.test(t)) {
-      scene.update(sel.id, { metalness: 0.9, roughness: 0.2 });
+      scene.paintMaterial(sel.id, { metalness: 0.9, roughness: 0.2 });
       return `Made ${sel.name} more metallic.`;
     }
     if (/\b(matte|rough|dull)\b/.test(t)) {
-      scene.update(sel.id, { metalness: 0.05, roughness: 1 });
+      scene.paintMaterial(sel.id, { metalness: 0.05, roughness: 1 });
       return `Gave ${sel.name} a matte finish.`;
     }
     if (/\b(big|bigger|large|larger|grow)\b/.test(t)) {

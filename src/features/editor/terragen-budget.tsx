@@ -346,7 +346,7 @@ export interface Change {
  */
 export function orderChanges(
   order: WorkOrder,
-  scene: { objects: number; weatherSets: number }
+  scene: { objects: number; weatherSets: number; materialSlots: number; materialObjects: number }
 ): Change[] {
   const rows: Change[] = [];
   const swaps = order.swaps.filter((s) => s.inRun).length;
@@ -368,6 +368,21 @@ export function orderChanges(
       icon: "arrange",
       label: `Arrangements (seed ${order.layouts.seed})`,
       value: formatCount(order.layouts.count),
+    });
+  }
+  // Material edits are the one thing in this list that costs nothing and
+  // changes everything — they don't multiply the run, so they never show up in
+  // the budget, and without a row here a scene whose materials were carefully
+  // set reviews identically to one whose weren't. Counted both ways because
+  // "4 slots" alone doesn't say whether that is one object or four.
+  if (scene.materialSlots > 0) {
+    rows.push({
+      icon: "texture",
+      label:
+        scene.materialObjects === 1
+          ? "Material slots edited"
+          : `Material slots edited (${scene.materialObjects} objects)`,
+      value: formatCount(scene.materialSlots),
     });
   }
   if (scene.weatherSets > 0) {

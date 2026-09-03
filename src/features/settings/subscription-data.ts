@@ -135,6 +135,9 @@ export const PLANS: PlanSpec[] = [
 
 export const planSpec = (id: PlanId) => PLANS.find((p) => p.id === id) ?? PLANS[0];
 
+/** Is this string one of ours? The hash router hands us whatever was typed. */
+export const isPlanId = (v: string): v is PlanId => PLANS.some((p) => p.id === v);
+
 /** Where a plan sits on the ladder — what makes a change an upgrade or not. */
 export const rank = (id: PlanId) => PLANS.findIndex((p) => p.id === id);
 

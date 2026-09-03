@@ -20,6 +20,7 @@ import {
   type Script,
   type Turn,
 } from "./ai-agent-script";
+import { materialOf } from "./scene-types";
 import type { SceneApi } from "./useScene";
 import type { AssetStore } from "./useAssets";
 import type { Asset } from "./assets-data";
@@ -274,13 +275,18 @@ export function AiAgentPanel({
   const applyStyleEdit = (text: string): (() => void) | undefined => {
     const sel = scene.selected;
     if (!sel || !/\b(dark|darker|metal|metallic|matte|rough|restyle|style)\b/i.test(text)) return;
-    const before = { color: sel.color, metalness: sel.metalness, roughness: sel.roughness };
+    // Slot 0 is what "darker" is measured against. The sentence is about the
+    // object, so the edit paints every slot — and the undo restores every slot
+    // to the one set of values they were painted from, which is what painting
+    // them all in the first place implies.
+    const from = materialOf(sel, 0);
+    const before = { color: from.color, metalness: from.metalness, roughness: from.roughness };
     const patch: Partial<typeof before> = {};
-    if (/\bdark(er)?\b/i.test(text)) patch.color = darken(sel.color);
+    if (/\bdark(er)?\b/i.test(text)) patch.color = darken(from.color);
     if (/\b(matte|rough)\b/i.test(text)) Object.assign(patch, { metalness: 0.05, roughness: 1 });
     else Object.assign(patch, { metalness: 0.9, roughness: 0.2 });
-    scene.update(sel.id, patch);
-    return () => scene.update(sel.id, before);
+    scene.paintMaterial(sel.id, patch);
+    return () => scene.paintMaterial(sel.id, before);
   };
 
   /**

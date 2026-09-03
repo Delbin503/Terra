@@ -4,7 +4,9 @@ import { Icon } from "@/components/icons";
 import { Button, Tooltip } from "@/components/ui";
 import { Panel, PanelHeader, PanelTitle, PanelClose } from "./ui";
 import { useDismissable } from "./use-dismissable";
-import { workspace, terraCredits } from "./account-data";
+import { useSettings } from "@/features/settings/settings-store";
+import { TopUpDialog } from "@/features/settings/TopUpDialog";
+import { workspace } from "./account-data";
 
 /**
  * CreditsMenu — the lightning affordance in the editor's top-right cluster.
@@ -50,7 +52,6 @@ export function CreditsMenu() {
       {open && (
         <CreditsPanel
           workspace={workspace.name}
-          balance={terraCredits}
           onClose={() => setOpen(false)}
           className="absolute left-0 top-[calc(100%+10px)] z-50 origin-top-left animate-menu-in"
         />
@@ -68,23 +69,28 @@ export function CreditsMenu() {
  * that had landed on the viewport rather than as a menu belonging to the button
  * above it.
  *
- * Top Up and History both leave for Settings → Terra Balance, which is where
- * credits are actually bought and where the ledger lives. They used to be two
- * buttons with no handlers — the balance's own panel offering nothing you could
- * do with the balance.
+ * TOP UP BUYS HERE; History leaves for Settings → Terra Balance, where the
+ * ledger lives. Both used to leave: pressing Top Up on the balance's own panel
+ * sent you to a page carrying another Top Up button, which is a signpost rather
+ * than a control. The purchase is a dialog now (see TopUpDialog) and this panel
+ * mounts it, so the balance above it moves without the screen changing.
  */
 export function CreditsPanel({
   workspace: name,
-  balance,
   onClose,
   className,
 }: {
   workspace: string;
-  balance: number;
   onClose: () => void;
   /** where the caller hangs it off its own trigger */
   className?: string;
 }) {
+  /* One balance, read from the account rather than passed in: the editor, the
+     web top bar and Settings were three callers each handing this panel their
+     own frozen figure. */
+  const { creditBalance: balance } = useSettings();
+  const [topUp, setTopUp] = useState(false);
+
   const toBalance = () => {
     onClose();
     window.location.hash = "#settings/balance";
@@ -149,7 +155,7 @@ export function CreditsPanel({
               variant="brand"
               size="sm"
               data-ui="credits-topup"
-              onClick={toBalance}
+              onClick={() => setTopUp(true)}
               className="!h-7 !rounded-lg !px-2.5"
             >
               Top Up
@@ -157,6 +163,10 @@ export function CreditsPanel({
           </div>
         </div>
       </div>
+
+      {/* Inside the panel, so the panel stays open behind the purchase and the
+          balance it just changed is the first thing under the dialog. */}
+      <TopUpDialog open={topUp} onOpenChange={setTopUp} />
     </Panel>
   );
 }

@@ -25,6 +25,24 @@ import { Icon } from "@/components/icons";
  * which clip an absolutely-positioned child. Scrolling the page closes it,
  * which is what a menu anchored to a moving element should do.
  *
+ * AND IT REBASES ONTO ITS CONTAINING BLOCK, which is what makes "fixed from
+ * the trigger's rect" actually true. `position: fixed` is only relative to the
+ * viewport while no ancestor is transformed — and `DialogContent` centres
+ * itself with `-translate-x-1/2 -translate-y-1/2`, which makes the dialog box
+ * the containing block for everything fixed inside it. A Select in a modal was
+ * therefore measured against the screen and then positioned against the panel,
+ * landing the list half a dialog away from the control that opened it; the
+ * click-catcher's `inset-0` covered the panel rather than the page for the same
+ * reason. So an invisible probe pinned at fixed 0,0 is measured alongside the
+ * trigger, and its viewport position is subtracted back out.
+ *
+ * IT IS NOT PORTALLED TO THE BODY, which is the other way to fix this and the
+ * wrong one here: Radix's dialog traps focus inside its own subtree, so a list
+ * moved out of that subtree has its focus pulled back the instant it opens —
+ * taking the arrow keys with it and blurring the list shut before a click on an
+ * option can land. Staying inside the dialog keeps the control usable; the
+ * arithmetic below is what keeps it in the right place.
+ *
  * What is kept from the native control is everything a keyboard needs — the
  * roles, the arrow keys, Home/End, Enter, Escape, and focus returning to the
  * trigger on close.
@@ -77,6 +95,8 @@ export function Select({
   const [active, setActive] = React.useState(0);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const listRef = React.useRef<HTMLDivElement>(null);
+  /** the fixed-0,0 probe `place` measures the containing block with */
+  const originRef = React.useRef<HTMLDivElement>(null);
 
   const open = at !== null;
   const selected = options.findIndex((o) => o.value === value);
@@ -89,9 +109,17 @@ export function Select({
     const height = Math.min(options.length * ROW + PAD, MAX_H);
     const below = window.innerHeight - r.bottom - GAP;
     const flipped = below < height && r.top > below;
+    /* Where a `fixed` 0,0 actually lands. On a plain page that is the viewport
+       corner and both offsets are zero; inside a transformed ancestor it is
+       that ancestor's corner, and every coordinate below has to come back by
+       the same amount. Measured rather than assumed, because the transform can
+       be anywhere up the tree. */
+    const origin = originRef.current?.getBoundingClientRect();
+    const dx = origin?.left ?? 0;
+    const dy = origin?.top ?? 0;
     setAt({
-      left: Math.max(8, Math.min(r.left, window.innerWidth - r.width - 8)),
-      top: flipped ? Math.max(8, r.top - GAP - height) : r.bottom + GAP,
+      left: Math.max(8, Math.min(r.left, window.innerWidth - r.width - 8)) - dx,
+      top: (flipped ? Math.max(8, r.top - GAP - height) : r.bottom + GAP) - dy,
       width: r.width,
       flipped,
     });
@@ -205,9 +233,16 @@ export function Select({
         />
       </button>
 
+      {/* The probe. Zero-sized and inert, and mounted whether or not the list
+          is open, because `place` reads it BEFORE the list exists. */}
+      <div ref={originRef} aria-hidden className="pointer-events-none fixed left-0 top-0 h-0 w-0" />
+
       {at && (
         <>
-          {/* Catches the next click anywhere, the way the context menu does. */}
+          {/* Catches the next click anywhere, the way the context menu does.
+              `inset-0` is the containing block, which is the dialog when there
+              is one — and a click inside the dialog but outside the list still
+              has to close it, so the panel's own area is the part that matters. */}
           <div className="fixed inset-0 z-40" onClick={() => close(false)} />
           <div
             ref={listRef}

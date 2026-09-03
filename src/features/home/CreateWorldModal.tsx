@@ -12,6 +12,11 @@ import {
 import { ImageSlotCard } from "./ImageSlotCard";
 import { ImageStudioDialog } from "./ImageStudioDialog";
 import {
+  NameProjectDialog,
+  nameFromPrompt,
+  UNTITLED_PROJECT,
+} from "./NameProjectDialog";
+import {
   CREATE_COST,
   MAX_IMAGES,
   assignSlot,
@@ -69,6 +74,15 @@ export function CreateWorldModal({
   const [images, setImages] = useState<WorldImage[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * The name step, and the suggestion it opens with. `null` means it is closed.
+   *
+   * A string rather than a boolean plus a separate suggestion: the two are
+   * always set together and never meaningful apart, and holding a stale
+   * suggestion behind a false flag is how the dialog ends up proposing the last
+   * prompt's name for this one.
+   */
+  const [naming, setNaming] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const is2d = mode === "2d";
@@ -149,11 +163,17 @@ export function CreateWorldModal({
     onOpenChange(false);
   }
 
-  /** Hand it over. The generated world opens in the editor. */
+  /**
+   * Hand it over — once it has a name.
+   *
+   * The composer's own question is answered at this point; what is missing is
+   * the one thing the editor's top bar needs and nothing here has asked for.
+   * The name step is prefilled from the prompt, so this is still one keystroke
+   * from here to the editor. See NameProjectDialog.
+   */
   function create() {
     if (!canCreate) return;
-    reset();
-    window.location.hash = "#editor";
+    setNaming(is2d && !prompt.trim() ? UNTITLED_PROJECT : nameFromPrompt(prompt));
   }
 
   /**
@@ -172,13 +192,31 @@ export function CreateWorldModal({
    * arrive in the editor as a promise nothing is going to keep.
    */
   function createEmpty() {
+    // Nothing typed to derive from, by definition — so the name step opens on
+    // the placeholder and this is the one path where it earns its keep most.
+    setNaming(UNTITLED_PROJECT);
+  }
+
+  /**
+   * Named, and away.
+   *
+   * The name rides in the hash because that is how this app carries a parameter
+   * across a view change — `#settings/plans/<planId>` already does it — and the
+   * editor is a separate top-level view, so there is no shared state between
+   * here and there to put it in.
+   */
+  function openNamed(name: string) {
+    setNaming(null);
     reset();
-    window.location.hash = "#editor";
+    window.location.hash = `#editor/${encodeURIComponent(name)}`;
   }
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      {/* The composer stays mounted underneath: cancelling the name step has to
+          come back to the prompt and photographs exactly as they were, not to
+          an emptied dialog. */}
+      <Dialog open={open && naming === null} onOpenChange={onOpenChange}>
         <DialogContent
           hideClose
           surface="glass"
@@ -364,6 +402,13 @@ export function CreateWorldModal({
           </div>
         </DialogContent>
       </Dialog>
+
+      <NameProjectDialog
+        open={naming !== null}
+        suggestion={naming ?? undefined}
+        onCancel={() => setNaming(null)}
+        onConfirm={openNamed}
+      />
 
       <ImageStudioDialog
         image={editing}

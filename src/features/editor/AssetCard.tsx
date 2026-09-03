@@ -63,7 +63,15 @@ export function AssetCard({
       onDragStart={(e) => {
         e.dataTransfer.setData(
           "application/terra-asset",
-          JSON.stringify({ name: asset.name, type: asset.type, modelUrl: asset.modelUrl })
+          JSON.stringify({
+            name: asset.name,
+            type: asset.type,
+            modelUrl: asset.modelUrl,
+            /* A dragged sky has to carry its file, or dropping one into the
+               viewport places a named object with no sky behind it while
+               clicking the same card swaps the horizon. */
+            skyUrl: asset.skyUrl,
+          })
         );
         e.dataTransfer.effectAllowed = "copy";
       }}

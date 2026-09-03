@@ -90,6 +90,7 @@ import {
   Ungroup,
   BoxSelect,
   ListFilter,
+  Grip,
   GripHorizontal,
   Crown,
   SunMedium,
@@ -136,6 +137,8 @@ import {
   ArrowUpDown,
   Calendar,
   ChevronLeft,
+  ChevronsLeft,
+  ChevronsRight,
   Eraser,
   MousePointerClick,
   Minus,
@@ -291,6 +294,8 @@ export const iconRegistry = {
   "input-text": Type,
   video: Video,
   panorama: Layers,
+  /** a Gaussian splat — a field of points, which is what one IS */
+  splat: Grip,
   camera: Camera,
   spline: Spline,
 
@@ -363,6 +368,10 @@ export const iconRegistry = {
   "chevron-left": ChevronLeft,
   "chevron-right": ChevronRight,
   "chevron-down": ChevronDown,
+  // The ends of a paged table. Named for what they DO rather than for the
+  // double chevron they draw, so a table never asks for a shape.
+  "page-first": ChevronsLeft,
+  "page-last": ChevronsRight,
   "arrow-right": ArrowRight,
   close: X,
 } satisfies Record<string, LucideIcon>;

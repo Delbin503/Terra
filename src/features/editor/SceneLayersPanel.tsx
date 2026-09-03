@@ -47,7 +47,7 @@ import type { SceneApi } from "./useScene";
  */
 
 /** Every source type Terra places — the full type-filter vocabulary. */
-const ALL_TYPES: AssetType[] = ["mesh", "skybox", "environment", "image", "video", "camera"];
+const ALL_TYPES: AssetType[] = ["mesh", "skybox", "environment", "splat", "image", "video", "camera"];
 
 /** Rows indent by this much per level. Deep enough to read as nesting, tight
  *  enough that a 300px panel still fits a name at depth 4. */
