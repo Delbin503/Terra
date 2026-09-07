@@ -19,15 +19,22 @@ const TICKS = [6, 12, 18];
  * Percentages are hours/24.
  */
 const DAY_RAMP = [
-  { at: 0, color: "#0d1226" }, // midnight
-  { at: 20, color: "#1d2440" }, // 04:48 — first light
-  { at: 27, color: "#6b4a5a" }, // 06:30 — dawn
-  { at: 33, color: "#c98a5a" }, // 08:00 — low sun
+  { at: 0, color: "#1a2860" }, // midnight — blue, not black; see the scrim note below
+  { at: 8, color: "#172353" }, // 01:55 — the deepest hour
+  { at: 16, color: "#23346f" }, // 03:50 — astronomical twilight, lifting
+  { at: 22, color: "#46487f" }, // 05:17 — blue hour, leaning violet
+  { at: 27, color: "#8a5a72" }, // 06:30 — dawn
+  { at: 31, color: "#c9805a" }, // 07:26 — sunrise
+  { at: 34, color: "#dda06a" }, // 08:10 — low sun
+  { at: 42, color: "#a9c0dc" }, // 10:05 — morning
   { at: 50, color: "#8fb4d8" }, // midday
+  { at: 62, color: "#b3b9cd" }, // 14:53 — the light starting to turn
   { at: 70, color: "#d9995e" }, // 16:48 — afternoon
   { at: 76, color: "#b4573f" }, // 18:15 — golden hour
-  { at: 84, color: "#4a3552" }, // 20:00 — dusk
-  { at: 100, color: "#0d1226" }, // midnight again, so the ramp closes
+  { at: 80, color: "#8a4560" }, // 19:12 — sunset
+  { at: 84, color: "#55407e" }, // 20:10 — dusk
+  { at: 90, color: "#2c3573" }, // 21:36 — night closing in
+  { at: 100, color: "#1a2860" }, // midnight again, so the ramp closes
 ];
 
 const RAMP_CSS = `linear-gradient(90deg, ${DAY_RAMP.map((s) => `${s.color} ${s.at}%`).join(", ")})`;
@@ -118,16 +125,17 @@ function DayBar({
       </div>
 
       <div className="relative h-9 overflow-hidden rounded-lg" style={{ background: RAMP_CSS }}>
-        {/* A scrim under the labels. The ramp runs from near-black to a pale
-            midday blue, so white text on it is unreadable at exactly the hours
-            most people set — noon. */}
-        <div className="absolute inset-0 bg-black/25" />
+        {/* A light scrim only. It used to be black/25, which bought the noon
+            labels their contrast by draining the ramp — the night stops came out
+            of it flat black rather than blue. The labels carry their own drop
+            shadow now (below), so this only has to take the edge off midday. */}
+        <div className="absolute inset-0 bg-black/12" />
 
         {TICKS.map((h) => (
           <span
             key={h}
             aria-hidden
-            className="type-caption absolute top-1/2 -translate-x-1/2 -translate-y-1/2 text-white/70"
+            className="type-caption absolute top-1/2 -translate-x-1/2 -translate-y-1/2 text-white/85 [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]"
             style={{ left: `${(h / 24) * 100}%` }}
           >
             {String(h).padStart(2, "0")}:00
@@ -135,8 +143,8 @@ function DayBar({
         ))}
 
         {/* Where the sun is. A full-height line rather than a dot: it has to
-            read against nine different backgrounds along the ramp, and a line
-            with a dark edge does that where a single colour cannot. */}
+            read against every colour along the ramp, and a line with a dark
+            edge does that where a single colour cannot. */}
         <div
           aria-hidden
           data-ui="terragen-time-marker"
