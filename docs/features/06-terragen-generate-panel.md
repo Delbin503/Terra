@@ -58,6 +58,7 @@ They are now read straight off the rig via `planCapture`, the same call the edit
 │                                              │ ▸ Objects            │
 │        the stage — full bleed                │ ▸ Camera Settings    │
 │        (the dock floats over it)             │ ▸ Weather & Lighting │
+│                                              │ ▸ Time of Day        │
 │                                              │ ▸ Scene Environment  │
 │                                              │ ▸ Arrangement        │
 │                                              ├──────────────────────┤
@@ -80,7 +81,7 @@ They are now read straight off the rig via `planCapture`, the same call the edit
 
 The collapsed bar keeps **both** the expand chevron and the ✕, so a folded panel is still closable in one click.
 
-### The six sections — what each one is for
+### The seven sections — what each one is for
 
 The dock is the Work Order, read top to bottom. Each row is one decision about the dataset:
 
@@ -89,6 +90,7 @@ The dock is the Work Order, read top to bottom. Each row is one decision about t
 | **Objects** | What is in the frame. Which object is the **Master** every camera orbits, what else shares the shot, bringing new assets in from the library and posing them — and the **stand-ins** each object can be re-rendered as. | the scene *(stand-ins: the order)* | only through stand-ins |
 | **Camera Settings** | The sweep itself. Camera mode, how close and how far the rig stands off the master, how high it climbs, where it orbits, and how many shots it takes. These are the camera rig's own settings, edited in place. | the scene | no — it sets **frames per subset** |
 | **Weather & Lighting** | The conditions the scene is rendered under, and the saved **weather sets** the run can sweep. | the scene | only through checked sets |
+| **Time of Day** | The hour the sun sits at, and the saved **time sets** the run can sweep. Multiplies *against* the weather sets rather than with them — three hours under two conditions is six passes. | the scene | only through checked sets |
 | **Scene Environment** | Which HDRI lights and backs the scene, plus a shortlist of other skies to render the same sweep under. | the order | **yes** |
 | **Arrangement** | Rearranges everything but the master inside a drawn space, *N* times, reproducibly from a seed. | the order *(previews apply to the scene)* | **yes** |
 | **Output** | What comes back in the archive — dataset type, frame resolution, and which annotations TerraGen computes. | the order | no — it changes the **archive**, not the count |
@@ -96,8 +98,8 @@ The dock is the Work Order, read top to bottom. Each row is one decision about t
 ### How they behave
 
 - **An accordion, one open at a time.** At 400px there is no room for a nav plus a form, and two open sections put the control you're dragging and the row you're comparing it against on different screens. It opens on **Objects**.
-- **Every row carries its own summary**, so the closed stack still says what the order is set to without opening anything — `Torus` · `Torus · 2.6–6.2 m` · `Sunny` · `No HDRI` · `As arranged` · `Images · 1920×1080 · 2 annotations`. Where a section isn't ready, the summary says that instead: `No master object`, `Torus · no camera placed`.
-- **The first three sections edit the scene, not the order.** Objects, Camera Settings and Weather & Lighting decide what a *single subset* even looks like. That is why they carry no on/off switch — and why anything you change in them is still there when you go back to the editor.
+- **Every row carries its own summary**, so the closed stack still says what the order is set to without opening anything — `Torus` · `Torus · 2.6–6.2 m` · `Sunny` · `12:00 · Midday` · `No HDRI` · `As arranged` · `Images · 1920×1080 · 2 annotations`. Where a section isn't ready, the summary says that instead: `No master object`, `Torus · no camera placed`.
+- **The first four sections edit the scene, not the order.** Objects, Camera Settings, Weather & Lighting and Time of Day decide what a *single subset* even looks like. That is why they carry no on/off switch — and why anything you change in them is still there when you go back to the editor.
 - **Output is pinned outside the scroll**, directly above Dispatch, in its own capped scroller (`max-h-48vh`). It gates what TerraGen computes rather than how many times it runs, and it is the last thing checked before spending.
 - **No running total anywhere on the panel.** Each axis editor carries a plain-language cost line instead — *"3 environments — one subset each"*. The bill is stated once, in the dispatch review.
 
@@ -346,7 +348,82 @@ If the set being edited is deleted from under the edit, the footer falls back to
 
 ---
 
-## 9. Scene Environment *(an axis)*
+## 9. Time of Day *(an axis, and scene state)*
+
+**Row summary:** the clock and its phase — `19:50 · Dusk`. The closed row also carries a pill with the bare hour.
+
+The sun's clock, and the hours a run sweeps. Like weather, the time is **scene state** — setting it here sets the sun in the scene, and it is still set when you go back to the editor.
+
+**Why it is not a dial inside Weather & Lighting.** The two *multiply each other*: three hours under two conditions is six passes over the sweep. A single list of "sets" mixing them could only ever express six named combinations by hand — two lists express the grid. Time of Day was an axis, then it folded into Weather, and the fold took its controls out with it: for a while the sun clock was live in the scene with nothing anywhere able to move it, and midday was the only render this panel could order.
+
+### The day bar
+
+A colour ramp, three hour labels, a marker where the sun is, and a slider under it.
+
+- **The bar is the readout, the slider is the control.** A range input alone puts a dot on a grey track and asks you to know that 40% along is roughly ten in the morning. The ramp answers that before you drag; the marker says where in the day you landed.
+- **The ramp's stops are where light changes character**, not at even intervals — midnight, the deepest hour, astronomical twilight, the blue hour, dawn, sunrise, low sun, morning, midday, the afternoon turn, golden hour, sunset, dusk. A uniform blue→orange→blue would misreport where the golden hours are.
+- **Three labels, not twenty-four** (`06:00`, `12:00`, `18:00`). The strip is ~300px and its job is to orient you, not to be read off.
+- **Five-minute steps.** A dataset is ordered at `07:30`, never at `07:31`, and 1,440 stops on a 300px track is a pixel and a half each.
+- **The marker is a full-height line, not a dot** — it has to read against every colour along the ramp, and a line with a dark edge does that where a single colour cannot.
+
+*Not in this section:* the sun's **intensity** and **shadow depth**. The state carries both, and this section briefly exposed them. They are a look you set once rather than a thing a dataset sweeps, and two sliders nobody moves are the same clutter the weather panel was cut down to remove.
+
+### The phase, in words
+
+A clock reads exactly; a phase reads at a glance. `12:40` is what you set, `Midday` is what the frame will look like — the row summary and a saved set's name want the second. The bands are uneven because they are the ones that matter to a *render* rather than to a calendar:
+
+| From | Phase |
+|---|---|
+| 21:00 – 05:00 | Night |
+| 05:00 | Dawn |
+| 07:00 | Morning |
+| 09:00 | Late morning |
+| 11:00 | Midday |
+| 14:00 | Afternoon |
+| 17:00 | Golden hour |
+| 19:00 | Dusk |
+
+### Saving a time set
+
+1. Drag the slider to the hour you want. The scene's sun updates live.
+2. **Save as set.** It appears in the **Time sets** list below, checked and in the run.
+
+A set is **named for itself** — `07:30 · Dawn`, then ` 2` if that name is taken. The clock leads because it is the thing you just chose and would search for; the phase follows because a column of bare clock times is a list you decode a row at a time.
+
+**A set stores the clock and nothing else.** Not a whole weather state, which would drag a copy of the cloud cover along and silently undo the conditions you set; and not the whole sun either, because the intensity and shadow are not what this panel varies — a set carrying them would be storing two constants and claiming they were part of the choice.
+
+Each row shows **the hour's own colour**, sampled off the same ramp the bar draws, so a list of times reads as a list of *lights* rather than a column of numbers. There is no subtitle: the name is already the clock and the phase.
+
+### Modifying a set
+
+Identical to the weather section's, deliberately — same buttons in the same order, same row anatomy, same sentence about the sweep. Two lists that behave identically should look identical; the moment one puts its checkbox on the other side, people start checking the wrong thing.
+
+1. Press the **pencil**. This loads the set into the bar *and* remembers which one — the row highlights and the footer becomes that set's footer.
+2. Move the slider.
+3. **Update set** writes it back. **Done** walks away without writing.
+
+There is no "Save as set" beside Update, for the same reason there isn't one in Weather: a third button that silently forks the set is how a run ends up sweeping `07:30 · Dawn` and `07:30 · Dawn 2`, one of which is the mistake. If the set being edited is deleted from under the edit, the footer falls back to the plain save footer.
+
+### Loading, checking, deleting, resetting
+
+| Action | Where |
+|---|---|
+| Load a set onto the bar (without entering edit mode) | click its **name** |
+| Include / exclude it from the run | its **checkbox** |
+| Delete it | the **bin** on its row |
+| Back to midday | **Reset**, beside Save as set |
+
+**Both Reset and Load touch the clock only.** Reset in this section must not clear the weather conditions sitting in the section above it, and loading a time must disturb neither those conditions nor the sun's own intensity and shadow.
+
+### What it costs
+
+The list header counts what is in (`2 of 3 in run`) and the footer states the bill: *"Every subset renders 2 times — once per checked time."* With one set or none, it says *"Check more than one set to sweep the day across the run."* — one time is the scene as it stands, which multiplies nothing.
+
+**Sets last for this session.** There is no backend to persist to, and the panel says so rather than implying storage it hasn't got.
+
+---
+
+## 10. Scene Environment *(an axis)*
 
 Swaps the HDRI the scene is lit and backed by. **The environment already in your scene is always value #1** and cannot be removed from the axis.
 
@@ -364,7 +441,7 @@ Swaps the HDRI the scene is lit and backed by. **The environment already in your
 
 ---
 
-## 10. Arrangement *(an axis)*
+## 11. Arrangement *(an axis)*
 
 Rearranges the objects inside a drawn space and renders each arrangement — a way to get *N* believable rooms out of one scene, all reproducible.
 
@@ -383,7 +460,7 @@ The axis and the Space panel's **Scatter** call the **same** `arrange()` solver 
 
 ---
 
-## 11. Output
+## 12. Output
 
 Output does **not** change the frame count — it changes what comes back in the archive. It is pinned above Dispatch for that reason: it is the last thing you check before spending.
 
@@ -404,7 +481,7 @@ And a closing line: *"Frames, archive size and credits are shown in the dispatch
 
 ---
 
-## 12. The arithmetic
+## 13. The arithmetic
 
 Kept in `work-order.ts`, out of React, for the same reason `planCapture` is: the frame count is what the dataset is billed and judged on, so it has to be testable on its own.
 
@@ -420,6 +497,7 @@ bytes    = frames × 0.5 MB × (width × height ÷ (1920 × 1080))
 | Scene Environment | the order | base HDRI + each checked pick |
 | Arrangement | the order | the count, when ≥ 2 |
 | Weather sets | the **scene** | how many sets are checked, when ≥ 2 |
+| Time sets | the **scene** | how many sets are checked, when ≥ 2 |
 | Object swaps | the order | **one row per object** — the object itself + its checked stand-ins |
 
 **Worked example** — defaults (3 stops × 24 shots = 72 frames), two extra environments checked, two weather sets, one object with two stand-ins:
@@ -431,11 +509,13 @@ credits = 1,296 × 0.125 + 18 × 7                                      =   288
 archive = 1,296 × 0.5 MB at 1920×1080                                 = 648 MB
 ```
 
+Checked **time sets** enter the same product, and they multiply *against* the weather sets rather than folding into them — the two above under three saved hours is 54 subsets, not 18.
+
 The per-subset term is the headless scene reconstruction TerraGen does on every restart — which is what makes an orchestrated value expensive, and why the review can explain itself. Constants are back-fitted to the pipeline docs' worked example (24 subsets × 360 frames ≈ 1,240 credits · 4.2 GB).
 
 ---
 
-## 13. Preflight
+## 14. Preflight
 
 A **live validity strip** in the footer rather than failing on click: by the time someone reaches for Dispatch they should already know. It shows the first gate — blocks before warnings — with a `+N` pill for the rest.
 
@@ -455,7 +535,7 @@ There is deliberately **no environment gate**. There was one, and it read the sc
 
 ---
 
-## 14. The Review & dispatch modal
+## 15. The Review & dispatch modal
 
 The button opens a modal over the mode — Radix `Dialog` for the scrim, focus trap and Escape, with the **same glass as the dock** so it reads as the same surface rather than a second, flatter one. It closes from its own top-right ✕ (*Back to settings*) as well as from the footer.
 
@@ -477,7 +557,7 @@ Every other figure on the screen stays in ink. This is the number the whole scre
 | **Credits** | `288` | `(3,440 left)` — the balance *after* the run. If it doesn't fit, the whole block turns red and the line reads *"N more than your balance of M."* |
 | **Archive** | `648 MB` | `1,296 frames at 1920×1080` |
 
-**3 · What you added.** A row per thing the user actually put into this order, because by this point they have been through six sections and a library sheet, and *"did the second chair make it in?"* is a fair question with a Dispatch button in front of you.
+**3 · What you added.** A row per thing the user actually put into this order, because by this point they have been through seven sections and a library sheet, and *"did the second chair make it in?"* is a fair question with a Dispatch button in front of you.
 
 Rows appear **only when there is something to say** — never a zero: objects in the scene *(containers excluded — counting a group and its four crates as five overstates the scene)*, swap objects, environments added, **arrangements named with their seed**, weather sets in the run, annotation types, and frame resolution.
 
@@ -501,7 +581,7 @@ The whole "Why this many" block is hidden on a one-subset order, where it would 
 
 ---
 
-## 15. After dispatch
+## 16. After dispatch
 
 Confirming closes the review. The panel footer becomes:
 
@@ -513,7 +593,7 @@ The run is added to the **Work Orders** list, reached from the download button i
 
 ---
 
-## 16. Known gaps
+## 17. Known gaps
 
 Recorded here rather than described as if shipped:
 

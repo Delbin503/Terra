@@ -100,15 +100,54 @@ A whole drag, however long, collapses into **one undo step** (`commit(tag)` in `
 
 ## Texture tab — Material
 
-| Row | Control |
-|---|---|
-| **Color** | Eight swatches, plus a **Custom** entry that opens the native colour picker and shows the hex |
-| **Metallic** | Factor card, 0–1 |
-| **Roughness** | Factor card, 0–1 |
-| **Specular** | Factor card, 0–1 |
-| **Normal** | Factor card, 0–8 |
+### Material slots
 
-The swatch list (`OBJECT_COLORS`) is the same one the AI assistant resolves colour words against, so "make it red" and the red swatch always agree.
+A model rarely has one surface. A digger is a body, its hydraulics and its cab glass, and the five factors below mean nothing until you say *which of them* you are setting. The **slot switcher** sits at the top of the panel, above the factors, because it changes what all five of them mean — the rows below are Element 2's roughness, not the object's.
+
+**It only appears when there is more than one slot** (`showSlots` = the Material group *and* `materials.length > 1`). A single-surface object gets the factors straight, with no switcher to operate.
+
+| Part of a row | What it is |
+|---|---|
+| Swatch | that slot's current colour |
+| **Element _N_** | the slot index — the name the engine end uses, and the one every slot is guaranteed to have |
+| Subtitle | the file's own material name, *when it is worth showing* |
+| Brand dot | this slot has been edited away from the defaults |
+
+**The subtitle is conditional.** Exporters routinely emit names no human wrote — the catalogue's one real GLB calls its material `tripo_node_4db3f717_bd31_4057_b8f6_d811010610b3_material`. A name is suppressed if it is the placeholder we invented ourselves (`Material`) or longer than 22 characters, since a name like that under "Element 0" is noise that pushes the row to two lines and says nothing.
+
+**Three rows, then scroll.** The panel is one of three stacked in the bottom-right column and already caps itself at `46vh`; a model with eleven materials would spend the whole of it on the switcher and push the five factors — the controls you came here for — off the bottom. Three is enough to show the list *is* a list and that there is more below. The cap is computed from the row height rather than a guessed pixel value, so the two can't drift apart, and row height is fixed rather than natural *because* the subtitle is conditional — otherwise "three rows" would mean a different number of pixels per model.
+
+**The armed slot gets a stroke, not a fill.** The factor rows below use the same soft glass fill for their own selection, so a filled slot read as "one more row" rather than as the thing the five controls are pointed at. The outline is a ring, so arming a slot cannot nudge the list's layout.
+
+**Switching writes nothing.** It moves a cursor. The slots you are not looking at keep every value you gave them.
+
+### Where the slots come from
+
+**The file says how many there are.** A placed GLB carries one nominal slot until the loader has actually read it; `SceneObjectMesh` reports the material names it found and `discoverMaterials` seeds the list from them. A slot count is a property of the asset — a fixed three would be wrong for every model that isn't.
+
+The seed **will not overwrite edits**. It only runs while the object still has its single untouched placeholder slot, so a second load of the same URL — a duplicate placed, an undo, React re-running an effect — finds real slots already there and leaves them alone. The placeholder's own values carry into the first real slot, because the model may have been recoloured while it was loading and that edit belongs to the surface the user was looking at.
+
+### The factors
+
+Per slot, for an ordinary mesh:
+
+| Row | Control | Default |
+|---|---|---|
+| **Color** | Eight swatches, plus a **Custom** entry that opens the native colour picker and shows the hex | palette default |
+| **Metallic** | Factor card, 0–1 | 0.10 |
+| **Roughness** | Factor card, 0–1 | 0.80 |
+| **Specular** | Factor card, 0–1 | 0.50 |
+| **Normal** | Factor card, 0–8 | 1.00 |
+
+The swatch list (`OBJECT_COLORS`) is the same one the AI assistant resolves colour words against, so "make it red" and the red swatch always agree. Each control shows which slot it is writing to, but only when there is more than one surface to confuse it with.
+
+**Not every source gets these five.** A splat and an HDRI have no albedo to tint and no microsurface to roughen, so their Material group is a different set — **Brightness** and **Sky Influence** — and the panel's eyebrow reads *Appearance* rather than *Material*, since "Material" over two sky sliders names a thing a sky does not have.
+
+**A group paints through.** Editing a material on a group applies the patch to every slot of every object beneath it, rather than to a nominal material the group itself never renders.
+
+### What reaches TerraGen
+
+**Modified slots only.** `buildMaterialPayload` walks the scene at dispatch and carries a slot only if `slotEdited` says it differs from the defaults above — so an untouched model sends nothing and the payload stays a statement of what you changed. Groups and cameras are skipped (both carry a material they cannot show); splats and skies go in their own lists with their own two fields. The Objects section's summary counts what this comes to, recomputed as the scene changes so opening the review after an edit never quotes a stale count.
 
 ---
 
