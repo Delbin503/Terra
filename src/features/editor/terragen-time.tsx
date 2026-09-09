@@ -124,12 +124,23 @@ function DayBar({
         </span>
       </div>
 
-      <div className="relative h-9 overflow-hidden rounded-lg" style={{ background: RAMP_CSS }}>
-        {/* A light scrim only. It used to be black/25, which bought the noon
-            labels their contrast by draining the ramp — the night stops came out
-            of it flat black rather than blue. The labels carry their own drop
-            shadow now (below), so this only has to take the edge off midday. */}
-        <div className="absolute inset-0 bg-black/12" />
+      <div className="relative h-9 overflow-hidden rounded-lg ring-1 ring-inset ring-glass/10">
+        {/* THE RAMP, HELD BACK.
+
+            On its own layer rather than on the container, and at half strength,
+            so the panel's glass reads through it. Painted opaque it was the
+            loudest thing in the whole Work Order — a saturated blue-to-orange
+            band sitting among controls that are all muted glass, pulling the eye
+            to a readout rather than to the sliders it belongs to.
+
+            It has to be the layer and not the container: the labels and the
+            marker are children, and fading the parent would take them with it —
+            the marker especially, which has to stay legible against every colour
+            along the ramp.
+
+            No scrim any more. It existed to take the edge off midday, and the
+            transparency now does that everywhere at once. */}
+        <div className="absolute inset-0 opacity-50" style={{ background: RAMP_CSS }} />
 
         {TICKS.map((h) => (
           <span
