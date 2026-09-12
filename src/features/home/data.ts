@@ -70,16 +70,132 @@ export interface FeedItem {
   seed: number;
 }
 
-/** The "What's New" tab — release notes and model drops, as cards. */
-export const whatsNew: FeedItem[] = [
-  { id: "n1", title: "Terra 2.4 — faster capture runs", seed: 512 },
-  { id: "n2", title: "New: voxel terrain generator", seed: 233 },
-  { id: "n3", title: "Weather presets for every scene", seed: 91 },
-  { id: "n4", title: "Camera rigs now export to USD", seed: 744 },
-  { id: "n5", title: "Material library refresh", seed: 356 },
-  { id: "n6", title: "Batch dataset exports", seed: 168 },
-  { id: "n7", title: "Depth + segmentation passes", seed: 899 },
-  { id: "n8", title: "Improved HDRI relighting", seed: 27 },
+/**
+ * The "What's New" tab — release notes and model drops, as cards.
+ *
+ * EACH ONE IS A PAGE, not just a cover. "Explore Now" used to select a
+ * Community collection, which is what the Community banners do and a release
+ * note is not: a note has a body, a date and someone who wrote it, and none of
+ * that fits on a 180px card. So the item carries its own story and the card
+ * opens it.
+ *
+ * `tag` is the release's own label, not a position in the list — it is what the
+ * page's eyebrow says, and it stays true when the order changes.
+ */
+export interface NewsItem extends FeedItem {
+  tag: string;
+  /** one line, under the title — the note in a sentence */
+  summary: string;
+  /** the note itself, one string per paragraph */
+  body: string[];
+  author: string;
+  /** relative label, like every other clock in this prototype */
+  at: string;
+}
+
+export const whatsNew: NewsItem[] = [
+  {
+    id: "n1",
+    title: "Terra 2.4 — faster capture runs",
+    seed: 512,
+    tag: "Release 2.4",
+    summary: "The turntable pass schedules its own frames, so a sweep finishes in about half the wall time.",
+    body: [
+      "A capture run used to render every increment in the order you set it, one shot at a time, whichever way the rig happened to be pointing. 2.4 plans the pass first: frames that share an environment, a time of day and a weather state are rendered together, so the scene is only relit once for each combination rather than once per frame.",
+      "Nothing about the Work Order changes. You still pick the increments, the shots per rotation and the annotations you want; the estimate on the dispatch panel is the same number it always was, and the archive comes back in the same shape. What changed is how long you wait for it — a 720-frame sweep that took an hour now lands in a little over half of one.",
+      "Runs already queued when you update will finish on the old schedule. Anything dispatched after that takes the new path automatically.",
+    ],
+    author: "Terra Engineering",
+    at: "2 days ago",
+  },
+  {
+    id: "n2",
+    title: "New: voxel terrain generator",
+    seed: 233,
+    tag: "New tool",
+    summary: "Block out a landscape from a heightfield and a brush, then let the generator dress it.",
+    body: [
+      "The terrain generator gives you a ground plane you can actually shape. Paint height with a brush, and the generator fills the surface with rock, scree and planting that follows the slope — steep faces stay bare, shallow ground takes cover.",
+      "Everything it makes is a real scene object, so it is selectable in the Layers panel, it can be hidden or locked, and it is annotated like anything else in the capture pass.",
+    ],
+    author: "Terra Product",
+    at: "5 days ago",
+  },
+  {
+    id: "n3",
+    title: "Weather presets for every scene",
+    seed: 91,
+    tag: "New tool",
+    summary: "Five conditions, each with its own wind, and each one an axis a run can sweep.",
+    body: [
+      "Sun, cloud, rain, storm, dust and snow are presets now rather than a set of sliders you rebuild per scene. Pick one and the sky, the light and the surface response move together.",
+      "Weather is also an axis on a Work Order: turn it on and every arrangement is captured in each condition you selected, which is how one scene becomes a dataset that holds up in bad light.",
+    ],
+    author: "Terra Product",
+    at: "a week ago",
+  },
+  {
+    id: "n4",
+    title: "Camera rigs now export to USD",
+    seed: 744,
+    tag: "Interop",
+    summary: "Take the rig — both cameras, the orbit and the sweep — into any USD pipeline.",
+    body: [
+      "The two-camera rig, its height span, its orbit arc and every increment on the sweep now export as USD. The frames Terra rendered and the frames your own renderer produces line up, because they are the same camera transforms.",
+      "Import is not part of this release. A rig authored elsewhere still has to be rebuilt in the editor.",
+    ],
+    author: "Terra Engineering",
+    at: "a week ago",
+  },
+  {
+    id: "n5",
+    title: "Material library refresh",
+    seed: 356,
+    tag: "Library",
+    summary: "Material slots, so one object can wear a different surface in each arrangement.",
+    body: [
+      "Materials are assigned to slots on an object rather than baked into it, which means a swap is a change of slot rather than a new asset. The library itself has been re-shot against a neutral probe so two materials beside each other can actually be compared.",
+    ],
+    author: "Terra Product",
+    at: "2 weeks ago",
+  },
+  {
+    id: "n6",
+    title: "Batch dataset exports",
+    seed: 168,
+    tag: "Release 2.3",
+    summary: "Several Work Orders, one archive, one manifest.",
+    body: [
+      "Select finished runs in the Work Orders table and take them out together. The manifest records which run each frame came from, so a merged dataset can still be split back apart later.",
+    ],
+    author: "Terra Engineering",
+    at: "3 weeks ago",
+  },
+  {
+    id: "n7",
+    title: "Depth + segmentation passes",
+    seed: 899,
+    tag: "Release 2.3",
+    summary: "Two more passes alongside the boxes, written per frame.",
+    body: [
+      "Semantic segmentation and polygon masks ship with every frame that asks for them, straight from the renderer's own knowledge of the scene — there is nothing to draw and nothing to check.",
+      "Oriented boxes and the video scope are still coming; the annotation picker marks them so a Work Order can't be dispatched expecting them.",
+    ],
+    author: "Terra Engineering",
+    at: "a month ago",
+  },
+  {
+    id: "n8",
+    title: "Improved HDRI relighting",
+    seed: 27,
+    tag: "Rendering",
+    summary: "The day ramp drives the sky, so time of day is one control instead of four.",
+    body: [
+      "Move the clock and the sun angle, colour temperature, sky and ambient response all follow it, through night as well as day. Time of day is an axis a run can sweep, which is what makes a scene captured at dawn and at dusk two sets of frames rather than two scenes.",
+    ],
+    author: "Terra Rendering",
+    at: "a month ago",
+  },
 ];
 
 /**
@@ -112,6 +228,19 @@ export const COMMUNITY_TABS: { id: CommunityTab; label: string }[] = [
   { id: "industrial", label: "Industrial" },
   { id: "interior", label: "Interior" },
   { id: "aerial", label: "Aerial" },
+];
+
+/**
+ * WHERE A PUBLISHED PROJECT CAN GO.
+ *
+ * The four categories a person is asked to file their own world under. It is
+ * not every tab: "Featured" is a curation nobody nominates themselves into.
+ */
+export const PUBLISH_CATEGORIES: { value: CommunityCategory; label: string }[] = [
+  { value: "urban", label: "Urban" },
+  { value: "nature", label: "Nature" },
+  { value: "industrial", label: "Industrial" },
+  { value: "aerial", label: "Aerial" },
 ];
 
 export interface CommunityWorld extends FeedItem {

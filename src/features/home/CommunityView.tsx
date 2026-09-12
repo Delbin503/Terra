@@ -4,6 +4,7 @@ import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui";
 import { HomeTopBar } from "./HomeTopBar";
 import { WorldThumb } from "./WorldThumb";
+import { useWorkspace } from "./workspace";
 import {
   COMMUNITY_TABS,
   communityBanners,
@@ -54,15 +55,19 @@ export function CommunityView({
 }) {
   const [tab, setTab] = useState<CommunityTab>("featured");
   const [query, setQuery] = useState("");
+  /* WHAT THIS WORKSPACE PUBLISHED, in front of the seeded worlds. A world you
+     put here yourself is the one you are most likely to have come looking for,
+     and it is newer than everything in the seed by definition. */
+  const { published } = useWorkspace();
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return communityWorlds.filter(
+    return [...published, ...communityWorlds].filter(
       (w) =>
         (tab === "featured" ? w.featured : w.category === tab) &&
         (w.title.toLowerCase().includes(q) || w.author.toLowerCase().includes(q))
     );
-  }, [tab, query]);
+  }, [tab, query, published]);
 
   return (
     <>

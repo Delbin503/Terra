@@ -4,6 +4,9 @@ import {
   notifications as seedNotifications,
   orgs,
   projects as seedProjects,
+  user,
+  type CommunityCategory,
+  type CommunityWorld,
   type Folder,
   type Notification,
   type NotificationCategory,
@@ -66,6 +69,18 @@ interface Workspace {
   notifications: Notification[];
   unread: number;
 
+  /**
+   * WHAT THIS WORKSPACE PUT ON THE COMMUNITY PAGE.
+   *
+   * Published worlds live beside the seeded ones rather than in them: the seed
+   * is other people's work and never changes, and these are yours. Community
+   * reads both lists, which is what makes "Publish Project" land somewhere you
+   * can go and look at rather than only raising a toast.
+   */
+  published: CommunityWorld[];
+  /** file a project under a category and put it on the Community page */
+  publishProject: (id: string, category: CommunityCategory) => void;
+
   addFolder: (name: string) => string;
   rename: (kind: "project" | "folder", id: string, name: string) => void;
   toggleFavourite: (kind: "project" | "folder", id: string) => void;
@@ -95,6 +110,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<Project[]>(seedProjects);
   const [folders, setFolders] = useState<Folder[]>(seedFolders);
   const [trash, setTrash] = useState<TrashEntry[]>([]);
+  const [published, setPublished] = useState<CommunityWorld[]>([]);
   const [notifications, setNotifications] =
     useState<Notification[]>(seedNotifications);
   const [orgId, setOrgId] = useState(orgs[0].id);
@@ -168,6 +184,35 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           "project",
           `${kind === "project" ? "Project" : "Folder"} Renamed`,
           `You have renamed ${was} to ${name}`
+        );
+      },
+
+      published,
+
+      publishProject(id, category) {
+        const project = projects.find((p) => p.id === id);
+        if (!project) return;
+        const label =
+          category.charAt(0).toUpperCase() + category.slice(1);
+        setPublished((list) => [
+          {
+            /* Its own id. The project keeps existing and stays editable — what
+               is on the Community page is a copy of it as it was when you
+               pressed Publish, which is why the two can't share an identity. */
+            id: nextId("cw"),
+            title: project.name,
+            seed: project.seed,
+            author: user.name,
+            likes: 0,
+            users: 0,
+            category,
+          },
+          ...list.filter((w) => w.title !== project.name),
+        ]);
+        notify(
+          "project",
+          "Project Published",
+          `You have published ${project.name} to the Community under ${label}`
         );
       },
 
@@ -305,7 +350,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setNotifications((list) => list.map((n) => ({ ...n, unread: false })));
       },
     };
-  }, [projects, folders, trash, notifications, orgId]);
+  }, [projects, folders, trash, notifications, orgId, published]);
 
   return <WorkspaceCtx.Provider value={value}>{children}</WorkspaceCtx.Provider>;
 }

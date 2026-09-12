@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
+import { ConfirmDialog } from "@/components/ui";
 import { Sidebar, type Destination } from "./Sidebar";
 import { AppBackdrop } from "./AppBackdrop";
 import { HomeTopBar } from "./HomeTopBar";
@@ -10,13 +11,14 @@ import { ProjectCard } from "./ProjectCard";
 import { ProjectsView } from "./ProjectsView";
 import { CommunityView, FeatureCard, WorldCard } from "./CommunityView";
 import { RemixDialog } from "./RemixDialog";
+import { WhatsNewPage } from "./WhatsNewPage";
 import { TrashView } from "./TrashView";
 import { PricingView } from "./PricingView";
 import { NotificationsDrawer } from "./NotificationsDrawer";
 import { AiChatDrawer } from "./AiChatDrawer";
 import { WorkspaceProvider, useWorkspace } from "./workspace";
 import type { Shelf } from "./shelves";
-import type { CommunityWorld } from "./data";
+import type { CommunityWorld, NewsItem } from "./data";
 import { WorkOrdersDialog } from "@/features/editor/WorkOrdersDialog";
 import type { WorkOrderRunStore } from "@/features/editor/work-order-runs";
 import { whatsNew, communityWorlds } from "./data";
@@ -78,6 +80,18 @@ function Shell({ at: landing, runs }: { at: Destination; runs: WorkOrderRunStore
   const [orders, setOrders] = useState(false);
   /** a community world being considered — the Remix sheet is about this one */
   const [remix, setRemix] = useState<CommunityWorld | null>(null);
+  /**
+   * A REMIX THAT HAS BEEN ASKED FOR BUT NOT AGREED TO.
+   *
+   * Remix used to drop you into the editor on the first click. It copies
+   * somebody else's world into a project of your own and spends the trip out of
+   * this page to do it, so it is asked — and asked SEPARATELY from the sheet
+   * rather than nested inside it, because a dialog over a dialog is two scrims
+   * and a focus trap fighting each other.
+   */
+  const [copying, setCopying] = useState<CommunityWorld | null>(null);
+  /** the release note being read, when one is — home shows it instead of the feed */
+  const [news, setNews] = useState<NewsItem | null>(null);
   /** community likes — here rather than in the grid, so the sheet shares them */
   const [likedWorlds, setLikedWorlds] = useState<string[]>([]);
   const toggleWorldLike = (id: string) =>
@@ -151,16 +165,25 @@ function Shell({ at: landing, runs }: { at: Destination; runs: WorkOrderRunStore
             at === "pricing" ? "pb-2" : "pb-20"
           )}
         >
-          {at === "home" && (
-            <HomeFeed
-              narrow={chat}
-              onCreate={() => setModalOpen(true)}
-              onSeeProjects={() => setAt("projects")}
-              onSeeCommunity={() => setAt("community")}
-              onChat={() => setChat(true)}
-              onPricing={() => setAt("pricing")}
-            />
-          )}
+          {at === "home" &&
+            (news ? (
+              <WhatsNewPage
+                item={news}
+                onHome={() => setNews(null)}
+                onOpen={setNews}
+                onChat={() => setChat(true)}
+                onPricing={() => setAt("pricing")}
+              />
+            ) : (
+              <HomeFeed
+                narrow={chat}
+                onCreate={() => setModalOpen(true)}
+                onSeeProjects={() => setAt("projects")}
+                onOpenNews={setNews}
+                onChat={() => setChat(true)}
+                onPricing={() => setAt("pricing")}
+              />
+            ))}
           {at === "projects" && (
             <ProjectsView
               shelf={shelf}
@@ -225,8 +248,27 @@ function Shell({ at: landing, runs }: { at: Destination; runs: WorkOrderRunStore
         liked={remix ? likedWorlds.includes(remix.id) : false}
         onToggleLike={toggleWorldLike}
         onClose={() => setRemix(null)}
-        onRemix={() => {
+        onRemix={(world) => {
           setRemix(null);
+          setCopying(world);
+        }}
+      />
+
+      <ConfirmDialog
+        open={!!copying}
+        onOpenChange={(o) => !o && setCopying(null)}
+        title={`Copy “${copying?.title ?? ""}” into your projects?`}
+        body={`This makes your own copy of ${copying?.author ?? "the author"}'s world and opens it in the editor. Their original is untouched, and nothing you change here reaches it.`}
+        confirmLabel="Copy & Open"
+        confirmIcon="duplicate"
+        tone="brand"
+        /* Cancel goes BACK to the sheet rather than to the page: you were
+           looking at the world, and changing your mind about copying it is not
+           the same as being finished with it. */
+        cancelLabel="Back"
+        onCancel={() => copying && setRemix(copying)}
+        onConfirm={() => {
+          setCopying(null);
           window.location.hash = "#editor";
         }}
       />
@@ -238,7 +280,7 @@ function HomeFeed({
   narrow,
   onCreate,
   onSeeProjects,
-  onSeeCommunity,
+  onOpenNews,
   onChat,
   onPricing,
 }: {
@@ -246,8 +288,15 @@ function HomeFeed({
   narrow: boolean;
   onCreate: () => void;
   onSeeProjects: () => void;
-  /** where a What's New card's "Explore Now" leads */
-  onSeeCommunity: () => void;
+  /**
+   * Where a What's New card's "Explore Now" leads: the note itself.
+   *
+   * It used to select the Community page, which is what the COMMUNITY banners
+   * do — they stand for a collection. A release note doesn't: it has a body and
+   * a date, and sending someone to a grid of other people's worlds answered a
+   * question they hadn't asked.
+   */
+  onOpenNews: (item: NewsItem) => void;
   onChat: () => void;
   onPricing: () => void;
 }) {
@@ -361,7 +410,7 @@ function HomeFeed({
                    container. Height is the constraint here, so height is what
                    is set. */
                 className="h-[180px]"
-                onExplore={onSeeCommunity}
+                onExplore={() => onOpenNews(item)}
               />
             ))}
       </div>

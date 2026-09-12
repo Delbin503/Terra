@@ -6,6 +6,7 @@ import { HomeTopBar } from "./HomeTopBar";
 import { ProjectCard, ProjectRow } from "./ProjectCard";
 import { FolderCard, FolderRow } from "./FolderCard";
 import { MoveDialog, type MoveRequest } from "./MoveDialog";
+import { PublishProjectDialog, type PublishRequest } from "./PublishProjectDialog";
 import {
   CARD_SIZE,
   LAYOUTS,
@@ -80,6 +81,9 @@ function projectMenu(kept: boolean): MenuItem[] {
     },
     { id: "rename", label: "Rename", icon: "edit", separated: true },
     { id: "copy-link", label: "Copy Link", icon: "link" },
+    /* Publishing is the one action here that leaves the workspace, so it sits
+       with the other things you do TO a project rather than beside Trash. */
+    { id: "publish", label: "Publish Project", icon: "community" },
     { id: "move", label: "Move", icon: "move-to", items: MOVE_TARGETS },
     { id: "trash", label: "Move to Trash", icon: "trash", danger: true },
   ];
@@ -134,6 +138,8 @@ export function ProjectsView({
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [move, setMove] = useState<MoveRequest | null>(null);
+  /** the project waiting on a category — null when nothing is being published */
+  const [publishing, setPublishing] = useState<PublishRequest | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
   // The work itself belongs to the workspace, not to this screen: Trash has to
@@ -147,6 +153,7 @@ export function ProjectsView({
     moveToFolder,
     moveToOrganization,
     trashItem,
+    publishProject,
   } = useWorkspace();
 
   const spec = shelfSpec(shelf);
@@ -249,6 +256,13 @@ export function ProjectsView({
       case "copy-link":
         void copyLink(at);
         break;
+      case "publish": {
+        const project = projects.find((p) => p.id === at.id);
+        if (project) {
+          setPublishing({ id: project.id, name: project.name, seed: project.seed });
+        }
+        break;
+      }
       case "move-folder":
       case "move-org":
         setMove({
@@ -606,6 +620,17 @@ export function ProjectsView({
         }
         confirmLabel="Move to Trash"
         onConfirm={confirmTrash}
+      />
+
+      <PublishProjectDialog
+        request={publishing}
+        onClose={() => setPublishing(null)}
+        onPublish={(id, category) => {
+          const name = publishing?.name ?? "Project";
+          publishProject(id, category);
+          setPublishing(null);
+          setNote(`“${name}” published to Community — find it under ${category[0].toUpperCase()}${category.slice(1)}`);
+        }}
       />
 
       <MoveDialog
