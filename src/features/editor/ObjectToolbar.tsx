@@ -19,13 +19,16 @@ export type EditTab = "object" | "texture" | "capture";
  * leaves the object selected. `tab === null` is therefore a normal resting
  * state — the object is still yours, you just want to look at it.
  *
- * A SKY GETS ONE TILE. An HDRI and a skybox have no body — no position to
- * move, nothing to turn, nothing to scale — so there is no Object tab for them
- * to open, and offering one led straight to three sliders that moved a texture
- * wrapped around the whole world. What they do have is an appearance: how
- * bright the sky renders and how much of it lands on everything else. A
- * Gaussian splat keeps both tiles, because a splat IS a body — a captured place
- * standing at a position you can move.
+ * A SKY GETS BOTH TILES. It has no body in the scene graph — an HDRI and a
+ * skybox render through `<Environment>` rather than as a mesh — but it does
+ * have an orientation, a height and a size, and all three are things the
+ * ground-projected dome can actually express: turning it moves the sun,
+ * raising it moves the horizon, scaling it changes how far the projection
+ * reaches. So Object opens a Transform with those three rows (Position is one
+ * axis, because the only place a wrapped sky can go is up or down — see
+ * ObjectPropertiesPanel and SettingControl), and Appearance keeps the two
+ * sky parameters: how bright it renders and how much of it lands on everything
+ * else.
  *
  * A camera gets a different set: Capture instead of Texture, and no Role tile
  * at all — a capture rig can't be the scene's hero or its clutter, it's the
@@ -62,6 +65,20 @@ export function ObjectToolbar({
     onClick: () => onTab("texture"),
     active: tab === "texture",
   };
+  /* Every non-camera source's Object tile, wearing its own glyph so the tile
+     says WHICH thing it is about before you read the label. */
+  const objectTile = {
+    icon: (isSplat
+      ? "splat"
+      : source === "skybox"
+        ? "panorama"
+        : source === "environment"
+          ? "environment"
+          : "input-3d") as IconName,
+    label: "Object",
+    onClick: () => onTab("object"),
+    active: tab === "object",
+  };
   const tiles: {
     icon: IconName;
     label: string;
@@ -73,17 +90,7 @@ export function ObjectToolbar({
         { icon: "camera", label: "Object", onClick: () => onTab("object"), active: tab === "object" },
         { icon: "capture", label: "Capture", onClick: () => onTab("capture"), active: tab === "capture" },
       ]
-    : isSky
-      ? [appearance]
-      : [
-          {
-            icon: isSplat ? "splat" : "input-3d",
-            label: "Object",
-            onClick: () => onTab("object"),
-            active: tab === "object",
-          },
-          appearance,
-        ];
+    : [objectTile, appearance];
 
   return (
     <div

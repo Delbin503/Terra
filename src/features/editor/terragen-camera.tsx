@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
+import { Button } from "@/components/ui";
 import { NumberInput } from "./ui";
 import { FactorCard } from "./controls-ui";
 import {
@@ -12,11 +13,8 @@ import {
   orbitPoint,
   orbitSweep,
   SHOTS_RANGE,
-  stopGap,
   withVerticalSpan,
-  type CameraRig,
 } from "./camera-rig";
-import { CaptureExplainer, type CaptureTopic } from "./CaptureExplainer";
 import { DistanceControl } from "./SettingControl";
 import type { CameraEdit } from "./TerraGenView";
 import type { SceneApi } from "./useScene";
@@ -116,12 +114,8 @@ function RigControls({
   onEditing: (edit: CameraEdit) => void;
 }) {
   const { rig: cameraRig, start, end, target } = rig;
-  /** Which setting has its explainer open — one at a time, as in the editor. */
-  const [explain, setExplain] = useState<CaptureTopic | null>(null);
-
   if (!cameraRig || !start || !end) return null;
 
-  const fixed = cameraRig.mode === "fixed";
   const sweep = distance(atDistance(target, start.position, rig.nearDistance), end.position);
   const orbit = norm360(azimuthOf(target, end.position));
 
@@ -186,27 +180,15 @@ function RigControls({
           footnote under the last one. Sat at the end it was reached only by
           someone who had already scrolled past every dial it was warning
           about. */}
-      <Note>
-        These are the camera's own settings — editing them here moves the rig in the scene, and the
-        stage switches to the rig so you can see it happen.
-      </Note>
-
       <Group title="Camera mode">
-        {/* The editor's own two cards — the choice and what it costs you, not a
-            segmented control whose labels have to carry the whole explanation. */}
-        <div className="flex flex-col gap-2">
+        {/* SIDE BY SIDE. Two mutually exclusive answers to one question read as
+            a choice when they sit on one line and as a list when they stack —
+            and the labels are one word each, so the row costs nothing. */}
+        <div className="grid grid-cols-2 gap-2">
           {(
             [
-              {
-                value: "rotatable" as const,
-                label: "Rotatable",
-                hint: "Master turns a full revolution at each height, stepping start → end.",
-              },
-              {
-                value: "fixed" as const,
-                label: "Fixed",
-                hint: "One front-on frame. No orbit, no climb.",
-              },
+              { value: "rotatable" as const, label: "Rotatable" },
+              { value: "fixed" as const, label: "Fixed" },
             ]
           ).map((m) => (
             <button
@@ -220,31 +202,27 @@ function RigControls({
                 scene.updateRig(cameraRig.id, { mode: m.value });
               }}
               className={cn(
-                "flex flex-col items-start gap-0.5 rounded-xl border px-3 py-2 text-left transition-colors",
+                "flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2 transition-colors",
                 cameraRig.mode === m.value
                   ? "border-brand/50 bg-brand/12"
                   : "border-glass/12 hover:bg-glass/8"
               )}
             >
-              <span className="type-body-strong flex items-center gap-1.5 text-content">
-                {cameraRig.mode === m.value && (
-                  <Icon name="check" size={12} strokeWidth={3} className="text-brand" />
-                )}
-                {m.label}
-              </span>
-              <span className="type-caption text-content-subtle">{m.hint}</span>
+              {cameraRig.mode === m.value && (
+                <Icon name="check" size={12} strokeWidth={3} className="text-brand" />
+              )}
+              <span className="type-body-strong text-content">{m.label}</span>
             </button>
           ))}
         </div>
-        <Explain
-          topic="cameraMode"
-          open={explain === "cameraMode"}
-          onToggle={() => setExplain((t) => (t === "cameraMode" ? null : "cameraMode"))}
-          rig={cameraRig}
-        />
       </Group>
 
-      <Group title="Zoom distance" hint="how far in the sweep travels">
+      {/* ZOOM AND ITS STOPS, IN ONE GROUP.
+          The two numbers are one decision — how far the sweep travels, and how
+          many times it stops on the way — and reading them a section apart is
+          what made the old column feel like a form rather than a setting. The
+          stop count is capped by what the reach can actually hold. */}
+      <Group title="Zoom distance" hint={`${stops} stops`}>
         <DistanceControl
           nearDistance={rig.nearDistance}
           farDistance={rig.farDistance}
@@ -252,224 +230,302 @@ function RigControls({
           masterName={rig.masterName ?? "the master"}
           onHandle={() => onEditing("distance")}
           onChange={focused("distance", setNear)}
+          note={false}
         />
-        {/* NO "FURTHEST" SLIDER. The far end is where the pair physically
-            stands, and it is set by dragging the cameras — a slider for it was
-            a third way to say a thing the viewport already says better, and it
-            re-built the mast on every tick of the drag. The reach it produces
-            still reads on the line above, beside the near end it bounds. */}
+
+        <ZoomSets scene={scene} onShow={focused("distance", (id: string) => scene.loadZoom(id))} />
+
+        <div className="mt-3">
+          <FactorCard
+            label="Increments"
+            value={stops}
+            min={DISTANCE_SHOTS_RANGE.min}
+            max={maxStops(sweep)}
+            step={DISTANCE_SHOTS_RANGE.step}
+            precision={0}
+            onChange={focused("shotsDistance", (v: number) =>
+              scene.updateRig(cameraRig.id, { shotsPerDistance: Math.round(v) })
+            )}
+          />
+        </div>
       </Group>
 
-      {!fixed && (
-        <>
-          <Group title="Camera height" hint="how high the sweep climbs">
-            {/* The editor's climb control, ends and all: the two numbers worth
-                jumping to are level and straight overhead, and both are one
-                click rather than a careful drag to the end of a track. */}
-            <div className="flex items-center gap-2">
-              <Icon name="move" size={13} className="shrink-0 text-content-subtle" />
-              <input
-                type="range"
-                aria-label="Height between the two cameras"
-                data-ui="terragen-camera-height"
-                min={0}
-                max={Math.max(0.1, rig.climbLimit)}
-                step={0.1}
-                value={Math.min(Math.max(0, rig.climb), Math.max(0.1, rig.climbLimit))}
-                onChange={(e) => focused("distance", setClimb)(parseFloat(e.target.value))}
-                className="h-1 flex-1 cursor-pointer accent-brand"
-              />
-              <div className="field-well type-numeric w-16 shrink-0 rounded-md border px-1.5 py-0.5 text-center text-content">
-                {rig.climb.toFixed(1)} m
-              </div>
+      {/* EVERY CONTROL STAYS ON SCREEN IN BOTH MODES.
+          Fixed used to hide the climb, the orbit and the two shot counts,
+          on the reasoning that a single front-on frame does not use them. That
+          reasoning is right about the RENDER and wrong about the PANEL: the
+          settings still exist on the rig, switching to Fixed and back is how
+          you check one frame before committing to a sweep, and a panel that
+          loses four of its six controls when you do that reads as having
+          thrown them away. They stay, they keep their values, and the mode
+          decides what the run does with them. */}
+      <Group title="Camera height">
+          {/* The editor's climb control, ends and all: the two numbers worth
+              jumping to are level and straight overhead, and both are one
+              click rather than a careful drag to the end of a track. */}
+          <div className="flex items-center gap-2">
+            <Icon name="move" size={13} className="shrink-0 text-content-subtle" />
+            <input
+              type="range"
+              aria-label="Height between the two cameras"
+              data-ui="terragen-camera-height"
+              min={0}
+              max={Math.max(0.1, rig.climbLimit)}
+              step={0.1}
+              value={Math.min(Math.max(0, rig.climb), Math.max(0.1, rig.climbLimit))}
+              onChange={(e) => focused("distance", setClimb)(parseFloat(e.target.value))}
+              className="h-1 flex-1 cursor-pointer accent-brand"
+            />
+            <div className="field-well type-numeric w-16 shrink-0 rounded-md border px-1.5 py-0.5 text-center text-content">
+              {rig.climb.toFixed(1)} m
             </div>
-            <div className="mt-1.5 flex items-center justify-between">
-              <button
-                type="button"
-                data-ui="terragen-camera-height-level"
-                onClick={() => focused("distance", setClimb)(0)}
-                className="type-caption text-content-subtle transition-colors hover:text-content"
-              >
-                Level · 0 m
-              </button>
-              <button
-                type="button"
-                data-ui="terragen-camera-height-overhead"
-                onClick={() => focused("distance", setClimb)(rig.climbLimit)}
-                className="type-caption text-content-subtle transition-colors hover:text-content"
-              >
-                {rig.climbLimit.toFixed(1)} m · Max
-              </button>
-            </div>
-            <p className="type-caption mt-2 text-content-subtle">
-              How far the far camera stands above the near one. The near camera holds still and the
-              far one moves straight up and down, so the pair stays a vertical mast over{" "}
-              {rig.masterName ?? "the master"} rather than leaning into a slope.
-            </p>
-          </Group>
+          </div>
+          <div className="mt-1.5 flex items-center justify-between">
+            <button
+              type="button"
+              data-ui="terragen-camera-height-level"
+              onClick={() => focused("distance", setClimb)(0)}
+              className="type-caption text-content-subtle transition-colors hover:text-content"
+            >
+              Level · 0 m
+            </button>
+            <button
+              type="button"
+              data-ui="terragen-camera-height-overhead"
+              onClick={() => focused("distance", setClimb)(rig.climbLimit)}
+              className="type-caption text-content-subtle transition-colors hover:text-content"
+            >
+              {rig.climbLimit.toFixed(1)} m · Max
+            </button>
+          </div>
+        </Group>
 
-          <Group title="Orbit rotation" hint="where the rig stands">
-            {/*
-              THE SAME CONTROL THE EDITOR HAS, because it is the same setting.
-              This was a lone 0–359 "Bearing" slider, and it was wrong in the
-              way a half-copy usually is: the rig's orbit is THREE numbers, not
-              one — where the sweep starts (`orbitStart`), where it stops
-              (`orbitEnd`), and where the pair is standing right now. Editing
-              only the third meant the arc the master actually turns through
-              was invisible here and unreachable, while Shots / Rotation right
-              below it kept quoting that arc in its own copy.
+        {/* ORBIT AND ITS SHOTS, IN ONE GROUP — the same pairing as zoom: the
+            arc the master turns through, and how many frames come out of it. */}
+        <Group title="Orbit rotation" hint={`${cameraRig.shotsPerRotation} shots`}>
+          {/*
+            The two ends BRACKET the slider rather than sitting under it: left
+            is where the sweep starts, right is where it stops, the handle
+            between them is where the rig is now. Read across, it is the
+            sentence "from here, round to there, currently here".
+          */}
+          <div className="flex items-center gap-2">
+            <NumberInput
+              bordered
+              className="w-14 shrink-0"
+              aria-label="Arc origin bearing"
+              data-ui="terragen-arc-start"
+              value={Math.round(cameraRig.orbitStart)}
+              onChange={(e) => {
+                onFocusCamera();
+                onEditing("orbit");
+                scene.updateRig(cameraRig.id, {
+                  orbitStart: parseFloat(e.target.value) || 0,
+                });
+              }}
+            />
+            <input
+              type="range"
+              aria-label="Orbit cameras around master"
+              data-ui="terragen-orbit-slider"
+              min={0}
+              max={360}
+              step={1}
+              value={Math.round(orbit)}
+              onChange={(e) => focused("orbit", setOrbit)(parseFloat(e.target.value))}
+              className="h-1 flex-1 cursor-pointer accent-brand"
+            />
+            <NumberInput
+              bordered
+              className="w-14 shrink-0"
+              aria-label="Arc maximum bearing"
+              data-ui="terragen-arc-end"
+              value={Math.round(cameraRig.orbitEnd)}
+              onChange={(e) => {
+                onFocusCamera();
+                onEditing("orbit");
+                scene.updateRig(cameraRig.id, {
+                  orbitEnd: parseFloat(e.target.value) || 0,
+                });
+              }}
+            />
+          </div>
 
-              The two ends BRACKET the slider rather than sitting under it: left
-              is where the sweep starts, right is where it stops, the handle
-              between them is where the rig is now. Read across, it is the
-              sentence "from here, round to there, currently here".
-            */}
-            <div className="flex items-center gap-2">
-              <NumberInput
-                bordered
-                className="w-14 shrink-0"
-                aria-label="Arc origin bearing"
-                data-ui="terragen-arc-start"
-                value={Math.round(cameraRig.orbitStart)}
-                onChange={(e) => {
-                  onFocusCamera();
-                  onEditing("orbit");
-                  scene.updateRig(cameraRig.id, {
-                    orbitStart: parseFloat(e.target.value) || 0,
-                  });
-                }}
-              />
-              <input
-                type="range"
-                aria-label="Orbit cameras around master"
-                data-ui="terragen-orbit-slider"
-                min={0}
-                max={360}
-                step={1}
-                value={Math.round(orbit)}
-                onChange={(e) => focused("orbit", setOrbit)(parseFloat(e.target.value))}
-                className="h-1 flex-1 cursor-pointer accent-brand"
-              />
-              <NumberInput
-                bordered
-                className="w-14 shrink-0"
-                aria-label="Arc maximum bearing"
-                data-ui="terragen-arc-end"
-                value={Math.round(cameraRig.orbitEnd)}
-                onChange={(e) => {
-                  onFocusCamera();
-                  onEditing("orbit");
-                  scene.updateRig(cameraRig.id, {
-                    orbitEnd: parseFloat(e.target.value) || 0,
-                  });
-                }}
-              />
-            </div>
+          <div className="mt-2 flex items-center justify-between">
+            <span className="type-caption text-content-subtle">
+              Origin · {Math.round(cameraRig.orbitStart)}°
+            </span>
+            <span className="type-caption-strong text-content">{Math.round(orbit)}° now</span>
+            <span className="type-caption text-content-subtle">
+              {Math.round(orbitSweep(cameraRig.orbitStart, cameraRig.orbitEnd))}° swept
+            </span>
+          </div>
 
-            <div className="mt-2 flex items-center justify-between">
-              <span className="type-caption text-content-subtle">
-                Origin · {Math.round(cameraRig.orbitStart)}°
-              </span>
-              <span className="type-caption-strong text-content">{Math.round(orbit)}° now</span>
-              <span className="type-caption text-content-subtle">
-                {Math.round(orbitSweep(cameraRig.orbitStart, cameraRig.orbitEnd))}° swept
-              </span>
-            </div>
-
-            <p className="type-caption mt-2 text-content-subtle">
-              Swings both cameras around {rig.masterName ?? "the master"}, keeping their height and
-              reach. Drag the ring in the viewport for the same thing.
-            </p>
-          </Group>
-
-          <Group title="Shots">
-            <div className="space-y-3">
-              {/* Capped by what the sweep can actually hold: past that the extra
-                  stops are the same frame billed again. */}
-              <FactorCard
-                label="Increments"
-                value={stops}
-                min={DISTANCE_SHOTS_RANGE.min}
-                max={maxStops(sweep)}
-                step={DISTANCE_SHOTS_RANGE.step}
-                precision={0}
-                onChange={focused("shotsDistance", (v: number) =>
-                  scene.updateRig(cameraRig.id, { shotsPerDistance: Math.round(v) })
-                )}
-              />
-              <p className="type-caption text-content-subtle">
-                {stops <= 1
-                  ? "One stop — the rig shoots its rotation without climbing."
-                  : `${stops} stops between the two ends, ${stopGap(sweep, stops).toFixed(2)} m apart. ` +
-                    `Room for ${maxStops(sweep)} over this ${sweep.toFixed(1)} m sweep.`}
-              </p>
-              <Explain
-                topic="shotsPerDistance"
-                open={explain === "shotsPerDistance"}
-                onToggle={() =>
-                  setExplain((t) => (t === "shotsPerDistance" ? null : "shotsPerDistance"))
-                }
-                rig={cameraRig}
-              />
-
-              <FactorCard
-                label="Shots / Rotation"
-                value={cameraRig.shotsPerRotation}
-                min={SHOTS_RANGE.min}
-                max={SHOTS_RANGE.max}
-                step={SHOTS_RANGE.step}
-                precision={0}
-                onChange={focused("shotsRotation", (v: number) =>
-                  scene.updateRig(cameraRig.id, { shotsPerRotation: Math.round(v) })
-                )}
-              />
-              <Explain
-                topic="shotsPerRotation"
-                open={explain === "shotsPerRotation"}
-                onToggle={() =>
-                  setExplain((t) => (t === "shotsPerRotation" ? null : "shotsPerRotation"))
-                }
-                rig={cameraRig}
-              />
-            </div>
-          </Group>
-        </>
-      )}
+          <div className="mt-3">
+            <FactorCard
+              label="Shots / Rotation"
+              value={cameraRig.shotsPerRotation}
+              min={SHOTS_RANGE.min}
+              max={SHOTS_RANGE.max}
+              step={SHOTS_RANGE.step}
+              precision={0}
+              onChange={focused("shotsRotation", (v: number) =>
+                scene.updateRig(cameraRig.id, { shotsPerRotation: Math.round(v) })
+              )}
+            />
+        </div>
+      </Group>
     </>
   );
 }
 
+/* ------------------------------------------------------------- zoom sets -- */
+
 /**
- * The editor's capture explainer, behind the same info button it uses there.
+ * THE REACHES THIS RUN SWEEPS.
  *
- * Folded rather than always-on: the diagrams are worth their height the first
- * few times and are pure noise afterwards, and this column is already the
- * longest section in the dock.
+ * Deliberately the Time of Day section's list, down to the order of the
+ * buttons and the anatomy of a row: checkbox, name, pencil, bin. Two lists that
+ * behave identically should look identical — the moment one of them puts its
+ * checkbox on the other side, people start checking the wrong thing.
+ *
+ * CLICKING A NAME STANDS THE RIG AT THAT REACH and draws the distance halo over
+ * it, because a list of numbers is not a thing anyone can judge. Loading is not
+ * an edit: it moves the saved near number onto the rig, which is where the
+ * control above was already writing.
  */
-function Explain({
-  topic,
-  open,
-  onToggle,
-  rig,
-}: {
-  topic: CaptureTopic;
-  open: boolean;
-  onToggle: () => void;
-  rig: CameraRig;
-}) {
+function ZoomSets({ scene, onShow }: { scene: SceneApi; onShow: (id: string) => void }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const saved = scene.savedZooms;
+  const inRun = saved.filter((z) => z.inRun).length;
+  const editingSet = editing ? saved.find((z) => z.id === editing) ?? null : null;
+
   return (
-    <div className="mt-2">
-      <button
-        type="button"
-        aria-expanded={open}
-        data-ui={`terragen-explain-${topic}`}
-        onClick={onToggle}
-        className="type-caption flex items-center gap-1.5 text-content-subtle transition-colors hover:text-content"
-      >
-        <Icon name="info" size={13} className="shrink-0" />
-        {open ? "Hide how this works" : "How this works"}
-      </button>
-      {open && <CaptureExplainer topic={topic} rig={rig} />}
+    <div className="mt-3 border-t border-glass/10 pt-3">
+      {editingSet ? (
+        <div data-ui="terragen-zoom-editing">
+          <p className="type-caption mb-2 flex items-center gap-1.5 text-content-subtle">
+            <Icon name="edit" size={13} className="shrink-0 text-brand" />
+            Editing <span className="text-content">{editingSet.name}</span>
+          </p>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="grow"
+              data-ui="terragen-zoom-edit-cancel"
+              onClick={() => setEditing(null)}
+            >
+              Done
+            </Button>
+            <Button
+              variant="brand"
+              size="sm"
+              className="grow"
+              data-ui="terragen-zoom-edit-save"
+              onClick={() => {
+                scene.updateZoomSet(editingSet.id);
+                setEditing(null);
+              }}
+            >
+              <Icon name="save" size={15} />
+              Update set
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button
+          variant="brand"
+          size="sm"
+          className="w-full"
+          data-ui="terragen-zoom-save"
+          onClick={scene.saveZoom}
+        >
+          <Icon name="save" size={15} />
+          Save as set
+        </Button>
+      )}
+
+      {saved.length > 0 && (
+        <>
+          <div className="mb-1.5 mt-3 flex items-baseline justify-between gap-3">
+            <h3 className="type-eyebrow text-content-muted">Zoom sets</h3>
+            <span className="type-caption shrink-0 text-content-subtle">
+              {inRun} of {saved.length} in run
+            </span>
+          </div>
+
+          <div className="space-y-1.5">
+            {saved.map((z) => (
+              <div
+                key={z.id}
+                data-ui={`terragen-zoom-set-${z.id}`}
+                className={cn(
+                  "flex items-center gap-2 rounded-lg border px-2.5 py-2 transition-colors",
+                  editing === z.id
+                    ? "border-brand bg-brand/12"
+                    : z.inRun
+                      ? "border-brand/40 bg-brand/8"
+                      : "border-glass/12 bg-glass/6"
+                )}
+              >
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={z.inRun}
+                  aria-label={`Include ${z.name} in the run`}
+                  data-ui={`terragen-zoom-set-${z.id}-inrun`}
+                  onClick={() => scene.toggleZoomInRun(z.id)}
+                  className={cn(
+                    "grid h-4 w-4 shrink-0 place-items-center rounded border transition-colors",
+                    z.inRun ? "border-brand bg-brand text-brand-foreground" : "border-glass/25"
+                  )}
+                >
+                  {z.inRun && <Icon name="check" size={11} strokeWidth={3} />}
+                </button>
+
+                <button
+                  type="button"
+                  data-ui={`terragen-zoom-set-${z.id}-show`}
+                  onClick={() => onShow(z.id)}
+                  className="min-w-0 grow text-left"
+                >
+                  <span className="type-body block truncate text-content">{z.name}</span>
+                  <span className="type-caption block truncate text-content-subtle">
+                    {z.nearDistance.toFixed(1)} m from the master
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  aria-label={`Edit ${z.name}`}
+                  title="Load this set and update it"
+                  data-ui={`terragen-zoom-set-${z.id}-edit`}
+                  onClick={() => {
+                    onShow(z.id);
+                    setEditing(z.id);
+                  }}
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-content-muted transition-colors hover:bg-glass/15 hover:text-content"
+                >
+                  <Icon name="edit" size={13} />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Delete ${z.name}`}
+                  data-ui={`terragen-zoom-set-${z.id}-delete`}
+                  onClick={() => {
+                    scene.deleteZoom(z.id);
+                    setEditing((cur) => (cur === z.id ? null : cur));
+                  }}
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-content-muted transition-colors hover:bg-danger-soft/40 hover:text-danger"
+                >
+                  <Icon name="trash" size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

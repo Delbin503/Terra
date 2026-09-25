@@ -144,6 +144,46 @@ export const maxZoom = (farDistance: number, nearLimit: number) =>
 /** One decimal, always — "1.0x", "3.9x". */
 export const formatZoom = (zoom: number) => `${zoom.toFixed(1)}x`;
 
+/**
+ * A ZOOM THE RUN SWEEPS.
+ *
+ * The same idea as a saved time (see `SavedTime`): one value on an axis, kept
+ * so the run can render the sweep at several reaches instead of one. It stores
+ * the NEAR DISTANCE in metres rather than the zoom multiple, because the
+ * multiple is derived from the rig's current far distance — park the rig
+ * somewhere else and a stored "2.4x" would silently mean a different place,
+ * while a stored 4.6 m still means 4.6 m from the master.
+ *
+ * `name` is the multiple at the moment it was saved, which is what the user
+ * just chose and what they would search the list for.
+ */
+export interface SavedZoom {
+  id: string;
+  name: string;
+  /** metres from the master — the rig's `nearDistance` */
+  nearDistance: number;
+  /** this set is one of the values the run sweeps */
+  inRun: boolean;
+}
+
+let savedZoomCounter = 0;
+
+export function makeSavedZoom(name: string, nearDistance: number): SavedZoom {
+  savedZoomCounter += 1;
+  return { id: `zoom-${savedZoomCounter}`, name, nearDistance, inRun: true };
+}
+
+/** "2.4x", then " 2" if that is taken — the same disambiguation the time sets
+ *  use, for the same reason: two rows with one name is a list you cannot act on. */
+export function nextZoomName(zoom: number, saved: SavedZoom[]): string {
+  const stem = formatZoom(zoom);
+  const taken = new Set(saved.map((s) => s.name));
+  if (!taken.has(stem)) return stem;
+  let n = 2;
+  while (taken.has(`${stem} ${n}`)) n += 1;
+  return `${stem} ${n}`;
+}
+
 export const DISTANCE_SHOTS_RANGE = { min: 1, max: 12, step: 1 };
 export const SHOTS_RANGE = { min: 4, max: 120, step: 1 };
 

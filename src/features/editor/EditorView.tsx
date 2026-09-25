@@ -1770,12 +1770,14 @@ export function EditorView({
             // number the review screen just charged for.
             const weatherSets = scene.savedWeather.filter((s) => s.inRun).length;
             const timeSets = scene.savedTimes.filter((s) => s.inRun).length;
+            const zoomSets = scene.savedZooms.filter((s) => s.inRun).length;
             const totals = computeTotals(
               order,
               assets.assets,
               rigState(scene).frames,
               weatherSets,
-              timeSets
+              timeSets,
+              zoomSets
             );
             // Credits travel with the row: the Work Orders table quotes what
             // this dispatch was charged, and this is the only place that figure

@@ -494,15 +494,17 @@ export function makeSceneObject(
        one brightness, and telling someone to edit a material it doesn't have
        sends them looking for a panel that isn't there.
 
-       AND A SKY HAS NO TRANSFORM EITHER. This sentence used to tell everything
-       filed under Environments to "move and scale it to sit around your
-       objects", which is true of a captured place and false of an HDRI: there
-       is nothing to move, and the panel that would have moved it is gone (see
-       ObjectToolbar). A description that names controls the object does not
-       have is the most expensive kind of wrong — it sends someone hunting. */
+       AND A SKY'S TRANSFORM IS NOT A BODY'S. This sentence used to tell
+       everything filed under Environments to "move and scale it to sit around
+       your objects", which is true of a captured place and false of an HDRI —
+       a sky has no body to walk around. What it does have is the dome it
+       renders as: turn it, raise it, widen it. Naming those three and no more
+       is the point; a description that promises controls the object does not
+       have is the most expensive kind of wrong, because it sends someone
+       hunting. */
     description:
       source === "environment" || source === "skybox"
-        ? `${SOURCE_LABEL[source]} wrapped around the whole scene. It has no position — set how bright it renders and how much of it lands on your objects.`
+        ? `${SOURCE_LABEL[source]} wrapped around the whole scene. Turn it to move the sun, raise it to shift the horizon, scale how far it reaches — and set how bright it renders and how much of it lands on your objects.`
         : isWorldAsset(source)
           ? `${SOURCE_LABEL[source]} placed in the scene. Move and scale it to sit around your objects, and set how bright it renders.`
           : `${SOURCE_LABEL[source]} asset placed in the scene. Customize its transform and material to suit your world.`,

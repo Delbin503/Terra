@@ -156,6 +156,10 @@ export function SettingControl({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const isCustom = !(OBJECT_COLORS as readonly string[]).includes(material.color);
 
+  /** A wrapped sky can only travel up and down — see the Position block. */
+  const skyOnlyZ =
+    object.source === "environment" || object.source === "skybox";
+
   /**
    * The explainer is asked for, not served.
    *
@@ -258,10 +262,23 @@ export function SettingControl({
         </div>
 
         {setting === "position" && (
-          <div className="grid grid-cols-3 gap-2">
-            {AXES.map((a, i) => (
-              <AxisNumber key={a} axis={a} value={object.position[i]} onChange={(v) => setAxis("position", i, v)} />
-            ))}
+          /* A SKY GETS ONE FIELD.
+             It is a texture wrapped around the whole world, so sliding it
+             sideways moves nothing you can see — the only travel the dome can
+             express is up and down, which `SceneCanvas` reads off this axis to
+             raise or lower the horizon. Two dead fields beside the live one
+             would be an invitation to type into them. */
+          <div className={cn("gap-2", skyOnlyZ ? "flex flex-col" : "grid grid-cols-3")}>
+            {(skyOnlyZ ? ([["Z", 2]] as const) : AXES.map((a, i) => [a, i] as const)).map(
+              ([axis, i]) => (
+                <AxisNumber
+                  key={axis}
+                  axis={axis}
+                  value={object.position[i]}
+                  onChange={(v) => setAxis("position", i, v)}
+                />
+              )
+            )}
           </div>
         )}
 
@@ -639,6 +656,7 @@ export function DistanceControl({
   masterName,
   onChange,
   onHandle,
+  note = true,
 }: {
   nearDistance: number;
   farDistance: number;
@@ -647,6 +665,15 @@ export function DistanceControl({
   /** still METRES — this control converts, the rig stores geometry */
   onChange: (metres: number) => void;
   onHandle?: (h: "min" | "max" | null) => void;
+  /**
+   * Whether to print the sentence under the track.
+   *
+   * On in the editor, where this control floats alone over the viewport and the
+   * sentence is the only thing saying what 1x is measured against. Off in
+   * TerraGen, where it is one control in a column of six and every one of them
+   * carrying a paragraph is what made that column unreadable.
+   */
+  note?: boolean;
 }) {
   const ceiling = maxZoom(farDistance, nearLimit);
   const zoom = Math.min(ceiling, Math.max(1, zoomOf(farDistance, nearDistance)));
@@ -698,11 +725,13 @@ export function DistanceControl({
         />
       </div>
 
-      <p className="type-caption text-content-subtle">
-        The rig stands {farDistance.toFixed(1)} m from {masterName} — that framing is 1x. The
-        capture zooms in to {formatZoom(zoom)} ({nearDistance.toFixed(1)} m). While this control is
-        open the pair previews at the near end, with yellow markers where they return to.
-      </p>
+      {note && (
+        <p className="type-caption text-content-subtle">
+          The rig stands {farDistance.toFixed(1)} m from {masterName} — that framing is 1x. The
+          capture zooms in to {formatZoom(zoom)} ({nearDistance.toFixed(1)} m). While this control
+          is open the pair previews at the near end, with yellow markers where they return to.
+        </p>
+      )}
     </div>
   );
 }

@@ -1,18 +1,9 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui";
-import { Panel, PanelBody } from "./ui";
 import { AssetThumb } from "./AssetThumb";
-import { useDismissable } from "./use-dismissable";
-import {
-  OBJECT_ROLES,
-  ROLE_BADGE,
-  ROLE_DOT,
-  ROLE_LABEL,
-  isContentObject,
-  type ObjectRole,
-} from "./scene-types";
+import { ROLE_BADGE, isContentObject, type ObjectRole } from "./scene-types";
 import type { Asset } from "./assets-data";
 import type { SceneApi } from "./useScene";
 import { swapAdjusted, swapsFor, type ObjectSwap, type SceneRoles, type WorkOrder } from "./work-order";
@@ -118,7 +109,11 @@ export function MasterSection({
       <Group title="Master" hint={master ? undefined : "not set"}>
         {master ? (
           <div className="flex items-center gap-2.5 rounded-xl border border-master/45 bg-master/10 p-2.5">
-            <span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-full border bg-master border-master" />
+            {/* The crown, not a dot. This block exists to say WHICH object is
+                the hero, and the same mark that promotes an object in the list
+                below is what should name it up here — a coloured dot made the
+                reader match a hue to a legend that isn't on screen. */}
+            <Icon name="master" size={15} className="shrink-0 text-master" />
             <button
               type="button"
               data-ui="terragen-master-select"
@@ -173,7 +168,6 @@ export function MasterSection({
                 swapsOpen={openSwaps === o.id}
                 onToggleSwaps={() => setOpenSwaps((id) => (id === o.id ? null : o.id))}
                 onSelect={() => onSelectObject(o.id)}
-                onSetRole={(r) => scene.setRole(o.id, r === o.role ? "none" : r)}
                 onMakeMaster={() => scene.setRole(o.id, "master")}
                 onAddSwaps={() => onBrowseSwaps({ id: o.id, name: o.name })}
                 onToggleSwap={(assetId) => store.toggleSwap(o.id, assetId)}
@@ -229,7 +223,6 @@ function ObjectCard({
   swapsOpen,
   onToggleSwaps,
   onSelect,
-  onSetRole,
   onMakeMaster,
   onAddSwaps,
   onToggleSwap,
@@ -246,7 +239,6 @@ function ObjectCard({
   swapsOpen: boolean;
   onToggleSwaps: () => void;
   onSelect: () => void;
-  onSetRole: (r: ObjectRole) => void;
   /** promote this object — the crown is a one-click action, not a menu */
   onMakeMaster: () => void;
   onAddSwaps: () => void;
@@ -272,25 +264,12 @@ function ObjectCard({
       )}
     >
       <div className="flex items-center gap-2 px-2.5 py-2">
-        {/* The role dot is the role MENU. It was a decoration next to a crown
-            that opened the menu, which left the row with two controls saying
-            "role" and neither saying "make this the master". */}
-        <RoleMenu role={role} onSetRole={onSetRole} />
-        {/* Selecting is the row's primary action — it is what puts the gizmo on
-            this object in the viewport to the left. */}
-        <button type="button" onClick={onSelect} className="min-w-0 grow text-left">
-          <span className="type-body block truncate text-content">{name}</span>
-          <span className="type-caption block truncate text-content-subtle">
-            {role !== "none" && `${ROLE_BADGE[role]} · `}
-            {swaps.length === 0
-              ? "No swap objects"
-              : `${inRun} of ${swaps.length} swap object${swaps.length === 1 ? "" : "s"} selected`}
-          </span>
-        </button>
-        {/* THE CROWN PROMOTES, IMMEDIATELY. It used to open the role menu, so
-            the most common thing anyone does in this list — "no, THAT one is
-            the hero" — was two clicks behind an icon that already meant
-            master. */}
+        {/* THE CROWN LEADS THE ROW.
+            "Which one is the hero" is the question this list exists to answer,
+            so the control that answers it is the first thing on the row and the
+            first thing scanned down the column — lit on the one object that
+            holds it, dim on the rest. It was buried at the other end of the row
+            between two icons that do something else entirely. */}
         <button
           type="button"
           aria-pressed={master}
@@ -303,10 +282,21 @@ function ObjectCard({
             "grid h-7 w-7 shrink-0 place-items-center rounded-md transition-colors",
             master
               ? "cursor-default bg-master/15 text-master"
-              : "text-content-muted hover:bg-glass/15 hover:text-master"
+              : "text-content-subtle hover:bg-glass/15 hover:text-master"
           )}
         >
           <Icon name="master" size={14} />
+        </button>
+        {/* Selecting is the row's primary action — it is what puts the gizmo on
+            this object in the viewport to the left. */}
+        <button type="button" onClick={onSelect} className="min-w-0 grow text-left">
+          <span className="type-body block truncate text-content">{name}</span>
+          <span className="type-caption block truncate text-content-subtle">
+            {role !== "none" && `${ROLE_BADGE[role]} · `}
+            {swaps.length === 0
+              ? "No swap objects"
+              : `${inRun} of ${swaps.length} swap object${swaps.length === 1 ? "" : "s"} selected`}
+          </span>
         </button>
         {/* Icon-only, and the only red thing on the row: deleting is the one
             action here you can't take back by clicking the same button again. */}
@@ -477,63 +467,3 @@ function ObjectCard({
   );
 }
 
-/** The role picker, hung off the row's own role dot. */
-function RoleMenu({ role, onSetRole }: { role: ObjectRole; onSetRole: (r: ObjectRole) => void }) {
-  const [open, setOpen] = useState(false);
-  const wrap = useRef<HTMLDivElement>(null);
-  useDismissable(open, () => setOpen(false), wrap);
-
-  return (
-    <div ref={wrap} className="relative shrink-0">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={`Role: ${ROLE_LABEL[role]}`}
-        title={`Role: ${ROLE_LABEL[role]}`}
-        data-ui="terragen-role-menu"
-        onClick={() => setOpen((o) => !o)}
-        className="grid h-6 w-6 place-items-center rounded-md transition-colors hover:bg-glass/15"
-      >
-        <span aria-hidden className={cn("h-2.5 w-2.5 rounded-full border", ROLE_DOT[role])} />
-      </button>
-
-      {open && (
-        <Panel
-          ui="terragen-role"
-          thickness="overlay"
-          className="absolute left-0 top-[calc(100%+6px)] z-50 w-[212px] !rounded-xl"
-        >
-          <PanelBody className="p-1.5">
-            <div role="menu" className="space-y-0.5">
-              {OBJECT_ROLES.map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={r === role}
-                  data-ui={`terragen-role-${r}`}
-                  onClick={() => {
-                    onSetRole(r);
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors",
-                    r === role ? "bg-glass/14" : "hover:bg-glass/8"
-                  )}
-                >
-                  <span
-                    aria-hidden
-                    className={cn("h-2 w-2 shrink-0 rounded-full border", ROLE_DOT[r])}
-                  />
-                  <span className="type-body grow truncate text-content">{ROLE_LABEL[r]}</span>
-                  {r === role && <Icon name="check" size={13} className="shrink-0 text-content" />}
-                </button>
-              ))}
-            </div>
-          </PanelBody>
-        </Panel>
-      )}
-    </div>
-  );
-}

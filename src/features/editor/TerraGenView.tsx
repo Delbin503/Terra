@@ -568,13 +568,14 @@ export function TerraGenView({
   // is where weather lives (see weather.ts).
   const weatherSets = scene.savedWeather.filter((s) => s.inRun).length;
   const timeSets = scene.savedTimes.filter((s) => s.inRun).length;
+  const zoomSets = scene.savedZooms.filter((s) => s.inRun).length;
   // Recomputed as the scene changes rather than only at the review, so opening
   // the sheet after an edit never quotes a stale count.
   const editedMaterials = useMemo(
     () => countEditedSlots(buildMaterialPayload(scene.objects)),
     [scene.objects]
   );
-  const totals = computeTotals(order, assets, rig.frames, weatherSets, timeSets);
+  const totals = computeTotals(order, assets, rig.frames, weatherSets, timeSets, zoomSets);
   const gates = preflight(
     order,
     {
@@ -838,6 +839,7 @@ export function TerraGenView({
             objects: scene.objects.filter((o) => isContentObject(o)).length,
             weatherSets,
             timeSets,
+            zoomSets,
             // What the run will carry from the Texture panel — see
             // `buildMaterialPayload`. Built from the scene at review time, so
             // the figure quoted here is the figure that dispatches.

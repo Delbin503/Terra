@@ -42,6 +42,12 @@ import { contactWalls, type SceneVolume, type Vec3 } from "./scene-volume";
 const DEFAULT_SKY = "/hdri/aarfontein_dusk_4k.exr";
 
 const R2D = 180 / Math.PI;
+const DEG = Math.PI / 180;
+
+/** The ground projection the sky has always rendered with. A placed sky's own
+ *  transform is applied ON TOP of these, so an untouched sky looks untouched
+ *  and every number the Object tab shows is an offset from a known default. */
+const GROUND = { height: 15, radius: 60, scale: 400 };
 
 /**
  * SKY BRIGHTNESS, ON THE THING THAT IS ACTUALLY THE SKY.
@@ -221,10 +227,30 @@ export function SceneWorld({
     const skybox = visible("skybox");
     const texture = hdri ?? skybox;
     const lighting = hdri ?? skybox ?? visible("splat");
+    /* AND HOW IT IS ORIENTED, HOW HIGH IT SITS, AND HOW FAR IT REACHES.
+       A sky has no mesh, but the ground-projected dome it renders as has three
+       degrees of freedom the object's own transform can drive, which is what
+       the Object tab on a sky edits (see ObjectToolbar):
+
+         rotation  → turns the sky. This is how the sun gets moved.
+         position  → Z only, added to the projection height: raises or lowers
+                     the horizon relative to the objects standing on it.
+         scale     → how far the projection reaches before it curves away.
+
+       Read off the texture object, because these describe the picture being
+       wrapped; a splat providing only lighting has no say in them. */
+    const rot = texture?.rotationDeg ?? [0, 0, 0];
+    const spread = texture ? Math.max(0.1, texture.scale[0]) : 1;
     return {
       brightness: texture?.brightness ?? 1,
       influence: lighting?.skyInfluence ?? DEFAULT_SKY_INFLUENCE,
       files: texture?.skyUrl ?? DEFAULT_SKY,
+      rotation: [rot[0] * DEG, rot[1] * DEG, rot[2] * DEG] as [number, number, number],
+      ground: {
+        height: GROUND.height + (texture?.position[2] ?? 0),
+        radius: GROUND.radius * spread,
+        scale: GROUND.scale * spread,
+      },
     };
   }, [scene.objects]);
   return (
@@ -255,7 +281,12 @@ export function SceneWorld({
         background
         backgroundIntensity={sky.brightness}
         environmentIntensity={sky.influence}
-        ground={{ height: 15, radius: 60, scale: 400 }}
+        /* Both rotations, together: turning only the background would swing the
+           picture while leaving the light it casts pointing the old way, so the
+           sun would move and the shadows would not. */
+        backgroundRotation={sky.rotation}
+        environmentRotation={sky.rotation}
+        ground={sky.ground}
       />
 
       {/* The sweep each rig will travel. Drawn before the cameras so the line

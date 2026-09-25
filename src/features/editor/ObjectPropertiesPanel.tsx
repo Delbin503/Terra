@@ -108,14 +108,23 @@ function materialKeysFor(source: SceneObject["source"]): SettingKey[] {
 
 /** Brightness is the object's own on a splat and the sky's on a backdrop. Same
  *  field, same control — but "Brightness" over an HDRI reads as the object's
- *  own, and the thing it brightens is the whole sky.
- *
- *  It also answers "does this thing have a transform": a sky is a texture
- *  wrapped around the scene, so it has no position, no rotation and no scale —
- *  see the Transform filter in the component below and ObjectToolbar, which
- *  stops offering the tab those rows live on. */
+ *  own, and the thing it brightens is the whole sky. */
 const isSky = (source: SceneObject["source"]) =>
   source === "environment" || source === "skybox";
+
+/**
+ * The Transform a wrapped sky actually has.
+ *
+ * It has no body in the scene graph, but the ground-projected dome it renders
+ * as is orientable, liftable and resizable, and `SceneCanvas` drives all three
+ * off these fields: rotation turns the sky (which is how you move the sun),
+ * position raises the horizon, scale changes how far the projection reaches.
+ *
+ * Position is ONE AXIS, handled in `SettingControl`: up and down is the only
+ * direction a texture wrapped around the whole world can travel, so the other
+ * two fields would be numbers that never change the picture.
+ */
+const SKY_TRANSFORM: SettingKey[] = ["position", "rotation", "scale"];
 
 /**
  * Rig properties, not object ones. Zoom Distance is how far in the pair reaches
@@ -140,7 +149,15 @@ function summarize(
 ): { text?: string; swatch?: string } {
   switch (key) {
     case "position":
-      return { text: o.position.map((v) => v.toFixed(1)).join(", ") };
+      // A sky reports the one axis it can travel on. Printing "0.0, 0.5, -4.6"
+      // beside a control with a single Z field states two numbers the user
+      // cannot reach — see SKY_TRANSFORM and the Position block in
+      // SettingControl.
+      return {
+        text: isSky(o.source)
+          ? o.position[2].toFixed(1)
+          : o.position.map((v) => v.toFixed(1)).join(", "),
+      };
     case "rotation":
       // From a camera, "rotation" is the master's orbit angle: the camera is
       // locked on the master, so turning the subject is the only rotation that
@@ -235,9 +252,9 @@ export function ObjectPropertiesPanel({
       (!CAMERA_ONLY.includes(s.key) || isCamera) &&
       // Scale is meaningless on a camera; the rig's reach is set by moving it.
       (!isCamera || group !== "Transform" || CAMERA_TRANSFORM.includes(s.key)) &&
-      // A sky has no transform at all — three sliders that moved a texture
-      // wrapped around the whole world, which is to say moved nothing.
-      !(group === "Transform" && isSky(object.source)) &&
+      // A sky's Transform is the three rows the dome can express — see
+      // SKY_TRANSFORM.
+      (!isSky(object.source) || group !== "Transform" || SKY_TRANSFORM.includes(s.key)) &&
       // Each source's Material group is its own set — see `materialKeysFor`.
       (s.group !== "Material" || materialKeys.includes(s.key))
   );

@@ -350,6 +350,7 @@ export function orderChanges(
     objects: number;
     weatherSets: number;
     timeSets: number;
+    zoomSets: number;
     materialSlots: number;
     materialObjects: number;
   }
@@ -405,6 +406,13 @@ export function orderChanges(
       value: formatCount(scene.timeSets),
     });
   }
+  if (scene.zoomSets > 0) {
+    rows.push({
+      icon: "scale",
+      label: "Zoom sets in the run",
+      value: formatCount(scene.zoomSets),
+    });
+  }
   if (annotations > 0) {
     rows.push({ icon: "capture", label: "Annotation types", value: formatCount(annotations) });
   }
@@ -422,6 +430,7 @@ export function orderChanges(
 function multiplierIcon(id: Totals["multipliers"][number]["id"]): IconName {
   if (id === "weather") return "sunny";
   if (id === "time") return "render-time";
+  if (id === "zoom") return "scale";
   if (id.startsWith("swaps:")) return "retry";
   return AXIS_BY_ID[id as AxisId].icon;
 }

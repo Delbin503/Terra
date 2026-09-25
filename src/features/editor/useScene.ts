@@ -33,8 +33,12 @@ import {
   CAMERA_DEFAULTS,
   distance,
   framingPosition,
+  makeSavedZoom,
   nearLimit,
+  nextZoomName,
+  zoomOf,
   type CameraRig,
+  type SavedZoom,
 } from "./camera-rig";
 import {
   DEFAULT_SUN,
@@ -243,6 +247,28 @@ export function useScene() {
   savedWeatherRef.current = savedWeather;
   const savedTimesRef = useRef(savedTimes);
   savedTimesRef.current = savedTimes;
+  /** Zoom reaches kept for the run — see `SavedZoom`. Session-scoped, and read
+   *  the same way the time sets are: one checked set is one value on an axis. */
+  const [savedZooms, setSavedZooms] = useState<SavedZoom[]>([]);
+  const savedZoomsRef = useRef(savedZooms);
+  savedZoomsRef.current = savedZooms;
+  /**
+   * The rig a zoom set is saved off, and how far it is parked from the master.
+   *
+   * Assigned during render rather than in an effect, for the reason the saved-set
+   * mirrors above are: save reads the live value inside a state updater, and an
+   * effect-assigned ref lags by a tick there. One rig today — `rigState` and the
+   * editor's re-frame both read `rigs[0]` the same way.
+   */
+  const rigRef = useRef<CameraRig | null>(null);
+  rigRef.current = rigs[0] ?? null;
+  const farDistanceRef = useRef(0);
+  farDistanceRef.current = (() => {
+    const rig = rigs[0];
+    const hero = objects.find(isMaster);
+    const end = rig ? objects.find((o) => o.id === rig.endId) : undefined;
+    return hero && end ? distance(hero.position, end.position) : 0;
+  })();
   /** Scene clipboard for the layers panel's Copy / Paste. Snapshot by value. */
   const [clipboard, setClipboard] = useState<{ rootId: string; objects: SceneObject[] } | null>(
     null
@@ -480,6 +506,64 @@ export function useScene() {
    *  the weather conditions sitting in the section above it. */
   const resetTime = useCallback(
     () => setWeatherState((prev) => patchWeather(prev, { sun: { minutes: DEFAULT_SUN.minutes } })),
+    []
+  );
+
+  /* ------------------------------------------------------------ zoom sets */
+
+  /**
+   * The reaches a run sweeps, saved off the rig.
+   *
+   * Deliberately the same six functions as the time sets above, in the same
+   * order, with the same names — save / load / delete / update / toggle — so
+   * the two lists behave identically and the panels that draw them can be read
+   * against each other. They multiply each other too: three zooms under two
+   * hours is six passes over the sweep.
+   *
+   * WHAT IS STORED IS METRES. `nearDistance` is a saved number on the rig, not
+   * a camera position, so a zoom set is that number and nothing else — the
+   * multiple the row is named for is only meaningful against wherever the rig
+   * is parked right now.
+   */
+  const saveZoom = useCallback(() => {
+    const rig = rigRef.current;
+    if (!rig) return;
+    setSavedZooms((prev) => {
+      const zoom = zoomOf(farDistanceRef.current, rig.nearDistance);
+      return [...prev, makeSavedZoom(nextZoomName(zoom, prev), rig.nearDistance)];
+    });
+  }, []);
+
+  /** Stand the rig at a saved reach. The near end only — loading a zoom must
+   *  not disturb the climb, the orbit or the shot counts around it. */
+  const loadZoom = useCallback((id: string) => {
+    const hit = savedZoomsRef.current.find((s) => s.id === id);
+    const rig = rigRef.current;
+    if (hit && rig) {
+      setRigs((prev) =>
+        prev.map((r) => (r.id === rig.id ? { ...r, nearDistance: hit.nearDistance } : r))
+      );
+    }
+  }, []);
+
+  const deleteZoom = useCallback(
+    (id: string) => setSavedZooms((prev) => prev.filter((s) => s.id !== id)),
+    []
+  );
+
+  /** Write the rig's live reach back over a set you loaded to edit — correcting
+   *  a set must not fork it, exactly as in Weather and Time. */
+  const updateZoomSet = useCallback((id: string) => {
+    const rig = rigRef.current;
+    if (!rig) return;
+    setSavedZooms((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, nearDistance: rig.nearDistance } : s))
+    );
+  }, []);
+
+  const toggleZoomInRun = useCallback(
+    (id: string) =>
+      setSavedZooms((prev) => prev.map((s) => (s.id === id ? { ...s, inRun: !s.inRun } : s))),
     []
   );
 
@@ -1487,6 +1571,12 @@ export function useScene() {
     updateWeatherSet,
     renameWeatherSet,
     toggleWeatherInRun,
+    savedZooms,
+    saveZoom,
+    loadZoom,
+    deleteZoom,
+    updateZoomSet,
+    toggleZoomInRun,
     savedTimes,
     saveTime,
     loadTime,

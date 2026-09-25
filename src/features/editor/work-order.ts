@@ -595,7 +595,7 @@ export interface Multiplier {
   /** an axis, or one of the things that multiply like one without being an
    *  axis: the scene-owned weather and time-of-day sets, and one object's
    *  stand-ins (`swaps:<objectId>`, one row per object that has any) */
-  id: AxisId | "weather" | "time" | `swaps:${string}`;
+  id: AxisId | "weather" | "time" | "zoom" | `swaps:${string}`;
   label: string;
   count: number;
 }
@@ -663,7 +663,8 @@ export function computeTotals(
   assets: Asset[],
   framesPerSubset: number,
   weatherSets = 0,
-  timeSets = 0
+  timeSets = 0,
+  zoomSets = 0
 ): Totals {
   const perSubset = Math.max(1, Math.round(framesPerSubset));
 
@@ -683,6 +684,13 @@ export function computeTotals(
   // two conditions is six passes, which is why they are two rows and not one.
   if (timeSets > 1) {
     multipliers.push({ id: "time", label: "Time sets", count: timeSets });
+  }
+
+  // And zooms against both. A zoom set is a reach the sweep travels in to, so
+  // two of them is the whole sweep shot twice — the same shape of cost as an
+  // hour or a weather, and counted the same way.
+  if (zoomSets > 1) {
+    multipliers.push({ id: "zoom", label: "Zoom sets", count: zoomSets });
   }
 
   /**
