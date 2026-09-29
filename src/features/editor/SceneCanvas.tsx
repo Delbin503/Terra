@@ -771,6 +771,121 @@ function GroupGizmo({
 }
 
 /**
+ * A SKY'S TRANSFORM GIZMO — handles for the one object with no body at all.
+ *
+ * An HDRI and a skybox draw no solid on purpose (see the filter in
+ * `SceneWorld`): the thing they are is the horizon, not a box standing on the
+ * ground. That left them as the only selectable object in the editor whose
+ * Object tab listed three transforms and offered no way to drag any of them —
+ * the panel could move the sky and the viewport could not.
+ *
+ * So it drives a proxy, exactly as a group and a volume do. What differs is
+ * WHICH HANDLES APPEAR, because a dome cannot honour all nine numbers:
+ *
+ *   translate — Z ONLY. `SceneCanvas` adds `position[2]` to the projection
+ *               height and ignores x and y, because sliding a texture wrapped
+ *               around the whole world sideways moves nothing you can see. The
+ *               two dead axes are hidden rather than left draggable: a handle
+ *               that grabs, drags and changes nothing is worse than no handle.
+ *   rotate    — all three. Every axis is read (it is how the sun gets moved).
+ *   scale     — all three shown, ONE value committed. The projection has a
+ *               single reach, read off `scale[0]`, so whichever handle you take
+ *               hold of writes the same number to all three. Showing one lonely
+ *               X arrow for what reads as "how far the ground stretches" would
+ *               be precise and unusable.
+ *
+ * NB the Z arrow drags along the world's Z, while what it changes is the
+ * horizon's HEIGHT — an oddity inherited from the data model, where the sky's
+ * third position component means height rather than depth.
+ */
+function SkyGizmo({
+  object,
+  mode,
+  onChange,
+  onGrab,
+}: {
+  object: SceneObject;
+  mode: "translate" | "rotate" | "scale";
+  onChange: (patch: Partial<SceneObject>) => void;
+  onGrab: (holding: boolean) => void;
+}) {
+  const proxy = useMemo(() => new Object3D(), []);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const gizmoRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const controls = useThree((s) => s.controls as any);
+  const dragging = useRef(false);
+
+  useEffect(() => {
+    if (dragging.current) return;
+    proxy.position.set(object.position[0], object.position[1], object.position[2]);
+    proxy.rotation.set(
+      object.rotationDeg[0] / R2D,
+      object.rotationDeg[1] / R2D,
+      object.rotationDeg[2] / R2D
+    );
+    proxy.scale.set(object.scale[0], object.scale[1], object.scale[2]);
+  }, [proxy, object.position, object.rotationDeg, object.scale]);
+
+  const commit = () => {
+    if (mode === "translate") {
+      // x and y are carried through untouched — the dome never reads them, and
+      // rewriting them from a proxy that cannot move on those axes would only
+      // add noise to the undo history.
+      onChange({ position: [object.position[0], object.position[1], proxy.position.z] });
+      return;
+    }
+    if (mode === "rotate") {
+      onChange({
+        rotationDeg: [
+          proxy.rotation.x * R2D,
+          proxy.rotation.y * R2D,
+          proxy.rotation.z * R2D,
+        ],
+      });
+      return;
+    }
+    // Whichever axis the drag actually moved becomes the one reach.
+    const prev = object.scale[0];
+    const next =
+      [proxy.scale.x, proxy.scale.y, proxy.scale.z].find(
+        (v) => Math.abs(v - prev) > 1e-4
+      ) ?? prev;
+    onChange({ scale: [next, next, next] });
+  };
+
+  return (
+    <>
+      <primitive object={proxy} />
+      <TransformControls
+        ref={gizmoRef}
+        object={proxy}
+        mode={mode}
+        showX={mode !== "translate"}
+        showY={mode !== "translate"}
+        onObjectChange={commit}
+        onMouseDown={() => {
+          dragging.current = true;
+          onGrab(true);
+          if (controls) controls.enabled = false;
+        }}
+        onMouseUp={() => {
+          dragging.current = false;
+          onGrab(false);
+          if (controls) controls.enabled = true;
+          // Re-seat the proxy on what was actually stored: a scale drag commits
+          // one uniform value, so two of its three axes end the drag holding a
+          // number the sky never took.
+          proxy.scale.set(object.scale[0], object.scale[0], object.scale[0]);
+        }}
+      />
+      <UnrealGizmoSkin key={mode} gizmoRef={gizmoRef} />
+      <GizmoReadout gizmoRef={gizmoRef} />
+    </>
+  );
+}
+
+/**
  * THE SPACE'S MOVE GIZMO — the object one, on a room.
  *
  * It used to be three cones on stalks, hand-drawn in `VolumeBox`. They pointed
@@ -1674,6 +1789,30 @@ export function SceneCanvas({
   // `enabled` is false, which would make precise dragging impossible.
   const [focusSettled, setFocusSettled] = useState(false);
   const [transforming, setTransforming] = useState(false);
+
+  /**
+   * THE CLICK THAT ENDS A GIZMO DRAG IS NOT A CLICK.
+   *
+   * Objects select on `onClick`, and a drag on a handle ends with a pointerup
+   * over whatever happens to sit behind that handle — so the release selects
+   * it. On a mesh this never showed: the thing behind its own handles is
+   * itself, and re-selecting it is a no-op. A sky's gizmo stands at the origin,
+   * which is exactly where the master object lives, so every drag on it handed
+   * the selection to the master and unmounted the handles mid-gesture. Released
+   * over bare ground instead, `onPointerMissed` deselected the sky outright.
+   *
+   * So a press on any gizmo raises this, and it drops only after the click that
+   * ends the same press has been dispatched. `setTimeout(0)` is the ordering
+   * guarantee: the browser sends pointerup and then click inside one task, and
+   * a timeout scheduled during the first runs after the second.
+   */
+  const suppressPick = useRef(false);
+  const grab = useCallback((holding: boolean) => {
+    setTransforming(holding);
+    if (holding) suppressPick.current = true;
+    else setTimeout(() => (suppressPick.current = false), 0);
+  }, []);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const gizmoRef = useRef<any>(null);
   const selectedId = scene.selectedId;
@@ -1741,6 +1880,7 @@ export function SceneCanvas({
    * child there means that child, not the box around it.
    */
   const pick = (id: string) => {
+    if (suppressPick.current) return;
     const groups = ancestorIds(scene.objects, id);
     if (groups.length === 0) {
       scene.select(id);
@@ -1820,6 +1960,12 @@ export function SceneCanvas({
   // job is to capture, so selecting one pulls back to show the WHOLE rig (both
   // cameras and the sweep between them) rather than zooming onto one lens.
   const sel = scene.selected;
+  /** The selected HDRI or skybox, if that is what is selected — the one object
+   *  whose gizmo cannot come from a mesh, because it deliberately has none. */
+  const selectedSky =
+    sel && !sel.group && (sel.source === "environment" || sel.source === "skybox")
+      ? sel
+      : null;
   const rig = sel?.rigId ? scene.rigs.find((r) => r.id === sel.rigId) : undefined;
   let focusCenter: [number, number, number] | null = sel ? sel.position : null;
   let focusRadius = sel ? 0.7 * Math.max(...sel.scale) : 0;
@@ -1853,7 +1999,9 @@ export function SceneCanvas({
       dpr={[1, 2]}
       gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true }}
       camera={{ position: [7, 5, 9], fov: 45, near: 0.1, far: 1000 }}
-      onPointerMissed={() => scene.select(null)}
+      onPointerMissed={() => {
+        if (!suppressPick.current) scene.select(null);
+      }}
     >
       <CameraGrabber cameraRef={cameraRef} />
 
@@ -1876,7 +2024,22 @@ export function SceneCanvas({
           group={selectedGroup}
           mode={gizmoMode}
           onChange={(patch) => scene.update(selectedGroup.id, patch)}
-          onGrab={setTransforming}
+          onGrab={grab}
+        />
+      )}
+
+      {/* A sky gets them too, on the same terms — and for the same reason a
+          group does: no mesh to attach to, three transforms that mean
+          something. Hidden is excluded as well as locked, because a sky that
+          is switched off is not rendering the horizon the handles would be
+          moving. */}
+      {selectedSky && showGizmo && !selectedSky.locked && !selectedSky.hidden && (
+        <SkyGizmo
+          key={selectedSky.id}
+          object={selectedSky}
+          mode={gizmoMode}
+          onChange={(patch) => scene.update(selectedSky.id, patch)}
+          onGrab={grab}
         />
       )}
 
@@ -1934,11 +2097,11 @@ export function SceneCanvas({
           mode={gizmoMode}
           onObjectChange={commitTransform}
           onMouseDown={() => {
-            setTransforming(true);
+            grab(true);
             if (controlsRef.current) controlsRef.current.enabled = false;
           }}
           onMouseUp={() => {
-            setTransforming(false);
+            grab(false);
             if (controlsRef.current) controlsRef.current.enabled = true;
           }}
         />

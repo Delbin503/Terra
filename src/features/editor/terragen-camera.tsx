@@ -217,39 +217,6 @@ function RigControls({
         </div>
       </Group>
 
-      {/* ZOOM AND ITS STOPS, IN ONE GROUP.
-          The two numbers are one decision — how far the sweep travels, and how
-          many times it stops on the way — and reading them a section apart is
-          what made the old column feel like a form rather than a setting. The
-          stop count is capped by what the reach can actually hold. */}
-      <Group title="Zoom distance" hint={`${stops} stops`}>
-        <DistanceControl
-          nearDistance={rig.nearDistance}
-          farDistance={rig.farDistance}
-          nearLimit={rig.nearLimit}
-          masterName={rig.masterName ?? "the master"}
-          onHandle={() => onEditing("distance")}
-          onChange={focused("distance", setNear)}
-          note={false}
-        />
-
-        <ZoomSets scene={scene} onShow={focused("distance", (id: string) => scene.loadZoom(id))} />
-
-        <div className="mt-3">
-          <FactorCard
-            label="Increments"
-            value={stops}
-            min={DISTANCE_SHOTS_RANGE.min}
-            max={maxStops(sweep)}
-            step={DISTANCE_SHOTS_RANGE.step}
-            precision={0}
-            onChange={focused("shotsDistance", (v: number) =>
-              scene.updateRig(cameraRig.id, { shotsPerDistance: Math.round(v) })
-            )}
-          />
-        </div>
-      </Group>
-
       {/* EVERY CONTROL STAYS ON SCREEN IN BOTH MODES.
           Fixed used to hide the climb, the orbit and the two shot counts,
           on the reasoning that a single front-on frame does not use them. That
@@ -297,6 +264,39 @@ function RigControls({
             >
               {rig.climbLimit.toFixed(1)} m · Max
             </button>
+          </div>
+        </Group>
+
+        {/* ZOOM AND ITS STOPS, IN ONE GROUP.
+            The two numbers are one decision — how far the sweep travels, and how
+            many times it stops on the way — and reading them a section apart is
+            what made the old column feel like a form rather than a setting. The
+            stop count is capped by what the reach can actually hold. */}
+        <Group title="Zoom distance" hint={`${stops} stops`}>
+          <DistanceControl
+            nearDistance={rig.nearDistance}
+            farDistance={rig.farDistance}
+            nearLimit={rig.nearLimit}
+            masterName={rig.masterName ?? "the master"}
+            onHandle={() => onEditing("distance")}
+            onChange={focused("distance", setNear)}
+            note={false}
+          />
+
+          <ZoomSets scene={scene} onShow={focused("distance", (id: string) => scene.loadZoom(id))} />
+
+          <div className="mt-3">
+            <FactorCard
+              label="Increments"
+              value={stops}
+              min={DISTANCE_SHOTS_RANGE.min}
+              max={maxStops(sweep)}
+              step={DISTANCE_SHOTS_RANGE.step}
+              precision={0}
+              onChange={focused("shotsDistance", (v: number) =>
+                scene.updateRig(cameraRig.id, { shotsPerDistance: Math.round(v) })
+              )}
+            />
           </div>
         </Group>
 

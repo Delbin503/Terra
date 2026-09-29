@@ -19,22 +19,24 @@ const TICKS = [6, 12, 18];
  * Percentages are hours/24.
  */
 const DAY_RAMP = [
-  { at: 0, color: "#1a2860" }, // midnight — blue, not black; see the scrim note below
-  { at: 8, color: "#172353" }, // 01:55 — the deepest hour
-  { at: 16, color: "#23346f" }, // 03:50 — astronomical twilight, lifting
-  { at: 22, color: "#46487f" }, // 05:17 — blue hour, leaning violet
-  { at: 27, color: "#8a5a72" }, // 06:30 — dawn
-  { at: 31, color: "#c9805a" }, // 07:26 — sunrise
-  { at: 34, color: "#dda06a" }, // 08:10 — low sun
-  { at: 42, color: "#a9c0dc" }, // 10:05 — morning
-  { at: 50, color: "#8fb4d8" }, // midday
-  { at: 62, color: "#b3b9cd" }, // 14:53 — the light starting to turn
-  { at: 70, color: "#d9995e" }, // 16:48 — afternoon
-  { at: 76, color: "#b4573f" }, // 18:15 — golden hour
-  { at: 80, color: "#8a4560" }, // 19:12 — sunset
-  { at: 84, color: "#55407e" }, // 20:10 — dusk
-  { at: 90, color: "#2c3573" }, // 21:36 — night closing in
-  { at: 100, color: "#1a2860" }, // midnight again, so the ramp closes
+  { at: 0, color: "#060a1c" }, // 00:00 — midnight, and it has to LOOK like midnight
+  { at: 8.3, color: "#080d22" }, // 02:00 — the deepest hour
+  { at: 16.7, color: "#122045" }, // 04:00 — astronomical twilight, lifting
+  { at: 20.8, color: "#2a3a70" }, // 05:00 — nautical twilight
+  { at: 22.9, color: "#4d4c84" }, // 05:30 — blue hour, leaning violet
+  { at: 25, color: "#8d5f78" }, // 06:00 — dawn
+  { at: 27.1, color: "#d2834f" }, // 06:30 — sunrise
+  { at: 31.3, color: "#f0ad6a" }, // 07:30 — low sun, the warm end of morning
+  { at: 37.5, color: "#a9cbe9" }, // 09:00 — morning sky
+  { at: 50, color: "#7fb5e6" }, // 12:00 — midday, the brightest point
+  { at: 62.5, color: "#93bcdf" }, // 15:00 — light beginning to turn
+  { at: 70.8, color: "#dba463" }, // 17:00 — afternoon warmth
+  { at: 75, color: "#c86a3c" }, // 18:00 — golden hour
+  { at: 78.1, color: "#9c4a5a" }, // 18:45 — sunset
+  { at: 81.3, color: "#523d75" }, // 19:30 — dusk
+  { at: 85.4, color: "#20264f" }, // 20:30 — night closing in
+  { at: 91.7, color: "#0b1028" }, // 22:00 — full night
+  { at: 100, color: "#060a1c" }, // 24:00 — back to midnight, so the ramp closes
 ];
 
 const RAMP_CSS = `linear-gradient(90deg, ${DAY_RAMP.map((s) => `${s.color} ${s.at}%`).join(", ")})`;
@@ -125,22 +127,25 @@ function DayBar({
       </div>
 
       <div className="relative h-9 overflow-hidden rounded-lg ring-1 ring-inset ring-glass/10">
-        {/* THE RAMP, HELD BACK.
+        {/* THE RAMP, AT FULL STRENGTH.
 
-            On its own layer rather than on the container, and at half strength,
-            so the panel's glass reads through it. Painted opaque it was the
-            loudest thing in the whole Work Order — a saturated blue-to-orange
-            band sitting among controls that are all muted glass, pulling the eye
-            to a readout rather than to the sliders it belongs to.
+            It was held back to half opacity to stop it shouting over the muted
+            glass around it, and that cost the thing it is for: at 50% over a
+            dark panel every hour converges on the same middling blue-grey, so
+            midnight read like afternoon and the strip stopped answering the one
+            question it exists to answer.
 
-            It has to be the layer and not the container: the labels and the
-            marker are children, and fading the parent would take them with it —
-            the marker especially, which has to stay legible against every colour
-            along the ramp.
+            The restraint is in the RAMP now instead of in the opacity. Night is
+            genuinely dark — near-black at 00:00, which is both what midnight
+            looks like and quiet enough to sit in a panel — so the band only
+            reaches full chroma across the few hours that really are vivid, at
+            dawn and at sunset. A picture of a day is allowed to be bright in
+            the middle.
 
-            No scrim any more. It existed to take the edge off midday, and the
-            transparency now does that everywhere at once. */}
-        <div className="absolute inset-0 opacity-50" style={{ background: RAMP_CSS }} />
+            It stays its own layer rather than moving to the container: the
+            labels and the marker are children, and styling the parent would
+            take them with it. */}
+        <div className="absolute inset-0" style={{ background: RAMP_CSS }} />
 
         {TICKS.map((h) => (
           <span
