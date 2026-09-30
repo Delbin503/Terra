@@ -226,7 +226,7 @@ function RigControls({
           loses four of its six controls when you do that reads as having
           thrown them away. They stay, they keep their values, and the mode
           decides what the run does with them. */}
-      <Group title="Camera height">
+      <Group title="Camera height" hint={`${stops} stops`}>
           {/* The editor's climb control, ends and all: the two numbers worth
               jumping to are level and straight overhead, and both are one
               click rather than a careful drag to the end of a track. */}
@@ -265,25 +265,6 @@ function RigControls({
               {rig.climbLimit.toFixed(1)} m · Max
             </button>
           </div>
-        </Group>
-
-        {/* ZOOM AND ITS STOPS, IN ONE GROUP.
-            The two numbers are one decision — how far the sweep travels, and how
-            many times it stops on the way — and reading them a section apart is
-            what made the old column feel like a form rather than a setting. The
-            stop count is capped by what the reach can actually hold. */}
-        <Group title="Zoom distance" hint={`${stops} stops`}>
-          <DistanceControl
-            nearDistance={rig.nearDistance}
-            farDistance={rig.farDistance}
-            nearLimit={rig.nearLimit}
-            masterName={rig.masterName ?? "the master"}
-            onHandle={() => onEditing("distance")}
-            onChange={focused("distance", setNear)}
-            note={false}
-          />
-
-          <ZoomSets scene={scene} onShow={focused("distance", (id: string) => scene.loadZoom(id))} />
 
           <div className="mt-3">
             <FactorCard
@@ -300,8 +281,8 @@ function RigControls({
           </div>
         </Group>
 
-        {/* ORBIT AND ITS SHOTS, IN ONE GROUP — the same pairing as zoom: the
-            arc the master turns through, and how many frames come out of it. */}
+        {/* ORBIT AND ITS SHOTS, IN ONE GROUP: the arc the master turns
+            through, and how many frames come out of it. */}
         <Group title="Orbit rotation" hint={`${cameraRig.shotsPerRotation} shots`}>
           {/*
             The two ends BRACKET the slider rather than sitting under it: left
@@ -375,6 +356,23 @@ function RigControls({
             />
         </div>
       </Group>
+
+        {/* ZOOM LAST, under the shot counts. Increments — how many stops the
+            sweep makes — now sits under Camera height; what stays here is the
+            reach itself and the saved zoom sets that go with it. */}
+        <Group title="Zoom distance">
+          <DistanceControl
+            nearDistance={rig.nearDistance}
+            farDistance={rig.farDistance}
+            nearLimit={rig.nearLimit}
+            masterName={rig.masterName ?? "the master"}
+            onHandle={() => onEditing("distance")}
+            onChange={focused("distance", setNear)}
+            note={false}
+          />
+
+          <ZoomSets scene={scene} onShow={focused("distance", (id: string) => scene.loadZoom(id))} />
+        </Group>
     </>
   );
 }
