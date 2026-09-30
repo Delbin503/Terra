@@ -3,6 +3,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Line, OrbitControls, GizmoHelper, Html, TransformControls } from "@react-three/drei";
 import {
   Mesh,
+  type PerspectiveCamera,
   Object3D,
   Plane,
   Vector3,
@@ -436,6 +437,23 @@ interface SceneCanvasProps {
       scale: [number, number, number];
     }) => void;
   } | null;
+  /**
+   * VIEW ONLY. Nothing in the viewport picks, selects, deselects or drags —
+   * the orbit, pan and zoom are all that is left. Set for the whole time the
+   * camera Preview tab is open, whether or not a camera has been chosen.
+   */
+  locked?: boolean;
+  /** The rig camera to look through, once one is chosen. See `PreviewFly`. */
+  preview?: PreviewPose | null;
+}
+
+/** Where the viewport stands to look through a rig camera — the same pose the
+ *  POV inset renders from (see CameraPreview): at the camera, facing the master. */
+export interface PreviewPose {
+  /** the camera being looked through; a new id is a new flight */
+  id: string;
+  position: [number, number, number];
+  target: [number, number, number];
 }
 
 /**
@@ -534,6 +552,7 @@ function FocusRig({
   center,
   radius,
   onSettled,
+  paused = false,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   controlsRef: React.MutableRefObject<any>;
@@ -541,6 +560,14 @@ function FocusRig({
   center: [number, number, number] | null;
   radius: number;
   onSettled: () => void;
+  /**
+   * Hand the camera to someone else — the camera Preview. Two lerps steering
+   * one camera meet halfway and stay there, which is exactly what happened:
+   * the view stalled between the rig framing and the lens it was flying to.
+   * A paused rig also DROPS its pending flight rather than resuming it after,
+   * because the preview restores the view itself on the way out.
+   */
+  paused?: boolean;
 }) {
   const { camera } = useThree();
   const home = useRef<{ pos: Vector3; tgt: Vector3 } | null>(null);
@@ -570,6 +597,10 @@ function FocusRig({
 
   useFrame(() => {
     const c = controlsRef.current;
+    if (paused) {
+      goal.current = null;
+      return;
+    }
     if (!c || !goal.current) return;
     camera.position.lerp(goal.current.pos, 0.12);
     c.target.lerp(goal.current.tgt, 0.12);
@@ -580,6 +611,97 @@ function FocusRig({
       onSettled();
     }
   });
+  return null;
+}
+
+/** The POV inset's lens. Previewing matches it, so the view the viewport lands
+ *  on is the picture the inset has been showing, not a wider cousin of it. */
+const PREVIEW_FOV = 50;
+
+/**
+ * PREVIEW FLIGHT — into a rig camera, and back out to where you were.
+ *
+ * The same motion `FocusRig` uses (position and target lerped together at the
+ * same rate), so looking through a camera feels like the editor's own fly-in
+ * rather than a cut. The lens widens to the inset's 50° on the way in and
+ * narrows back to the editor's own on the way out.
+ *
+ * IT LANDS EXACTLY. A lerp only approaches its goal, and "nearly where the
+ * camera is" is a slightly different picture from the one the camera takes —
+ * so once it is close enough to be invisible the pose is snapped the rest of
+ * the way. After that the orbit controls own the view: orbit, pan and zoom move
+ * off the camera freely, which is the point of looking around from it.
+ *
+ * THE WAY BACK IS REMEMBERED ONCE, on the first flight in. Switching Top to
+ * Bottom flies camera to camera and keeps that same return, so leaving puts you
+ * back where you were before previewing began, not at the last lens.
+ *
+ * `onArrive` fires when the view is about to pass into the camera's body, which
+ * is when the rig should vanish — earlier and you would watch it disappear from
+ * across the scene; later and the lens housing fills the frame on the way in.
+ */
+function PreviewFly({
+  controlsRef,
+  pose,
+  onArrive,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  controlsRef: React.MutableRefObject<any>;
+  pose: PreviewPose | null;
+  onArrive: () => void;
+}) {
+  const camera = useThree((s) => s.camera) as PerspectiveCamera;
+  const back = useRef<{ pos: Vector3; tgt: Vector3; fov: number } | null>(null);
+  const goal = useRef<{ pos: Vector3; tgt: Vector3; fov: number; entering: boolean } | null>(null);
+  const announced = useRef(false);
+
+  useEffect(() => {
+    const c = controlsRef.current;
+    if (!c) return;
+    if (pose) {
+      if (!back.current) {
+        back.current = { pos: camera.position.clone(), tgt: c.target.clone(), fov: camera.fov };
+      }
+      goal.current = {
+        pos: new Vector3(...pose.position),
+        tgt: new Vector3(...pose.target),
+        fov: PREVIEW_FOV,
+        entering: true,
+      };
+      announced.current = false;
+    } else if (back.current) {
+      goal.current = { ...back.current, entering: false };
+      back.current = null;
+    }
+    // Keyed on WHICH camera, not on the pose object: a new array every render
+    // would restart the flight every render and it would never land.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pose?.id ?? null]);
+
+  useFrame(() => {
+    const c = controlsRef.current;
+    const g = goal.current;
+    if (!c || !g) return;
+
+    camera.position.lerp(g.pos, 0.12);
+    c.target.lerp(g.tgt, 0.12);
+    camera.fov += (g.fov - camera.fov) * 0.12;
+
+    const d = camera.position.distanceTo(g.pos);
+    if (g.entering && !announced.current && d < 0.5) {
+      announced.current = true;
+      onArrive();
+    }
+    if (d < 0.01 && c.target.distanceTo(g.tgt) < 0.01 && Math.abs(camera.fov - g.fov) < 0.05) {
+      camera.position.copy(g.pos);
+      c.target.copy(g.tgt);
+      camera.fov = g.fov;
+      goal.current = null;
+    }
+    camera.updateProjectionMatrix();
+    c.update();
+  });
+
   return null;
 }
 
@@ -1780,6 +1902,8 @@ export function SceneCanvas({
   volumeEdit,
   substitute,
   gizmoInset = 0,
+  locked = false,
+  preview = null,
 }: SceneCanvasProps) {
   const [meshes, setMeshes] = useState<Record<string, Object3D>>({});
 
@@ -1789,6 +1913,16 @@ export function SceneCanvas({
   // `enabled` is false, which would make precise dragging impossible.
   const [focusSettled, setFocusSettled] = useState(false);
   const [transforming, setTransforming] = useState(false);
+
+  /**
+   * Whether the preview flight has reached the camera. The rig disappears only
+   * then — hidden from the start, you would watch the thing you are flying
+   * towards vanish, and have nothing to aim at on the way in. Reset on every
+   * new camera, so switching Top to Bottom brings the rig back for the flight.
+   */
+  const [previewArrived, setPreviewArrived] = useState(false);
+  useEffect(() => setPreviewArrived(false), [preview?.id]);
+  const insideCamera = !!preview && previewArrived;
 
   /**
    * THE CLICK THAT ENDS A GIZMO DRAG IS NOT A CLICK.
@@ -1880,7 +2014,7 @@ export function SceneCanvas({
    * child there means that child, not the box around it.
    */
   const pick = (id: string) => {
-    if (suppressPick.current) return;
+    if (suppressPick.current || locked) return;
     const groups = ancestorIds(scene.objects, id);
     if (groups.length === 0) {
       scene.select(id);
@@ -2000,7 +2134,7 @@ export function SceneCanvas({
       gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true }}
       camera={{ position: [7, 5, 9], fov: 45, near: 0.1, far: 1000 }}
       onPointerMissed={() => {
-        if (!suppressPick.current) scene.select(null);
+        if (!suppressPick.current && !locked) scene.select(null);
       }}
     >
       <CameraGrabber cameraRef={cameraRef} />
@@ -2013,6 +2147,8 @@ export function SceneCanvas({
         substitute={substitute?.object ?? null}
         onSelect={pick}
         hideIds={guideHides}
+        interactive={!locked}
+        hideCameras={insideCamera}
       />
 
       {/* A selected group gets the same three transforms a mesh gets. Locked
@@ -2049,12 +2185,14 @@ export function SceneCanvas({
           front of them, and drawn HERE rather than inside SceneWorld because
           SceneWorld is also what renders a captured frame — a dataset image
           with a violet box across it would be a picture of the tool. */}
-      {scene.volumes.map((v) => (
+      {/* Not drawn from inside a camera: a space is an editing aid, and a
+          violet box across the lens is not what the camera photographs. */}
+      {!insideCamera && scene.volumes.map((v) => (
         <VolumeBox
           key={v.id}
           volume={v}
           selected={v.id === scene.selectedVolumeId}
-          onSelect={() => scene.selectVolume(v.id)}
+          onSelect={() => !locked && scene.selectVolume(v.id)}
           /* Only the SELECTED object lights a face. Every object pressed to a
              wall lighting one at once would be a room outlined in amber, which
              says nothing about the thing currently in your hand. */
@@ -2114,7 +2252,10 @@ export function SceneCanvas({
         makeDefault
         enableDamping
         dampingFactor={0.08}
-        minDistance={2}
+        /* A camera can sit closer to the master than the editor's usual 2 m
+           floor, and a clamp there would shove the view off the lens the
+           moment it landed. */
+        minDistance={preview ? 0.05 : 2}
         /**
          * Far enough out to frame a room.
          *
@@ -2124,8 +2265,12 @@ export function SceneCanvas({
          * through the drag that created it and simply stop.
          */
         maxDistance={160}
-        maxPolarAngle={Math.PI / 2.05}
-        autoRotate={!!selectedId && focusSettled && !transforming}
+        /* Same reason: a camera below the master's height looks UP at it,
+           which the editor's stay-above-the-ground limit would not allow. */
+        maxPolarAngle={preview ? Math.PI : Math.PI / 2.05}
+        /* Never while previewing. The auto-orbit is the editor showing off
+           the selection; here the view belongs to whoever is looking. */
+        autoRotate={!!selectedId && focusSettled && !transforming && !locked}
         autoRotateSpeed={0.9}
       />
 
@@ -2135,6 +2280,13 @@ export function SceneCanvas({
         center={focusCenter}
         radius={focusRadius}
         onSettled={() => setFocusSettled(true)}
+        paused={locked}
+      />
+
+      <PreviewFly
+        controlsRef={controlsRef}
+        pose={preview}
+        onArrive={() => setPreviewArrived(true)}
       />
 
       <KeyboardFly controlsRef={controlsRef} />

@@ -9,7 +9,11 @@ import {
   type ObjectRole,
 } from "./scene-types";
 
-export type EditTab = "object" | "texture" | "capture";
+/**
+ * `preview` is the one tab that edits nothing: it swaps the viewport onto one
+ * of the rig's two cameras and locks every other control — see EditorView.
+ */
+export type EditTab = "object" | "texture" | "capture" | "preview";
 
 /**
  * Bottom-center per-object toolbar. The tabs drive the right-side properties
@@ -30,9 +34,9 @@ export type EditTab = "object" | "texture" | "capture";
  * sky parameters: how bright it renders and how much of it lands on everything
  * else.
  *
- * A camera gets a different set: Capture instead of Texture, and no Role tile
- * at all — a capture rig can't be the scene's hero or its clutter, it's the
- * thing pointed AT them.
+ * A camera gets a different set: Capture instead of Texture, Preview to look
+ * through either end of the rig, and no Role tile at all — a capture rig can't
+ * be the scene's hero or its clutter, it's the thing pointed AT them.
  *
  * A Gaussian splat keeps the same two tiles but the second one reads
  * "Appearance": what sits behind it is one brightness scalar, and a tile
@@ -89,6 +93,9 @@ export function ObjectToolbar({
     ? [
         { icon: "camera", label: "Object", onClick: () => onTab("object"), active: tab === "object" },
         { icon: "capture", label: "Capture", onClick: () => onTab("capture"), active: tab === "capture" },
+        // Last, because it is the one tile that leaves editing: the two to its
+        // left change the rig, this one only looks through it.
+        { icon: "preview", label: "Preview", onClick: () => onTab("preview"), active: tab === "preview" },
       ]
     : [objectTile, appearance];
 

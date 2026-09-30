@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
 import { Raycaster, Vector2, Vector3, Plane } from "three";
 import {
   SceneCanvas,
@@ -40,6 +41,8 @@ import { SceneLayersPanel } from "./SceneLayersPanel";
 import { PanelDock, DOCK_WIDTH } from "./panel-dock";
 import { objectTypeLabel, type SceneObject } from "./scene-types";
 import { CameraPreview } from "./CameraPreview";
+import { PreviewPicker, type PreviewCamera } from "./PreviewPicker";
+import type { PreviewPose } from "./SceneCanvas";
 import { TerraGenView } from "./TerraGenView";
 import { useScene } from "./useScene";
 import { useAssets } from "./useAssets";
@@ -143,6 +146,18 @@ export function EditorView({
   /** the layer tree — its own switch, so opening the library can't close it */
   const [layersOpen, setLayersOpen] = useState(false);
   const [editTab, setEditTab] = useState<EditTab | null>(null);
+  /**
+   * WHICH LENS THE PREVIEW IS LOOKING THROUGH, once one is picked.
+   *
+   * Tab and lens are separate on purpose: opening Preview is choosing to look,
+   * and choosing a camera is choosing where from. Leaving the tab — pressing
+   * Preview again, taking another tile, picking another object — drops the lens
+   * with it (see the effect below), which is what flies the viewport home.
+   */
+  const [previewCam, setPreviewCam] = useState<PreviewCamera | null>(null);
+  useEffect(() => {
+    if (editTab !== "preview") setPreviewCam(null);
+  }, [editTab]);
   /**
    * WHICH MATERIAL SLOT THE TEXTURE PANEL IS POINTED AT.
    *
@@ -334,6 +349,63 @@ export function EditorView({
   /** A camera that belongs to a capture rig — the one object whose rotation is
    *  its rig's bearing around the master rather than its own spin. */
   const isRigCamera = scene.selected?.source === "camera" && !!scene.selected?.rigId;
+
+  /**
+   * CAMERA PREVIEW — the one mode in the editor that edits nothing.
+   *
+   * The whole time the tab is open the editor is view-only: the viewport stops
+   * picking and dragging, the chrome around it goes inert, and the editing
+   * shortcuts are swallowed (see the capture listener below). Only the bottom
+   * toolbar and the camera picker still answer, because those are the ways out
+   * and the way to choose a lens.
+   */
+  const previewing = editTab === "preview";
+  /** The overlay chrome, made `inert` while previewing. Set on the node rather
+   *  than as a JSX prop: React 18 has no `inert` attribute in its types. */
+  const chromeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (chromeRef.current) chromeRef.current.inert = previewing;
+  }, [previewing]);
+  const previewRig = previewing ? scene.selectedRig : null;
+  const previewEnds = previewRig ? scene.rigCameras(previewRig) : null;
+  /** Standing at the chosen camera, looking at the master — the POV inset's pose. */
+  const previewPose: PreviewPose | null = (() => {
+    const cam = previewCam === "top" ? previewEnds?.end : previewCam === "bottom" ? previewEnds?.start : null;
+    if (!cam) return null;
+    return {
+      id: cam.id,
+      position: cam.position,
+      target: scene.master ? scene.master.position : [0, 0.5, 0],
+    };
+  })();
+
+  /**
+   * NO EDITING SHORTCUTS WHILE PREVIEWING.
+   *
+   * The layers panel and the marquee bind Delete, ⌘D, ⌘C/⌘V, F2 and friends at
+   * the window, and none of them knows a preview is running — so Delete would
+   * remove the very camera being looked through. A CAPTURE-phase listener on
+   * the window runs before every one of those and stops the event there.
+   *
+   * Only edits are swallowed. W/A/S/D and the arrow keys still fly the view,
+   * because moving around is exactly what this mode is for.
+   */
+  useEffect(() => {
+    if (!previewing) return;
+    const EDIT_KEYS = new Set(["delete", "backspace", "f2"]);
+    const EDIT_CHORDS = new Set(["c", "v", "x", "d", "g", "m", "z", "y"]);
+    const onKey = (e: KeyboardEvent) => {
+      const mod = IS_MAC ? e.metaKey : e.ctrlKey;
+      const key = e.key.toLowerCase();
+      const edit =
+        EDIT_KEYS.has(key) || (mod && EDIT_CHORDS.has(key)) || (e.shiftKey && key === "h");
+      if (!edit) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  }, [previewing]);
 
   // The Transform rows and the viewport gizmo are ONE control, driven both ways:
   // picking Position/Rotation/Scale switches the gizmo to the matching handles,
@@ -1122,9 +1194,13 @@ export function EditorView({
         showGizmo={editTab === "object" && !(isRigCamera && gizmoMode === "rotate")}
         controlsRef={controlsRef}
         cameraRef={cameraRef}
-        cameraGuide={cameraGuide}
+        /* No guides while previewing: the orbit ring and the climb bar are
+           handles, and a handle in a view-only mode is a promise it can't keep. */
+        cameraGuide={previewing ? null : cameraGuide}
         onOrbit={orbitRig}
         onSpan={setRigSpan}
+        locked={previewing}
+        preview={previewPose}
         /* Handles only while the Space panel is open. The box itself always
            draws — you need to see the room you are dropping into — but grips
            that resize it with nothing on screen to say what changed would be
@@ -1153,7 +1229,17 @@ export function EditorView({
       />
 
       {/* Overlay chrome */}
-      <div className="pointer-events-none absolute inset-0 z-10">
+      {/* INERT WHILE PREVIEWING — the top bar, the library and the dock stay in
+          view, dimmed, so it is clear the editor is still here and simply not
+          taking edits. `inert` rather than pointer-events alone, because it
+          also takes the controls out of the tab order. */}
+      <div
+        ref={chromeRef}
+        className={cn(
+          "pointer-events-none absolute inset-0 z-10 transition-opacity duration-300",
+          previewing && "opacity-35"
+        )}
+      >
         {/* Layer order inside the overlay is explicit, because two things make
             it non-obvious: `.glass` sets backdrop-filter, which creates a
             stacking context — so a popover's own z-index can't escape its bar —
@@ -1207,9 +1293,9 @@ export function EditorView({
         {/* Box select. Off while a space is being drawn — that gesture is also a
             drag on the ground, and two things reading the same drag is one of
             them getting it wrong. */}
-        <MarqueeSelect scene={scene} cameraRef={cameraRef} enabled={!drawingSpace} />
+        <MarqueeSelect scene={scene} cameraRef={cameraRef} enabled={!drawingSpace && !previewing} />
 
-        {selected && (
+        {selected && !previewing && (
           <ObjectTitle
             name={selected.name}
             dark={titleDark}
@@ -1625,10 +1711,22 @@ export function EditorView({
           data-ui="inspector-column"
           className="pointer-events-none fixed bottom-6 right-4 z-30 flex w-[320px] flex-col items-stretch gap-2.5"
         >
-          {selected.source === "camera" && (
-            <CameraPreview scene={scene} camera={selected} label={selected.name} />
+          {/* The inset would be a second copy of the view the viewport is about
+              to become, so Preview trades it — and the settings — for the
+              choice of lens. */}
+          {previewing ? (
+            <PreviewPicker
+              active={previewCam}
+              top={previewEnds?.end ?? null}
+              bottom={previewEnds?.start ?? null}
+              onPick={setPreviewCam}
+            />
+          ) : (
+            selected.source === "camera" && (
+              <CameraPreview scene={scene} camera={selected} label={selected.name} />
+            )
           )}
-          {editTab && (
+          {editTab && !previewing && (
             <ObjectPropertiesPanel
               object={selected}
               rig={scene.selectedRig}
