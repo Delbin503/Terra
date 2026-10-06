@@ -145,44 +145,15 @@ const COALESCE_MS = 600;
  *  session's worth of edits. */
 const HISTORY_LIMIT = 100;
 
-/**
- * The scene a new project opens with: one hero object, and a camera rig aimed
- * at it.
- *
- * Built in ONE function because the rig has to reference the ids its cameras
- * were actually minted with. Two separate `useState` initializers can't see
- * each other's output, so the rig used to hardcode "cam-1"/"cam-2" — which was
- * off by one, since `makeSceneObject` takes the first number off the shared
- * counter and the cameras come out as cam-2 and cam-3. The seeded rig therefore
- * pointed at a camera that never existed, `rigCameras` returned no start, and
- * every fresh project opened insisting no camera was placed.
- */
-function seedScene() {
-  const master = { ...makeSceneObject("Torus", "mesh", [0, 0.5, 0]), role: "master" as const };
-  const [start, end] = makeCameraRig("rig-seed", [4, 1, 4], [4, 9, 4]);
-  return {
-    objects: [master, start, end],
-    rigs: [
-      {
-        id: "rig-seed",
-        startId: start.id,
-        endId: end.id,
-        ...CAMERA_DEFAULTS,
-        // The pair sits at ~5.7 m out; the sweep travels in to roughly half of
-        // that. See `addCameraRig` for why the near end is a saved number.
-        nearDistance: 2.6,
-      },
-    ],
-  };
-}
-
 /** Central store for objects placed in the 3D scene + the current selection. */
 export function useScene() {
-  // Lazy so the counter is only advanced once, and shared so the two pieces of
-  // state agree about which cameras exist.
-  const [seed] = useState(seedScene);
-  const [objects, setObjects] = useState<SceneObject[]>(seed.objects);
-  const [rigs, setRigs] = useState<CameraRig[]>(seed.rigs);
+  /* A PROJECT OPENS EMPTY. It used to open on a seeded Torus with a camera rig
+     aimed at it under a desert sky, which answered the first three questions a
+     new user has — what is the hero, where are the cameras, what is the world —
+     before they had asked any of them. The guide walks through setting up
+     exactly those three, so the scene starts with none of them. */
+  const [objects, setObjects] = useState<SceneObject[]>([]);
+  const [rigs, setRigs] = useState<CameraRig[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /**
    * A MARQUEE SELECTION — several objects held at once, with no focus.

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { GlassPanel } from "@/components/glass";
 import { Icon } from "@/components/icons";
@@ -19,16 +19,17 @@ import {
   type CameraRig,
 } from "./camera-rig";
 import { CaptureExplainer, type CaptureTopic } from "./CaptureExplainer";
+import { SettingExplainer, type ExplainSource } from "./SettingExplainer";
 import type { SettingKey } from "./ObjectPropertiesPanel";
 
 /**
- * Which settings have an explainer behind the header's info button.
+ * Which settings get the CAPTURE explainer behind the header's info button.
  *
  * The three capture settings are the ones whose name doesn't tell you what you
  * are buying — "Increments" and "Shots / Rotation" multiply into a frame count,
- * and Mode decides whether either applies at all. Everything else in this panel
- * is a number with a unit, and a diagram of what "Position X" means would be
- * padding.
+ * and Mode decides whether either applies at all — so theirs carries the frame
+ * arithmetic. Every other setting has an info button too, opening the shorter
+ * SettingExplainer: what the control does on THIS kind of object.
  */
 const EXPLAINS: Partial<Record<SettingKey, CaptureTopic>> = {
   cameraMode: "cameraMode",
@@ -58,6 +59,13 @@ const LABEL: Record<SettingKey, string> = {
 const AXES = ["X", "Y", "Z"] as const;
 
 /**
+ * The camera settings that are measured AROUND the master — its bearing, how
+ * far in towards it, how high above it, and the stops along that sweep. With no
+ * master there is nothing to measure from, so these open onto a picker instead.
+ */
+const NEEDS_MASTER: SettingKey[] = ["rotation", "distance", "height", "shotsPerDistance"];
+
+/**
  * SettingControl — the compact bottom-center panel that shows ONLY the setting
  * picked in the right Properties panel. Deliberately small (xs controls).
  */
@@ -74,6 +82,9 @@ export function SettingControl({
   onDistance,
   onDistanceHandle,
   onHeight,
+  masterCandidates = [],
+  onPickMaster,
+  zoomSets,
   onClose,
 }: {
   object: SceneObject;
@@ -123,6 +134,16 @@ export function SettingControl({
   onDistanceHandle?: (h: "min" | "max" | null) => void;
   /** set the climb between the two cameras */
   onHeight?: (metres: number) => void;
+  /** what a camera with no master could shoot — the objects that can take the role */
+  masterCandidates?: { id: string; name: string }[];
+  /** make this object the master and frame the rig on it */
+  onPickMaster?: (id: string) => void;
+  /**
+   * The saved zoom sets, drawn under Zoom Distance. Passed in rendered rather
+   * than built here: the list is TerraGen's (`ZoomSets`), which imports this
+   * file for `DistanceControl`, and importing it back would be a cycle.
+   */
+  zoomSets?: ReactNode;
   onClose: () => void;
 }) {
   const [uniform, setUniform] = useState(true);
@@ -174,7 +195,20 @@ export function SettingControl({
    * diagrams keeps them as they step from Increments to Shots / Rotation.
    */
   const [explain, setExplain] = useState(false);
+  const isCamera = object.source === "camera";
   const topic = EXPLAINS[setting];
+  const explainSource: ExplainSource = isCamera
+    ? "camera"
+    : isSkySource
+      ? "sky"
+      : object.source === "splat"
+        ? "splat"
+        : "object";
+  /* A camera with no master can't show its orbit, reach or climb — there is
+     nothing for them to be measured from. Rather than an empty panel (or, for
+     Rotation, the per-object axes a locked-on camera can't use), it says so and
+     offers the fix in place. */
+  const needsMaster = isCamera && !camera && NEEDS_MASTER.includes(setting);
 
   const setAxis = (key: "position" | "rotationDeg" | "scale", i: number, v: number) => {
     if (key === "scale" && uniform) return onChange({ scale: [v, v, v] });
@@ -202,7 +236,7 @@ export function SettingControl({
           >
             <Icon name="drag" size={13} className="shrink-0 text-content-subtle" />
             <span className="type-label truncate text-content">
-              {setting === "rotation" && camera
+              {setting === "rotation" && isCamera
                 ? "Orbit Rotation"
                 : setting === "brightness" && isSkySource
                   ? "Sky Brightness"
@@ -231,24 +265,23 @@ export function SettingControl({
                 <Icon name="lock" size={11} /> Uniform
               </button>
             )}
-            {topic && rig && (
-              <button
-                type="button"
-                aria-label="What this setting does"
-                aria-pressed={explain}
-                title="What this setting does"
-                data-ui="setting-explain"
-                onClick={() => setExplain((v) => !v)}
-                className={cn(
-                  "grid h-6 w-6 place-items-center rounded-md transition-colors",
-                  explain
-                    ? "bg-brand/15 text-brand"
-                    : "text-content-muted hover:bg-glass/15 hover:text-content"
-                )}
-              >
-                <Icon name="info" size={13} />
-              </button>
-            )}
+            {/* Every setting has one — see EXPLAINS and SettingExplainer. */}
+            <button
+              type="button"
+              aria-label="What this setting does"
+              aria-pressed={explain}
+              title="What this setting does"
+              data-ui="setting-explain"
+              onClick={() => setExplain((v) => !v)}
+              className={cn(
+                "grid h-6 w-6 place-items-center rounded-md transition-colors",
+                explain
+                  ? "bg-brand/15 text-brand"
+                  : "text-content-muted hover:bg-glass/15 hover:text-content"
+              )}
+            >
+              <Icon name="info" size={13} />
+            </button>
             <button
               type="button"
               aria-label="Close setting"
@@ -280,6 +313,14 @@ export function SettingControl({
               )
             )}
           </div>
+        )}
+
+        {needsMaster && (
+          <NeedsMaster
+            setting={LABEL[setting]}
+            candidates={masterCandidates}
+            onPick={onPickMaster}
+          />
         )}
 
         {setting === "rotation" && camera && onOrbit ? (
@@ -350,7 +391,7 @@ export function SettingControl({
               Drag the ring in the viewport for the same thing.
             </p>
           </div>
-        ) : setting === "rotation" ? (
+        ) : setting === "rotation" && !isCamera ? (
           <div className="flex flex-col gap-2">
             {AXES.map((a, i) => (
               <AxisSlider
@@ -565,14 +606,19 @@ export function SettingControl({
         )}
 
         {setting === "distance" && camera && onDistance && (
-          <DistanceControl
-            nearDistance={camera.nearDistance}
-            farDistance={camera.farDistance}
-            nearLimit={camera.nearLimit}
-            masterName={camera.masterName}
-            onHandle={onDistanceHandle}
-            onChange={onDistance}
-          />
+          <>
+            <DistanceControl
+              nearDistance={camera.nearDistance}
+              farDistance={camera.farDistance}
+              nearLimit={camera.nearLimit}
+              masterName={camera.masterName}
+              onHandle={onDistanceHandle}
+              onChange={onDistance}
+            />
+            {/* Several reaches, not one: each set is a zoom the run captures,
+                and a stop in the expanded camera view. */}
+            {zoomSets}
+          </>
         )}
 
         {setting === "shotsPerDistance" && rig && camera && (
@@ -615,8 +661,73 @@ export function SettingControl({
         {/* One mount for all three topics, at the foot of the panel — so the
             control stays where it is when the explainer opens under it rather
             than the whole body jumping. */}
-        {explain && topic && rig && <CaptureExplainer topic={topic} rig={rig} />}
+        {explain &&
+          (topic && rig ? (
+            <CaptureExplainer topic={topic} rig={rig} />
+          ) : (
+            <SettingExplainer
+              setting={setting}
+              source={explainSource}
+              camera={
+                camera && rig
+                  ? {
+                      masterName: camera.masterName,
+                      orbitStart: rig.orbitStart,
+                      orbitEnd: rig.orbitEnd,
+                      zoom: zoomOf(camera.farDistance, camera.nearDistance),
+                      span: camera.span,
+                      spanMax: camera.spanMax,
+                    }
+                  : null
+              }
+            />
+          ))}
       </GlassPanel>
+    </div>
+  );
+}
+
+/**
+ * A camera setting with no master to measure from.
+ *
+ * The fix is offered where the problem is: every object that could be the
+ * master, one click each. Picking one promotes it and frames the rig on it, and
+ * the control the user actually opened appears in this same panel.
+ */
+function NeedsMaster({
+  setting,
+  candidates,
+  onPick,
+}: {
+  setting: string;
+  candidates: { id: string; name: string }[];
+  onPick?: (id: string) => void;
+}) {
+  return (
+    <div data-ui="setting-needs-master" className="flex flex-col gap-2">
+      <p className="type-caption text-content-subtle">
+        {setting} is measured around the <span className="text-content">Master object</span>, and
+        this scene doesn't have one yet.{" "}
+        {candidates.length > 0
+          ? "Pick the object this camera should shoot:"
+          : "Place an object from the Asset Library first, then mark it as the master."}
+      </p>
+      {candidates.length > 0 && (
+        <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
+          {candidates.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              data-ui={`setting-pick-master-${c.id}`}
+              onClick={() => onPick?.(c.id)}
+              className="type-caption-strong flex max-w-full items-center gap-1 rounded-full border border-glass/14 px-2.5 py-1 text-content transition-colors hover:border-brand/50 hover:bg-brand/12 hover:text-brand"
+            >
+              <Icon name="master" size={11} className="shrink-0" />
+              <span className="truncate">{c.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -306,6 +306,7 @@ export function ObjectTitle({
         </div>
         <h1
           ref={ref}
+          data-ui="object-title-name"
           contentEditable={editing}
           suppressContentEditableWarning
           onClick={() => !editing && startEditing()}

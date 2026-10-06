@@ -135,6 +135,32 @@ const SKY_TRANSFORM: SettingKey[] = ["position", "rotation", "scale"];
  */
 const CAMERA_ONLY: SettingKey[] = ["distance", "height"];
 
+/**
+ * The rows a source shows under one toolbar tab.
+ *
+ * Exported because the panel isn't the only thing that needs the answer:
+ * EditorView keeps the open setting across a change of selection only when the
+ * new object has that row too — otherwise a sky's Scale stays open over a
+ * camera, which has no scale to edit.
+ */
+export function settingKeysFor(source: SceneObject["source"], group: SettingGroup): SettingKey[] {
+  const isCamera = source === "camera";
+  const materialKeys = materialKeysFor(source);
+  return SETTINGS.filter(
+    (s) =>
+      s.group === group &&
+      // Rig-only rows never reach an ordinary object.
+      (!CAMERA_ONLY.includes(s.key) || isCamera) &&
+      // Scale is meaningless on a camera; the rig's reach is set by moving it.
+      (!isCamera || group !== "Transform" || CAMERA_TRANSFORM.includes(s.key)) &&
+      // A sky's Transform is the three rows the dome can express — see
+      // SKY_TRANSFORM.
+      (!isSky(source) || group !== "Transform" || SKY_TRANSFORM.includes(s.key)) &&
+      // Each source's Material group is its own set — see `materialKeysFor`.
+      (s.group !== "Material" || materialKeys.includes(s.key))
+  ).map((s) => s.key);
+}
+
 function summarize(
   o: SceneObject,
   /** the slot the Material rows are reporting on */
@@ -243,21 +269,8 @@ export function ObjectPropertiesPanel({
   // cannot be operated.
   const slots = object.materials;
   const showSlots = group === "Material" && slots.length > 1;
-  const materialKeys = materialKeysFor(object.source);
-
-  const items = SETTINGS.filter(
-    (s) =>
-      s.group === group &&
-      // Rig-only rows never reach an ordinary object.
-      (!CAMERA_ONLY.includes(s.key) || isCamera) &&
-      // Scale is meaningless on a camera; the rig's reach is set by moving it.
-      (!isCamera || group !== "Transform" || CAMERA_TRANSFORM.includes(s.key)) &&
-      // A sky's Transform is the three rows the dome can express — see
-      // SKY_TRANSFORM.
-      (!isSky(object.source) || group !== "Transform" || SKY_TRANSFORM.includes(s.key)) &&
-      // Each source's Material group is its own set — see `materialKeysFor`.
-      (s.group !== "Material" || materialKeys.includes(s.key))
-  );
+  const keys = settingKeysFor(object.source, group);
+  const items = SETTINGS.filter((s) => keys.includes(s.key));
 
   return (
     /* Position comes from the bottom-right column in EditorView, not from here:

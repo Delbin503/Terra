@@ -9,11 +9,7 @@ import {
   type ObjectRole,
 } from "./scene-types";
 
-/**
- * `preview` is the one tab that edits nothing: it swaps the viewport onto one
- * of the rig's two cameras and locks every other control — see EditorView.
- */
-export type EditTab = "object" | "texture" | "capture" | "preview";
+export type EditTab = "object" | "texture" | "capture";
 
 /**
  * Bottom-center per-object toolbar. The tabs drive the right-side properties
@@ -34,9 +30,10 @@ export type EditTab = "object" | "texture" | "capture" | "preview";
  * sky parameters: how bright it renders and how much of it lands on everything
  * else.
  *
- * A camera gets a different set: Capture instead of Texture, Preview to look
- * through either end of the rig, and no Role tile at all — a capture rig can't
- * be the scene's hero or its clutter, it's the thing pointed AT them.
+ * A camera gets a different set: Capture instead of Texture, and no Role tile
+ * at all — a capture rig can't be the scene's hero or its clutter, it's the
+ * thing pointed AT them. Looking through it is the POV inset's job: its expand
+ * button opens the full-size camera view (see CameraView).
  *
  * A Gaussian splat keeps the same two tiles but the second one reads
  * "Appearance": what sits behind it is one brightness scalar, and a tile
@@ -93,14 +90,12 @@ export function ObjectToolbar({
     ? [
         { icon: "camera", label: "Object", onClick: () => onTab("object"), active: tab === "object" },
         { icon: "capture", label: "Capture", onClick: () => onTab("capture"), active: tab === "capture" },
-        // Last, because it is the one tile that leaves editing: the two to its
-        // left change the rig, this one only looks through it.
-        { icon: "preview", label: "Preview", onClick: () => onTab("preview"), active: tab === "preview" },
       ]
     : [objectTile, appearance];
 
   return (
     <div
+      data-ui="object-toolbar"
       // Centred in what's LEFT of the viewport, not in the viewport: with the AI
       // drawer docked the true centre lands under it, and the toolbar ends up
       // sitting on top of the composer.

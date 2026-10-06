@@ -414,6 +414,12 @@ export function TerraGenView({
   // Derived every render, not read from the draft: the rig and the roles keep
   // moving — and now they move from inside this panel too.
   const rig = rigState(scene);
+  /* No master, no canvas: nothing is loading, so the dock must not wait out the
+     timeout behind a skeleton. A new project opens empty, so this is no longer
+     an edge — it is what pressing Generate first thing looks like. */
+  useEffect(() => {
+    if (!rig.hasMaster) setLoading(false);
+  }, [rig.hasMaster]);
   const roles = sceneRoles(scene);
 
   /**
@@ -1019,7 +1025,7 @@ function SweepRender({
       {!rig.hasMaster ? (
         <div className="absolute inset-0 grid place-items-center bg-canvas px-8 text-center">
           <p className="type-body max-w-sm text-content-subtle">
-            Pick a Master object in the Camera section — the camera has nothing to orbit until you
+            Pick a Master object in the Objects section — the camera has nothing to orbit until you
             do.
           </p>
         </div>

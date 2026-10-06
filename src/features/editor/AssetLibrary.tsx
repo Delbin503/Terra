@@ -1213,6 +1213,7 @@ function CatButton({
     <button
       type="button"
       onClick={onClick}
+      aria-current={active ? "true" : undefined}
       data-ui={`asset-cat-${label.toLowerCase().replace(/\s+/g, "-")}`}
       className={cn(
         "type-nav group relative flex items-center gap-3 rounded-lg px-3 py-2 transition-colors",

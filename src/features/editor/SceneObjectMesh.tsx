@@ -325,6 +325,7 @@ export function SceneObjectMesh({
   onSelect,
   register,
   onMaterials,
+  hoverable = true,
 }: {
   object: SceneObject;
   selected: boolean;
@@ -332,6 +333,8 @@ export function SceneObjectMesh({
   register: (id: string, node: Object3D | null) => void;
   /** a loaded GLB reporting the material slots it actually carries */
   onMaterials?: (id: string, names: string[]) => void;
+  /** false while nothing can be picked (a camera preview): no outline, no pointer */
+  hoverable?: boolean;
 }) {
   const ref = useRef<Object3D>(null);
   const [hovered, setHovered] = useState(false);
@@ -357,6 +360,13 @@ export function SceneObjectMesh({
     document.body.style.cursor = on ? "pointer" : "auto";
   };
 
+  // Locking mid-hover would otherwise leave the outline lit until the pointer
+  // happened to leave the object.
+  useEffect(() => {
+    if (!hoverable) setHover(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoverable]);
+
   return (
     <group
       ref={ref}
@@ -370,7 +380,7 @@ export function SceneObjectMesh({
       onPointerOver={(e) => {
         // stopPropagation so only the front-most object under the cursor lights up.
         e.stopPropagation();
-        setHover(true);
+        if (hoverable) setHover(true);
       }}
       onPointerOut={() => setHover(false)}
     >

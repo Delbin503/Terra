@@ -10,6 +10,9 @@ interface EditorTopBarProps {
   onRedo?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
+  /** opens / closes the getting-started guide */
+  onGuide?: () => void;
+  guideOpen?: boolean;
 }
 
 /**
@@ -66,7 +69,7 @@ export function displayTitle(name: string): string {
   return `${head}…${tail}`;
 }
 
-/** Top-left project chrome: project emoji · project name · undo / redo. */
+/** Top-left project chrome: project emoji · project name · undo / redo · guide. */
 export function EditorTopBar({
   projectName,
   onRename,
@@ -74,6 +77,8 @@ export function EditorTopBar({
   onRedo,
   canUndo = false,
   canRedo = false,
+  onGuide,
+  guideOpen = false,
 }: EditorTopBarProps) {
   // Seeded from the project name, then user-overridable. Keyed on projectName so
   // switching projects re-derives instead of carrying the previous mark over.
@@ -158,6 +163,21 @@ export function EditorTopBar({
       <div className="flex items-center gap-0.5">
         <GlassGhostButton ui="undo" size="sm" icon="undo" label="Undo" onClick={onUndo} disabled={!canUndo} />
         <GlassGhostButton ui="redo" size="sm" icon="redo" label="Redo" onClick={onRedo} disabled={!canRedo} />
+        {/* The guide sits with undo / redo rather than with the actions on the
+            right: it is about learning THIS project's editor, and it is lit
+            while the guide is open so the way to put it away is where it came
+            from. */}
+        {onGuide && (
+          <GlassGhostButton
+            ui="guide"
+            size="sm"
+            icon="info"
+            label={guideOpen ? "Hide the guide" : "Show the guide"}
+            onClick={onGuide}
+            aria-pressed={guideOpen}
+            className={guideOpen ? "!bg-brand-soft !text-brand" : undefined}
+          />
+        )}
       </div>
     </GlassBar>
   );

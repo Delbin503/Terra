@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Environment, Line, OrbitControls, GizmoHelper, Html, TransformControls } from "@react-three/drei";
+import { Environment, Lightformer, Line, OrbitControls, GizmoHelper, Html, TransformControls } from "@react-three/drei";
 import {
   Mesh,
-  type PerspectiveCamera,
   Object3D,
   Plane,
   Vector3,
@@ -30,13 +29,12 @@ import { DEFAULT_SKY_INFLUENCE, type SceneObject } from "./scene-types";
 import { contactWalls, type SceneVolume, type Vec3 } from "./scene-volume";
 
 /**
- * The sky a scene renders with nothing placed.
+ * The sky a placed sky asset renders when it carries no file of its own.
  *
- * Not a fallback for a broken path — a starting point. An empty scene still has
- * to be lit and still has to have a horizon, and the alternative to shipping
- * one is a black viewport that reads as a loading failure. It is also what the
- * catalogue's named placeholder skies keep rendering, since they carry no file
- * of their own; see `skyUrl` in assets-data.
+ * It used to be the sky of an EMPTY scene too. A new project now opens with
+ * nothing in it — no horizon until an Environment or Skybox is placed, which is
+ * the first thing the guide asks for — so this is only what the catalogue's
+ * named placeholder skies render; see `skyUrl` in assets-data.
  *
  * Gitignored along with the rest of `public/hdri/` — see the README.
  */
@@ -211,7 +209,11 @@ export function SceneWorld({
    * does. First one placed wins, preferring the sky assets, because two worlds
    * in one scene is already a scene that needs deciding rather than averaging.
    *
-   * Nothing placed means the values the canvas has always rendered at.
+   * NOTHING PLACED MEANS NO SKY. A new project opens empty — no horizon, no
+   * backdrop, just the editor's own dark ground — so `files` is null until a
+   * sky asset goes in, and the canvas lights objects with a neutral studio rig
+   * instead (see below). The shipped default is still what a catalogue
+   * placeholder sky renders, since those carry no file of their own.
    *
    * AND WHICH SKY IT IS. `files` used to be a hardcoded path, so placing an
    * Environment or a Skybox changed the exposure of the shipped default and
@@ -245,7 +247,7 @@ export function SceneWorld({
     return {
       brightness: texture?.brightness ?? 1,
       influence: lighting?.skyInfluence ?? DEFAULT_SKY_INFLUENCE,
-      files: texture?.skyUrl ?? DEFAULT_SKY,
+      files: texture ? (texture.skyUrl ?? DEFAULT_SKY) : null,
       rotation: [rot[0] * DEG, rot[1] * DEG, rot[2] * DEG] as [number, number, number],
       ground: {
         height: GROUND.height + (texture?.position[2] ?? 0),
@@ -269,26 +271,39 @@ export function SceneWorld({
           Influence is what it contributes to everything standing in front of it.
           With nothing placed the scene falls back to exactly what it rendered
           before the controls existed, so an untouched project looks untouched. */}
-      {/* Sky Brightness has to be applied by hand — see SkyBrightness. */}
-      <SkyBrightness value={sky.brightness} />
+      {/* Sky Brightness has to be applied by hand — see SkyBrightness. Keyed on
+          the file because it finds the dome mesh once: a new sky is a new mesh. */}
+      {sky.files && <SkyBrightness key={`brightness:${sky.files}`} value={sky.brightness} />}
 
       {/* KEYED ON THE FILE. drei picks its loader from the extension at mount
           (RGBELoader for .hdr, a gainmap decoder for .jpg — see useEnvironment),
           so swapping the path on a live instance asks one loader's texture to
           come out of another's. Remounting is the honest way to change sky. */}
-      <Environment
-        key={sky.files}
-        files={sky.files}
-        background
-        backgroundIntensity={sky.brightness}
-        environmentIntensity={sky.influence}
-        /* Both rotations, together: turning only the background would swing the
-           picture while leaving the light it casts pointing the old way, so the
-           sun would move and the shadows would not. */
-        backgroundRotation={sky.rotation}
-        environmentRotation={sky.rotation}
-        ground={sky.ground}
-      />
+      {sky.files ? (
+        <Environment
+          key={sky.files}
+          files={sky.files}
+          background
+          backgroundIntensity={sky.brightness}
+          environmentIntensity={sky.influence}
+          /* Both rotations, together: turning only the background would swing the
+             picture while leaving the light it casts pointing the old way, so the
+             sun would move and the shadows would not. */
+          backgroundRotation={sky.rotation}
+          environmentRotation={sky.rotation}
+          ground={sky.ground}
+        />
+      ) : (
+        /* NO SKY YET: light without a picture. Three soft panels and nothing
+           drawn behind them, so an object placed before any environment still
+           reads as a solid instead of a black cut-out, and the viewport stays
+           the empty dark stage a new project opens on. */
+        <Environment key="studio" resolution={128} environmentIntensity={sky.influence}>
+          <Lightformer intensity={2} position={[0, 6, -6]} scale={[12, 6, 1]} />
+          <Lightformer intensity={1} position={[-6, 3, 4]} scale={[8, 4, 1]} />
+          <Lightformer intensity={1} position={[6, 3, 4]} scale={[8, 4, 1]} />
+        </Environment>
+      )}
 
       {/* The sweep each rig will travel. Drawn before the cameras so the line
           passes behind their bodies rather than through them. */}
@@ -340,6 +355,7 @@ export function SceneWorld({
               onSelect={sel}
               register={reg}
               onMaterials={scene.discoverMaterials}
+              hoverable={interactive}
             />
           )
         )}
@@ -439,21 +455,9 @@ interface SceneCanvasProps {
   } | null;
   /**
    * VIEW ONLY. Nothing in the viewport picks, selects, deselects or drags —
-   * the orbit, pan and zoom are all that is left. Set for the whole time the
-   * camera Preview tab is open, whether or not a camera has been chosen.
+   * the orbit, pan and zoom are all that is left.
    */
   locked?: boolean;
-  /** The rig camera to look through, once one is chosen. See `PreviewFly`. */
-  preview?: PreviewPose | null;
-}
-
-/** Where the viewport stands to look through a rig camera — the same pose the
- *  POV inset renders from (see CameraPreview): at the camera, facing the master. */
-export interface PreviewPose {
-  /** the camera being looked through; a new id is a new flight */
-  id: string;
-  position: [number, number, number];
-  target: [number, number, number];
 }
 
 /**
@@ -561,11 +565,8 @@ function FocusRig({
   radius: number;
   onSettled: () => void;
   /**
-   * Hand the camera to someone else — the camera Preview. Two lerps steering
-   * one camera meet halfway and stay there, which is exactly what happened:
-   * the view stalled between the rig framing and the lens it was flying to.
-   * A paused rig also DROPS its pending flight rather than resuming it after,
-   * because the preview restores the view itself on the way out.
+   * Hold the fly-in while the viewport is view-only. A paused rig DROPS its
+   * pending flight rather than resuming it after.
    */
   paused?: boolean;
 }) {
@@ -611,97 +612,6 @@ function FocusRig({
       onSettled();
     }
   });
-  return null;
-}
-
-/** The POV inset's lens. Previewing matches it, so the view the viewport lands
- *  on is the picture the inset has been showing, not a wider cousin of it. */
-const PREVIEW_FOV = 50;
-
-/**
- * PREVIEW FLIGHT — into a rig camera, and back out to where you were.
- *
- * The same motion `FocusRig` uses (position and target lerped together at the
- * same rate), so looking through a camera feels like the editor's own fly-in
- * rather than a cut. The lens widens to the inset's 50° on the way in and
- * narrows back to the editor's own on the way out.
- *
- * IT LANDS EXACTLY. A lerp only approaches its goal, and "nearly where the
- * camera is" is a slightly different picture from the one the camera takes —
- * so once it is close enough to be invisible the pose is snapped the rest of
- * the way. After that the orbit controls own the view: orbit, pan and zoom move
- * off the camera freely, which is the point of looking around from it.
- *
- * THE WAY BACK IS REMEMBERED ONCE, on the first flight in. Switching Top to
- * Bottom flies camera to camera and keeps that same return, so leaving puts you
- * back where you were before previewing began, not at the last lens.
- *
- * `onArrive` fires when the view is about to pass into the camera's body, which
- * is when the rig should vanish — earlier and you would watch it disappear from
- * across the scene; later and the lens housing fills the frame on the way in.
- */
-function PreviewFly({
-  controlsRef,
-  pose,
-  onArrive,
-}: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  controlsRef: React.MutableRefObject<any>;
-  pose: PreviewPose | null;
-  onArrive: () => void;
-}) {
-  const camera = useThree((s) => s.camera) as PerspectiveCamera;
-  const back = useRef<{ pos: Vector3; tgt: Vector3; fov: number } | null>(null);
-  const goal = useRef<{ pos: Vector3; tgt: Vector3; fov: number; entering: boolean } | null>(null);
-  const announced = useRef(false);
-
-  useEffect(() => {
-    const c = controlsRef.current;
-    if (!c) return;
-    if (pose) {
-      if (!back.current) {
-        back.current = { pos: camera.position.clone(), tgt: c.target.clone(), fov: camera.fov };
-      }
-      goal.current = {
-        pos: new Vector3(...pose.position),
-        tgt: new Vector3(...pose.target),
-        fov: PREVIEW_FOV,
-        entering: true,
-      };
-      announced.current = false;
-    } else if (back.current) {
-      goal.current = { ...back.current, entering: false };
-      back.current = null;
-    }
-    // Keyed on WHICH camera, not on the pose object: a new array every render
-    // would restart the flight every render and it would never land.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pose?.id ?? null]);
-
-  useFrame(() => {
-    const c = controlsRef.current;
-    const g = goal.current;
-    if (!c || !g) return;
-
-    camera.position.lerp(g.pos, 0.12);
-    c.target.lerp(g.tgt, 0.12);
-    camera.fov += (g.fov - camera.fov) * 0.12;
-
-    const d = camera.position.distanceTo(g.pos);
-    if (g.entering && !announced.current && d < 0.5) {
-      announced.current = true;
-      onArrive();
-    }
-    if (d < 0.01 && c.target.distanceTo(g.tgt) < 0.01 && Math.abs(camera.fov - g.fov) < 0.05) {
-      camera.position.copy(g.pos);
-      c.target.copy(g.tgt);
-      camera.fov = g.fov;
-      goal.current = null;
-    }
-    camera.updateProjectionMatrix();
-    c.update();
-  });
-
   return null;
 }
 
@@ -1903,7 +1813,6 @@ export function SceneCanvas({
   substitute,
   gizmoInset = 0,
   locked = false,
-  preview = null,
 }: SceneCanvasProps) {
   const [meshes, setMeshes] = useState<Record<string, Object3D>>({});
 
@@ -1913,16 +1822,6 @@ export function SceneCanvas({
   // `enabled` is false, which would make precise dragging impossible.
   const [focusSettled, setFocusSettled] = useState(false);
   const [transforming, setTransforming] = useState(false);
-
-  /**
-   * Whether the preview flight has reached the camera. The rig disappears only
-   * then — hidden from the start, you would watch the thing you are flying
-   * towards vanish, and have nothing to aim at on the way in. Reset on every
-   * new camera, so switching Top to Bottom brings the rig back for the flight.
-   */
-  const [previewArrived, setPreviewArrived] = useState(false);
-  useEffect(() => setPreviewArrived(false), [preview?.id]);
-  const insideCamera = !!preview && previewArrived;
 
   /**
    * THE CLICK THAT ENDS A GIZMO DRAG IS NOT A CLICK.
@@ -2148,7 +2047,6 @@ export function SceneCanvas({
         onSelect={pick}
         hideIds={guideHides}
         interactive={!locked}
-        hideCameras={insideCamera}
       />
 
       {/* A selected group gets the same three transforms a mesh gets. Locked
@@ -2187,7 +2085,7 @@ export function SceneCanvas({
           with a violet box across it would be a picture of the tool. */}
       {/* Not drawn from inside a camera: a space is an editing aid, and a
           violet box across the lens is not what the camera photographs. */}
-      {!insideCamera && scene.volumes.map((v) => (
+      {scene.volumes.map((v) => (
         <VolumeBox
           key={v.id}
           volume={v}
@@ -2252,10 +2150,7 @@ export function SceneCanvas({
         makeDefault
         enableDamping
         dampingFactor={0.08}
-        /* A camera can sit closer to the master than the editor's usual 2 m
-           floor, and a clamp there would shove the view off the lens the
-           moment it landed. */
-        minDistance={preview ? 0.05 : 2}
+        minDistance={2}
         /**
          * Far enough out to frame a room.
          *
@@ -2265,10 +2160,8 @@ export function SceneCanvas({
          * through the drag that created it and simply stop.
          */
         maxDistance={160}
-        /* Same reason: a camera below the master's height looks UP at it,
-           which the editor's stay-above-the-ground limit would not allow. */
-        maxPolarAngle={preview ? Math.PI : Math.PI / 2.05}
-        /* Never while previewing. The auto-orbit is the editor showing off
+        maxPolarAngle={Math.PI / 2.05}
+        /* Never while view-only. The auto-orbit is the editor showing off
            the selection; here the view belongs to whoever is looking. */
         autoRotate={!!selectedId && focusSettled && !transforming && !locked}
         autoRotateSpeed={0.9}
@@ -2281,12 +2174,6 @@ export function SceneCanvas({
         radius={focusRadius}
         onSettled={() => setFocusSettled(true)}
         paused={locked}
-      />
-
-      <PreviewFly
-        controlsRef={controlsRef}
-        pose={preview}
-        onArrive={() => setPreviewArrived(true)}
       />
 
       <KeyboardFly controlsRef={controlsRef} />

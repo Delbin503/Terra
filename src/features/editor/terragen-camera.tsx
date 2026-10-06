@@ -391,8 +391,24 @@ function RigControls({
  * it, because a list of numbers is not a thing anyone can judge. Loading is not
  * an edit: it moves the saved near number onto the rig, which is where the
  * control above was already writing.
+ *
+ * Exported because the editor's own Zoom Distance panel shows the SAME list —
+ * one set of zooms, edited from either place, so a set saved over the viewport
+ * is already in the Work Order. `ui` keeps the two copies' handles apart.
  */
-function ZoomSets({ scene, onShow }: { scene: SceneApi; onShow: (id: string) => void }) {
+export function ZoomSets({
+  scene,
+  onShow,
+  ui = "terragen-zoom",
+  listClassName,
+}: {
+  scene: SceneApi;
+  onShow: (id: string) => void;
+  /** prefix for every `data-ui` in the list */
+  ui?: string;
+  /** extra classes on the rows' container — the editor caps its height */
+  listClassName?: string;
+}) {
   const [editing, setEditing] = useState<string | null>(null);
   const saved = scene.savedZooms;
   const inRun = saved.filter((z) => z.inRun).length;
@@ -401,7 +417,7 @@ function ZoomSets({ scene, onShow }: { scene: SceneApi; onShow: (id: string) => 
   return (
     <div className="mt-3 border-t border-glass/10 pt-3">
       {editingSet ? (
-        <div data-ui="terragen-zoom-editing">
+        <div data-ui={`${ui}-editing`}>
           <p className="type-caption mb-2 flex items-center gap-1.5 text-content-subtle">
             <Icon name="edit" size={13} className="shrink-0 text-brand" />
             Editing <span className="text-content">{editingSet.name}</span>
@@ -411,7 +427,7 @@ function ZoomSets({ scene, onShow }: { scene: SceneApi; onShow: (id: string) => 
               variant="outline"
               size="sm"
               className="grow"
-              data-ui="terragen-zoom-edit-cancel"
+              data-ui={`${ui}-edit-cancel`}
               onClick={() => setEditing(null)}
             >
               Done
@@ -420,7 +436,7 @@ function ZoomSets({ scene, onShow }: { scene: SceneApi; onShow: (id: string) => 
               variant="brand"
               size="sm"
               className="grow"
-              data-ui="terragen-zoom-edit-save"
+              data-ui={`${ui}-edit-save`}
               onClick={() => {
                 scene.updateZoomSet(editingSet.id);
                 setEditing(null);
@@ -436,7 +452,7 @@ function ZoomSets({ scene, onShow }: { scene: SceneApi; onShow: (id: string) => 
           variant="brand"
           size="sm"
           className="w-full"
-          data-ui="terragen-zoom-save"
+          data-ui={`${ui}-save`}
           onClick={scene.saveZoom}
         >
           <Icon name="save" size={15} />
@@ -453,11 +469,11 @@ function ZoomSets({ scene, onShow }: { scene: SceneApi; onShow: (id: string) => 
             </span>
           </div>
 
-          <div className="space-y-1.5">
+          <div className={cn("space-y-1.5", listClassName)}>
             {saved.map((z) => (
               <div
                 key={z.id}
-                data-ui={`terragen-zoom-set-${z.id}`}
+                data-ui={`${ui}-set-${z.id}`}
                 className={cn(
                   "flex items-center gap-2 rounded-lg border px-2.5 py-2 transition-colors",
                   editing === z.id
@@ -472,7 +488,7 @@ function ZoomSets({ scene, onShow }: { scene: SceneApi; onShow: (id: string) => 
                   role="checkbox"
                   aria-checked={z.inRun}
                   aria-label={`Include ${z.name} in the run`}
-                  data-ui={`terragen-zoom-set-${z.id}-inrun`}
+                  data-ui={`${ui}-set-${z.id}-inrun`}
                   onClick={() => scene.toggleZoomInRun(z.id)}
                   className={cn(
                     "grid h-4 w-4 shrink-0 place-items-center rounded border transition-colors",
@@ -484,7 +500,7 @@ function ZoomSets({ scene, onShow }: { scene: SceneApi; onShow: (id: string) => 
 
                 <button
                   type="button"
-                  data-ui={`terragen-zoom-set-${z.id}-show`}
+                  data-ui={`${ui}-set-${z.id}-show`}
                   onClick={() => onShow(z.id)}
                   className="min-w-0 grow text-left"
                 >
@@ -498,7 +514,7 @@ function ZoomSets({ scene, onShow }: { scene: SceneApi; onShow: (id: string) => 
                   type="button"
                   aria-label={`Edit ${z.name}`}
                   title="Load this set and update it"
-                  data-ui={`terragen-zoom-set-${z.id}-edit`}
+                  data-ui={`${ui}-set-${z.id}-edit`}
                   onClick={() => {
                     onShow(z.id);
                     setEditing(z.id);
@@ -510,7 +526,7 @@ function ZoomSets({ scene, onShow }: { scene: SceneApi; onShow: (id: string) => 
                 <button
                   type="button"
                   aria-label={`Delete ${z.name}`}
-                  data-ui={`terragen-zoom-set-${z.id}-delete`}
+                  data-ui={`${ui}-set-${z.id}-delete`}
                   onClick={() => {
                     scene.deleteZoom(z.id);
                     setEditing((cur) => (cur === z.id ? null : cur));

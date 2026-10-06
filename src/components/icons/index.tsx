@@ -98,6 +98,9 @@ import {
   Send,
   ImagePlus,
   Minimize2,
+  Maximize2,
+  ZoomIn,
+  ZoomOut,
   SquareStack,
   Tag,
   Database,
@@ -277,6 +280,10 @@ export const iconRegistry = {
   file: FileText,
   /** collapse a working panel down to its progress toast */
   minimize: Minimize2,
+  /** open a panel at full size — the camera POV, expanded */
+  maximize: Maximize2,
+  "zoom-in": ZoomIn,
+  "zoom-out": ZoomOut,
 
   // Viewport gizmo
   "gizmo-home": Home,
