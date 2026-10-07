@@ -7,7 +7,15 @@ import { Icon } from "@/components/icons";
 import { GlassGhostButton, GlassPanel } from "@/components/glass";
 import { SceneWorld } from "./SceneCanvas";
 import { CAMERA_RIG } from "./scene-palette";
-import { atDistance, distance as vecDistance, formatZoom, zoomOf } from "./camera-rig";
+import {
+  atDistance,
+  azimuthOf,
+  distance as vecDistance,
+  formatZoom,
+  orbitPoint,
+  orbitSweep,
+  zoomOf,
+} from "./camera-rig";
 import type { SceneApi } from "./useScene";
 import type { SceneObject } from "./scene-types";
 
@@ -105,6 +113,13 @@ export function CameraPreview({
 
 /* ------------------------------------------------------- the expanded view -- */
 
+/** One key press of turn. Five degrees is a nudge you can aim with; the drag is
+ *  there for crossing the whole arc. */
+const TURN_STEP = 5;
+/** How fast a drag turns. A full revolution takes about 900px — a little under
+ *  the picture's own width, so one confident sweep is one lap. */
+const DEG_PER_PX = 0.4;
+
 /** One place the expanded view can stand: a reach the capture actually shoots. */
 interface Stop {
   key: string;
@@ -148,6 +163,18 @@ function ViewRig({ position, target }: { position: Vec3; target: Vec3 }) {
  * travels (`atDistance`, the same as the distance preview in the viewport). It
  * does not change the lens: a narrower FOV would be a different picture from
  * the one the dataset contains.
+ *
+ * TURNING IS BOUNDED BY THE ARC, for the same reason. The capture holds the
+ * camera at its stop and turns the MASTER through `orbitStart → orbitEnd`;
+ * orbiting the camera the other way is the same picture (see `frameSample` in
+ * work-order.ts), so the view turns the camera and stops where the arc does. An
+ * arc of 60° → 360° is 300° of travel and the view gives you exactly those 300°
+ * — past that is a frame the run will never contain, which is the one thing
+ * this view exists not to show.
+ *
+ * The turn starts at 0 — the camera exactly where it stands — so opening the
+ * view never jumps, and it moves the VIEW only: the rig in the scene does not
+ * move, the same bargain zoom makes.
  *
  * Modal. The editor's shortcuts are swallowed while it is open, so Delete can't
  * remove the camera being looked through.
@@ -195,32 +222,72 @@ export function CameraView({
     return list.filter((s, i) => i === 0 || Math.abs(s.near - list[i - 1].near) > 0.01);
   }, [far, rig, scene.savedZooms]);
 
+  /** How far round the arc the view has been turned, in degrees from the
+   *  camera's own heading. Clamped to the sweep the rig actually shoots. */
+  const [turn, setTurn] = useState(0);
+  const sweep = rig ? orbitSweep(rig.orbitStart, rig.orbitEnd) : 360;
+  const canTurn = !!master && !!rig;
+  const t = Math.min(Math.max(0, turn), sweep);
+  const turnTo = (deg: number) => setTurn(Math.min(Math.max(0, deg), sweep));
+
   const [idx, setIdx] = useState(0);
   const clamped = Math.min(idx, Math.max(0, stops.length - 1));
   const stop = stops[clamped] ?? null;
   const step = (d: number) => setIdx((i) => Math.min(Math.max(0, Math.min(i, stops.length - 1) + d), Math.max(0, stops.length - 1)));
 
-  const position: Vec3 =
+  /* Zoom first, then turn: the stop decides how far out the camera stands, and
+     the turn walks that reach around the master. `orbitPoint` keeps the height
+     and the ground radius it is handed, so turning never re-frames the shot. */
+  const zoomed: Vec3 =
     !master || !stop || stop.key === "rig"
       ? viewCam.position
       : atDistance(master.position, viewCam.position, stop.near);
+  const position: Vec3 =
+    canTurn && t > 0 ? orbitPoint(target, zoomed, azimuthOf(target, zoomed) + t) : zoomed;
 
-  /* KEYS. Esc closes; + / − and the arrows step a stop. Everything is stopped
-     at the window in the capture phase, ahead of the editor's own shortcuts. */
+  /* KEYS. Esc closes; + / − and up/down step a zoom stop; left/right turn
+     around the arc. The two axes used to share the arrows, which left nothing
+     for the turn and made ← an alias for "zoom out" — a second name for a
+     control that already had one. Everything is stopped at the window in the
+     capture phase, ahead of the editor's own shortcuts. */
   const stepRef = useRef(step);
   stepRef.current = step;
+  const turnRef = useRef(turnTo);
+  turnRef.current = turnTo;
+  const turnNow = useRef(t);
+  turnNow.current = t;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const k = e.key;
       if (k === "Escape") onClose();
-      else if (k === "+" || k === "=" || k === "ArrowUp" || k === "ArrowRight") stepRef.current(1);
-      else if (k === "-" || k === "_" || k === "ArrowDown" || k === "ArrowLeft") stepRef.current(-1);
+      else if (k === "+" || k === "=" || k === "ArrowUp") stepRef.current(1);
+      else if (k === "-" || k === "_" || k === "ArrowDown") stepRef.current(-1);
+      else if (k === "ArrowRight") turnRef.current(turnNow.current + TURN_STEP);
+      else if (k === "ArrowLeft") turnRef.current(turnNow.current - TURN_STEP);
       e.preventDefault();
       e.stopImmediatePropagation();
     };
     window.addEventListener("keydown", onKey, { capture: true });
     return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [onClose]);
+
+  /* DRAG THE PICTURE TO TURN. Pointer capture rather than window listeners, so
+     a drag that leaves the panel still tracks and still ends. */
+  const drag = useRef<{ x: number; from: number } | null>(null);
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!canTurn) return;
+    drag.current = { x: e.clientX, from: t };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (d) turnTo(d.from + (e.clientX - d.x) * DEG_PER_PX);
+  };
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!drag.current) return;
+    drag.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+  };
 
   /* THE WHEEL STEPS, IT DOESN'T SLIDE. A trackpad sends dozens of small
      deltas per gesture; they are summed and spent one stop at a time, with a
@@ -285,7 +352,17 @@ export function CameraView({
           <GlassGhostButton ui="camera-view-close" size="sm" icon="close" label="Close (Esc)" onClick={onClose} />
         </header>
 
-        <div className="relative aspect-[16/10] bg-black/50" onWheel={onWheel}>
+        <div
+          className={cn(
+            "relative aspect-[16/10] touch-none bg-black/50",
+            canTurn && (drag.current ? "cursor-grabbing" : "cursor-grab")
+          )}
+          onWheel={onWheel}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+        >
           <Canvas
             className="!absolute inset-0"
             dpr={[1, 2]}
@@ -303,12 +380,13 @@ export function CameraView({
               <div className="type-panel-title text-white">{formatZoom(zoomOf(far!, stop.near))}</div>
               <div className="type-caption text-white/70">
                 {stop.near.toFixed(1)} m from {master.name}
+                {t > 0 && ` · turned ${Math.round(t)}°`}
               </div>
             </div>
           )}
         </div>
 
-        <footer className="flex flex-col gap-2 px-3 py-2.5">
+        <footer className="flex flex-col gap-2 px-3 py-3">
           {stops.length > 0 ? (
             <>
               <div className="flex items-center gap-2">
@@ -355,11 +433,53 @@ export function CameraView({
                   onClick={() => step(1)}
                 />
               </div>
-              <p className="type-caption text-content-subtle">
-                Zoom only moves between the reaches set in the camera's <span className="text-content">Zoom Distance</span>:
-                the rig's own framing, each saved zoom set, and the current value. Scroll, use + / −, or pick a stop. Add
-                stops with <span className="text-content">Save as set</span>.
-              </p>
+              {canTurn && (
+                <div className="flex items-center gap-2">
+                  <GlassGhostButton
+                    ui="camera-view-turn-back"
+                    size="sm"
+                    icon="chevron-left"
+                    label="Turn back toward the start of the arc"
+                    disabled={t <= 0}
+                    onClick={() => turnTo(t - TURN_STEP)}
+                  />
+                  <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                    <input
+                      type="range"
+                      aria-label={`Turn around ${master?.name ?? "the master"}`}
+                      data-ui="camera-view-turn"
+                      min={0}
+                      max={Math.round(sweep)}
+                      step={1}
+                      value={Math.round(t)}
+                      onChange={(e) => turnTo(parseFloat(e.target.value))}
+                      className="h-1 min-w-0 flex-1 cursor-pointer accent-brand"
+                    />
+                    {/* The arc, not just the angle: "120° of 300°" says both
+                        where you are and how much the run actually sweeps. */}
+                    <span className="type-caption shrink-0 tabular-nums text-content-subtle">
+                      <span className="text-content">{Math.round(t)}°</span> of {Math.round(sweep)}°
+                    </span>
+                    <button
+                      type="button"
+                      data-ui="camera-view-turn-reset"
+                      disabled={t <= 0}
+                      onClick={() => turnTo(0)}
+                      className="type-caption shrink-0 text-content-subtle underline-offset-2 transition-colors hover:text-content hover:underline disabled:opacity-40 disabled:hover:no-underline disabled:hover:text-content-subtle"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                  <GlassGhostButton
+                    ui="camera-view-turn-on"
+                    size="sm"
+                    icon="chevron-right"
+                    label="Turn further around the arc"
+                    disabled={t >= sweep}
+                    onClick={() => turnTo(t + TURN_STEP)}
+                  />
+                </div>
+              )}
             </>
           ) : (
             <p data-ui="camera-view-no-master" className="type-caption text-content-subtle">

@@ -69,14 +69,12 @@ const ui = (id: string) => `[data-ui="${id}"]`;
 type Obj = SceneApi["objects"][number];
 
 /* PLACING DOES NOT SELECT (see `add` in useScene), so every "here are its
-   controls" tip first needs the thing selected. These pick the newest one of
-   each kind, which is the one the step just asked for. */
+   controls" tip first needs the thing selected. The sky and the object are
+   selected by the user, through the Layers panel the guide walks them to;
+   `selectCamera` is the one shortcut left, and it picks the newest rig's start
+   camera — the one the step just asked for. */
 const isSky = (o: Obj) => o.source === "environment" || o.source === "skybox";
 const isBody = (o: Obj) => !o.group && !isSky(o) && o.source !== "camera";
-const selectLast = (pick: (o: Obj) => boolean) => (c: GuideContext) => {
-  const found = [...c.scene.objects].reverse().find(pick);
-  if (found) c.scene.select(found.id);
-};
 const selectCamera = (c: GuideContext) => {
   const rig = c.scene.rigs[c.scene.rigs.length - 1];
   const start = rig ? c.scene.rigCameras(rig).start : null;
@@ -85,6 +83,7 @@ const selectCamera = (c: GuideContext) => {
 const SELECT_IT = "Select it";
 
 const libraryOpen = (c: GuideContext) => !!c.find(ui("glass-asset-library"));
+const layersOpen = (c: GuideContext) => !!c.find(ui("glass-scene-layers"));
 const category = (id: string) => (c: GuideContext) =>
   !!c.find(`[data-ui="asset-cat-${id}"][aria-current="true"]`);
 
@@ -121,30 +120,79 @@ const PLACE_HOW =
 interface Focus {
   /** the panel's line while the thing is not selected */
   missing: string;
-  select: (c: GuideContext) => void;
+  /** what counts as "this is the thing" when reading the selection */
+  is: (o: Obj) => boolean;
+  /**
+   * A shortcut offered in the panel, which selects the thing FOR the user.
+   *
+   * OPTIONAL, AND DELIBERATELY ABSENT ON THE SKY AND THE OBJECT. A button that
+   * does the step for you teaches nothing — and selecting from the guide is not
+   * a gesture that exists in the editor, so the one thing the user took away
+   * was a route they can never use again. Those two steps walk the Layers panel
+   * instead (see `openLayersTip`). The camera keeps it: a rig is two objects and
+   * picking the right one of them in the viewport is fiddly.
+   */
+  select?: (c: GuideContext) => void;
 }
 
 const SKY: Focus = {
   missing:
-    "Placing doesn't select anything. A sky has no body to click in the viewport — select it in the Layers panel to bring up its controls.",
-  select: selectLast(isSky),
+    "The sky isn't selected. Open Layers from the toolbar and click its row to bring its controls back.",
+  is: isSky,
 };
 const BODY: Focus = {
-  missing: "Placing doesn't select anything — click your object in the viewport to bring up its controls.",
-  select: selectLast(isBody),
+  missing:
+    "The object isn't selected. Click it in the viewport, or open Layers and click its row, to bring its controls back.",
+  is: isBody,
 };
 const CAMERA: Focus = {
   missing:
     "Click one of the cameras in the viewport (or in Layers) to bring up its controls. If the camera view is open, close it with Esc first.",
+  is: (o) => o.source === "camera",
   select: selectCamera,
 };
+
+/** True while the thing this step is about is the one selected. */
+const isSelected = (f: Focus) => (c: GuideContext) => {
+  const sel = c.scene.selected;
+  return !!sel && f.is(sel);
+};
+
+/**
+ * PLACED, NOW SELECT IT — the two tips that stand in for the old shortcut.
+ *
+ * Placing does not select (see `add` in useScene), so every focus-view tip
+ * needs the thing selected first. That used to be a button in the guide panel
+ * which selected it for you; these walk the route the user will actually take
+ * afterwards — the toolbar's Layers button, then the row in the list.
+ *
+ * Both finish early if the thing is already selected, so someone who clicked it
+ * in the viewport (or had it selected before the guide got here) passes
+ * straight through rather than being sent to a panel they do not need.
+ */
+const openLayersTip = (f: Focus, why: string): GuideTip => ({
+  target: ui("toolbar-scene"),
+  side: "bottom",
+  title: "Open the Layers panel",
+  body: `Placing doesn't select anything, ${why} Click Layers to list everything in the scene.`,
+  done: either(layersOpen, isSelected(f)),
+});
+
+const selectInLayersTip = (f: Focus, what: string): GuideTip => ({
+  target: ui("glass-scene-layers"),
+  side: "left",
+  title: `Select the ${what}`,
+  body: `Click the ${what}'s row in the list. That selects it, and its controls appear along the bottom of the viewport.`,
+  done: isSelected(f),
+  missing: "Open Layers from the toolbar to continue.",
+});
 
 /** A tip about one control in the focus view of `f`. */
 const focusTip = (f: Focus, tip: Omit<GuideTip, "missing" | "action">): GuideTip => ({
   next: "Next",
   ...tip,
   missing: f.missing,
-  action: { label: SELECT_IT, run: f.select },
+  ...(f.select ? { action: { label: SELECT_IT, run: f.select } } : {}),
 });
 
 const renameTip = (f: Focus, what: string): GuideTip =>
@@ -209,6 +257,8 @@ export const GUIDE_STEPS: GuideStep[] = [
         done: hasSky,
         missing: "Open Assets and pick an Environment or a Skybox.",
       },
+      openLayersTip(SKY, "and a sky has no body to click in the viewport."),
+      selectInLayersTip(SKY, "sky"),
       focusTip(SKY, {
         target: ui("obj-tool-object"),
         side: "top",
@@ -251,6 +301,8 @@ export const GUIDE_STEPS: GuideStep[] = [
         done: hasObject,
         missing: "Open Assets and place a 3D model.",
       },
+      openLayersTip(BODY, "so your new object has no controls up yet."),
+      selectInLayersTip(BODY, "object"),
       focusTip(BODY, {
         target: ui("obj-tool-object"),
         side: "top",
