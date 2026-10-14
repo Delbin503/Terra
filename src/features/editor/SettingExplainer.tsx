@@ -157,6 +157,11 @@ function copyFor(setting: SettingKey, source: ExplainSource, cam: ExplainCamera 
         title: "Normal Intensity — surface detail",
         body: "How deep the bumps and grooves in the texture look. 0 flattens them, 1 is as authored, and higher values exaggerate them. It changes how light falls on the surface, not the shape itself.",
       };
+    case "resolution":
+      return {
+        title: "Model Resolution — how much detail renders",
+        body: "Each model comes in three detail levels. Low is the lightest file and the fastest to draw; High keeps every edge and texture. Auto switches between them as the camera moves: High up close, Medium across a room, Low in the distance. Fix a level to judge its detail at any distance.",
+      };
     case "brightness":
       return {
         title: "Brightness — exposure of the capture",

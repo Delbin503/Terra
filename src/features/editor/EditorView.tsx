@@ -38,7 +38,13 @@ import { ContextMenu, IS_MAC, MOD, type MenuItem } from "./ContextMenu";
 import { ObjectInfoPanel } from "./ObjectInfoPanel";
 import { SceneLayersPanel } from "./SceneLayersPanel";
 import { PanelDock, DOCK_WIDTH } from "./panel-dock";
-import { canTakeRole, objectTypeLabel, type SceneObject } from "./scene-types";
+import {
+  autoResolution,
+  canTakeRole,
+  objectTypeLabel,
+  type ResolutionLevel,
+  type SceneObject,
+} from "./scene-types";
 import { CameraPreview, CameraView } from "./CameraPreview";
 import { ZoomSets } from "./terragen-camera";
 import { EditorGuide } from "./EditorGuide";
@@ -51,6 +57,7 @@ import { WorkOrdersDialog } from "./WorkOrdersDialog";
 import { CameraPlaceDialog } from "./CameraPlaceDialog";
 import { BackdropReplaceDialog } from "./BackdropReplaceDialog";
 import { CaptureRunPanel } from "./CaptureRunPanel";
+import { SCENE_LABEL } from "./scene-palette";
 import {
   atDistance,
   azimuthOf,
@@ -717,6 +724,40 @@ export function EditorView({
   const marquee = scene.selectedObjects;
 
   /**
+   * WHAT MODEL RESOLUTION'S AUTO IS SHOWING — the level the viewport camera's
+   * distance picks, re-measured while the control is open.
+   *
+   * Polled rather than hooked into the orbit controls' change event: the
+   * camera also moves when the selection is framed or a view is restored, and
+   * a four-times-a-second read of one distance costs nothing. State changes
+   * only when the level or the tenth of a metre does, so a still camera
+   * re-renders nothing.
+   */
+  const [autoRes, setAutoRes] = useState<{ level: ResolutionLevel; distance: number } | null>(null);
+  const resolutionTarget =
+    activeSetting === "resolution" && selected ? selected.position : null;
+  useEffect(() => {
+    if (!resolutionTarget) {
+      setAutoRes(null);
+      return;
+    }
+    const [tx, ty, tz] = resolutionTarget;
+    const read = () => {
+      const p = cameraRef.current?.camera.position;
+      if (!p) return;
+      const distance = Math.round(Math.hypot(p.x - tx, p.y - ty, p.z - tz) * 10) / 10;
+      const level = autoResolution(distance);
+      setAutoRes((prev) =>
+        prev && prev.level === level && prev.distance === distance ? prev : { level, distance }
+      );
+    };
+    read();
+    const id = window.setInterval(read, 250);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolutionTarget?.[0], resolutionTarget?.[1], resolutionTarget?.[2]]);
+
+  /**
    * Right-click over a marquee selection opens its menu.
    *
    * Bound to the CANVAS rather than to a React `onContextMenu` on a wrapper: the
@@ -1189,6 +1230,23 @@ export function EditorView({
             onGuide={() => setGuideOpen((o) => !o)}
             guideOpen={guideOpen}
           />
+          {/* What the viewport is, said once and quietly. It used to be a pill
+              at the bottom centre, where it sat on the scene and on whichever
+              toolbar was up; under the project bar it is read when the project
+              is, and covers nothing. It sits ON the scene, so it inks like the
+              object title — flipping with the sampled backdrop. */}
+          <p
+            data-ui="preview-quality-note"
+            className="type-caption mt-2 flex items-center gap-1.5 pl-3"
+            style={{
+              color: (titleDark ? SCENE_LABEL.onBright : SCENE_LABEL.onDark).ink,
+              textShadow: (titleDark ? SCENE_LABEL.onBright : SCENE_LABEL.onDark).shadow,
+              opacity: 0.72,
+            }}
+          >
+            <Icon name="info" size={12} className="shrink-0" />
+            Preview quality · may differ from the final output
+          </p>
         </div>
 
         {/* The tools sit in the middle of the top row, between the project
@@ -1719,6 +1777,7 @@ export function EditorView({
           onDistance={setRigEndDistance}
           onDistanceHandle={setSpanHandle}
           onHeight={setRigSpan}
+          autoResolution={autoRes}
           zoomSets={
             selected.source === "camera" && cameraRelation ? (
               <ZoomSets

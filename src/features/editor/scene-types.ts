@@ -351,6 +351,62 @@ export interface SceneObject {
    * reflection intensity landing on everything in the scene.
    */
   skyInfluence: number;
+  /**
+   * WHICH DETAIL LEVEL OF THE MODEL RENDERS (Texture panel › Model Resolution).
+   *
+   * Absent means Auto: the level follows how far the viewport camera is from
+   * the object — see `autoResolution`. A fixed level holds whatever the
+   * distance, for when you are judging the detail itself.
+   *
+   * Only a mesh has levels. A sky is a texture and a splat is a captured
+   * field; neither ships Low / Medium / High copies, so neither gets the row.
+   */
+  resolution?: ModelResolution;
+}
+
+/** The detail levels a mesh ships with, lightest first. */
+export const RESOLUTION_LEVELS = ["low", "medium", "high"] as const;
+export type ResolutionLevel = (typeof RESOLUTION_LEVELS)[number];
+export type ModelResolution = "auto" | ResolutionLevel;
+
+export const RESOLUTION_LABEL: Record<ModelResolution, string> = {
+  auto: "Auto",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+};
+
+/** Only a mesh has detail levels to choose between — see `resolution`. */
+export const hasResolution = (source: AssetType) =>
+  source !== "camera" && !isWorldAsset(source);
+
+/**
+ * The level Auto shows at a given camera distance, in metres.
+ *
+ * Close enough to read surface detail → High; across a room → Medium; further
+ * than that the object is a few hundred pixels tall and Low is all it can show.
+ */
+export function autoResolution(distance: number): ResolutionLevel {
+  if (distance < 6) return "high";
+  if (distance < 15) return "medium";
+  return "low";
+}
+
+/**
+ * Each level's file size, for the trade-off the control shows.
+ *
+ * THESE ARE ESTIMATES. The prototype's catalogue has one file per model, not
+ * three, so the full size is derived from the object the same way the info
+ * panel derives a size from an asset, and the lighter levels are fixed
+ * fractions of it (a decimated mesh with downsized textures lands around a
+ * half and a third). A real LOD set reports its own three sizes.
+ */
+export function resolutionSizes(o: Pick<SceneObject, "id" | "name">): Record<ResolutionLevel, string> {
+  let seed = 0;
+  for (const ch of o.name + o.id) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+  const highMb = ((seed % 380) / 100) + 0.6;
+  const fmt = (mb: number) => (mb < 1 ? `${Math.round(mb * 1000)} KB` : `${mb.toFixed(1)} MB`);
+  return { low: fmt(highMb * 0.3), medium: fmt(highMb * 0.55), high: fmt(highMb) };
 }
 
 /**

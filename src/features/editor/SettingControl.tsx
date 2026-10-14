@@ -4,7 +4,16 @@ import { GlassPanel } from "@/components/glass";
 import { Icon } from "@/components/icons";
 import { AxisNumber, AxisSlider, FactorCard } from "./controls-ui";
 import { NumberInput } from "./ui";
-import { materialOf, OBJECT_COLORS, type MaterialSlot, type SceneObject } from "./scene-types";
+import {
+  materialOf,
+  OBJECT_COLORS,
+  RESOLUTION_LABEL,
+  resolutionSizes,
+  type MaterialSlot,
+  type ModelResolution,
+  type ResolutionLevel,
+  type SceneObject,
+} from "./scene-types";
 import {
   DISTANCE_SHOTS_RANGE,
   SHOTS_RANGE,
@@ -49,6 +58,7 @@ const LABEL: Record<SettingKey, string> = {
   normal: "Normal Intensity",
   brightness: "Brightness",
   skyInfluence: "Sky Influence",
+  resolution: "Model Resolution",
   cameraMode: "Camera Mode",
   distance: "Zoom Distance",
   height: "Camera Height",
@@ -85,6 +95,7 @@ export function SettingControl({
   masterCandidates = [],
   onPickMaster,
   zoomSets,
+  autoResolution,
   onClose,
 }: {
   object: SceneObject;
@@ -144,6 +155,12 @@ export function SettingControl({
    * file for `DistanceControl`, and importing it back would be a cycle.
    */
   zoomSets?: ReactNode;
+  /**
+   * What Auto is showing right now, and why: the level the viewport camera's
+   * distance picks, and that distance. Measured in EditorView, which owns the
+   * camera; absent until the first reading lands.
+   */
+  autoResolution?: { level: ResolutionLevel; distance: number } | null;
   onClose: () => void;
 }) {
   const [uniform, setUniform] = useState(true);
@@ -514,6 +531,14 @@ export function SettingControl({
         )}
 
         {/* ---- Capture settings (camera rigs only) ---- */}
+        {setting === "resolution" && (
+          <ResolutionControl
+            object={object}
+            auto={autoResolution ?? null}
+            onChange={(resolution) => onChange({ resolution })}
+          />
+        )}
+
         {setting === "cameraMode" && rig && (
           <div className="flex flex-col gap-2">
             {(
@@ -843,6 +868,81 @@ export function DistanceControl({
           is open the pair previews at the near end, with yellow markers where they return to.
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * MODEL RESOLUTION — which detail level of the mesh renders.
+ *
+ * One row of four, Auto first because it is the default and the one most
+ * people should leave on. Each fixed level carries its file size, so the
+ * choice reads as the trade it is; Auto carries what it is doing instead. The
+ * line underneath says what is on screen now, in a sentence rather than two
+ * loose labels, because "Auto" alone does not tell you whether you are judging
+ * the High model or the Low one.
+ */
+function ResolutionControl({
+  object,
+  auto,
+  onChange,
+}: {
+  object: SceneObject;
+  auto: { level: ResolutionLevel; distance: number } | null;
+  onChange: (r: ModelResolution) => void;
+}) {
+  const value = object.resolution ?? "auto";
+  const sizes = resolutionSizes(object);
+  const options: { value: ModelResolution; sub: string }[] = [
+    { value: "auto", sub: "By distance" },
+    { value: "low", sub: sizes.low },
+    { value: "medium", sub: sizes.medium },
+    { value: "high", sub: sizes.high },
+  ];
+  // The level actually drawn: the fixed one, or the one Auto picked.
+  const shown: ResolutionLevel | null = value === "auto" ? auto?.level ?? null : value;
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      <div role="radiogroup" aria-label="Model resolution" className="grid grid-cols-4 gap-1.5">
+        {options.map((o) => {
+          const on = value === o.value;
+          // Under Auto, the level it picked is marked — not selected, since you
+          // did not pick it — so you can see which model you are looking at.
+          const picked = value === "auto" && o.value === shown;
+          return (
+            <button
+              key={o.value}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              data-ui={`resolution-${o.value}`}
+              onClick={() => onChange(o.value)}
+              className={cn(
+                "relative flex flex-col items-center gap-0.5 rounded-xl border px-1 py-2 transition-colors",
+                on
+                  ? "border-brand/55 bg-brand/14 text-content"
+                  : picked
+                    ? "border-glass/24 bg-glass/10 text-content"
+                    : "border-glass/12 text-content-muted hover:bg-glass/8 hover:text-content"
+              )}
+            >
+              {picked && (
+                <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-brand" aria-hidden />
+              )}
+              <span className="type-label">{RESOLUTION_LABEL[o.value]}</span>
+              <span className="type-caption text-content-subtle">{o.sub}</span>
+            </button>
+          );
+        })}
+      </div>
+      <p data-ui="resolution-status" className="type-caption text-content-subtle">
+        {value === "auto"
+          ? shown && auto
+            ? `Showing ${RESOLUTION_LABEL[shown]} — the camera is ${auto.distance.toFixed(1)} m away.`
+            : "Switches between Low, Medium and High as the camera moves."
+          : `Holds ${RESOLUTION_LABEL[value]} at every distance.`}
+      </p>
     </div>
   );
 }

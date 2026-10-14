@@ -2,8 +2,10 @@ import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/icons";
 import { Panel, PanelHeader, PanelEyebrow, PanelBody } from "./ui";
 import {
+  hasResolution,
   isWorldAsset,
   materialOf,
+  RESOLUTION_LABEL,
   slotEdited,
   UNNAMED_SLOT,
   type MaterialSlot,
@@ -22,6 +24,7 @@ export type SettingKey =
   | "normal"
   | "brightness"
   | "skyInfluence"
+  | "resolution"
   | "cameraMode"
   | "distance"
   | "height"
@@ -72,6 +75,7 @@ const SETTINGS: { key: SettingKey; icon: IconName; label: string; group: Setting
   { key: "normal", icon: "tune", label: "Normal", group: "Material" },
   { key: "brightness", icon: "sunny", label: "Brightness", group: "Material" },
   { key: "skyInfluence", icon: "environment", label: "Sky Influence", group: "Material" },
+  { key: "resolution", icon: "grid", label: "Model Resolution", group: "Material" },
   { key: "distance", icon: "scale", label: "Zoom Distance", group: "Transform" },
   { key: "height", icon: "move", label: "Height", group: "Transform" },
   { key: "cameraMode", icon: "capture", label: "Mode", group: "Capture" },
@@ -103,7 +107,12 @@ const PBR: SettingKey[] = ["color", "metallic", "roughness", "specular", "normal
  * objects. Everything else has the five PBR factors, per slot.
  */
 function materialKeysFor(source: SceneObject["source"]): SettingKey[] {
-  return isWorldAsset(source) ? ["brightness", "skyInfluence"] : PBR;
+  if (isWorldAsset(source)) return ["brightness", "skyInfluence"];
+  // Model Resolution rides in the Texture tile because it is the same kind of
+  // question — how this object looks — and a mesh is the only thing with
+  // detail levels to pick between. It sits after the five factors: it is about
+  // the whole model, not the slot the switcher above is pointed at.
+  return hasResolution(source) ? [...PBR, "resolution"] : PBR;
 }
 
 /** Brightness is the object's own on a splat and the sky's on a backdrop. Same
@@ -220,6 +229,8 @@ function summarize(
       return { text: o.brightness.toFixed(2) };
     case "skyInfluence":
       return { text: o.skyInfluence.toFixed(2) };
+    case "resolution":
+      return { text: RESOLUTION_LABEL[o.resolution ?? "auto"] };
     case "cameraMode":
       return { text: rig?.mode === "fixed" ? "Fixed" : "Rotatable" };
     case "shotsPerDistance":
