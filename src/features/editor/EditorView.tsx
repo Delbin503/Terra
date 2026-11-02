@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Raycaster, Vector2, Vector3, Plane, type PerspectiveCamera } from "three";
 import {
-  GIZMO_REACH,
   SceneCanvas,
   type CameraGuide,
   type CameraHandle,
 } from "./SceneCanvas";
 import { GlassBar } from "@/components/glass";
 import { Icon } from "@/components/icons";
-import { Tooltip } from "@/components/ui";
 import { EditorTopBar } from "./EditorTopBar";
 import { EditorToolBar, type ToolId, type FlyoutAction } from "./EditorToolBar";
 import { EditorActions } from "./EditorActions";
@@ -94,16 +92,6 @@ export type SceneTier = "dark" | "dim" | "bright";
  * Canvas `camera` prop in SceneCanvas) and the orbit pivot it starts on.
  */
 const HOME_VIEW = { position: new Vector3(7, 5, 9), target: new Vector3(0, 0, 0) };
-
-/**
- * Reset view's hit target, px, and how far it sits from the cube's centre on
- * each axis. 47 px is where the side triangles sit (between TRI_BASE and
- * TRI_TIP × CUBE_PX), so up-and-left by that much puts the glyph in the
- * ring's top-left corner — in line with the left arrow below it and the top
- * arrow beside it, and well outside the turntable arc (radius 38 px).
- */
-const RESET_HIT = 28;
-const RESET_OFFSET = 47;
 
 /**
  * A spot on an area's floor for one more thing — somewhere in the middle
@@ -1380,37 +1368,8 @@ export function EditorView({
             onCloseFlyout={() => setTool(null)}
             view={viewHelpers}
             onToggleView={(h) => setViewHelpers((v) => ({ ...v, [h]: !v[h] }))}
+            onResetView={resetView}
           />
-        </div>
-
-        {/* RESET VIEW, as part of the cube rather than next to it.
-            Drawn the way the cube's own step arrows are — a bare light glyph
-            with a dark halo that turns brand orange under the pointer — and
-            set in the ring's empty top-left corner, above the left arrow and
-            outside the turntable arc, so the ornament stays one square. A glass button hung
-            below it read as a second, unrelated control and made the ring
-            lopsided. Positioned off the cube's centre (OrientationGizmo's
-            margin), so it moves with the cube when a dock panel opens. */}
-        <div
-          data-ui="view-reset-anchor"
-          className="pointer-events-none absolute z-20 transition-[right] duration-300 ease-out"
-          style={{
-            top: 80 + GIZMO_REACH - RESET_OFFSET - RESET_HIT / 2,
-            right: 16 + gizmoInset + GIZMO_REACH + RESET_OFFSET - RESET_HIT / 2,
-          }}
-        >
-          <Tooltip label="Reset view" side="left" tone="glass">
-            <button
-              type="button"
-              data-ui="view-reset"
-              aria-label="Reset view"
-              onClick={resetView}
-              className="pointer-events-auto grid place-items-center rounded-full text-white/70 outline-none transition-colors hover:text-[#f36f16] focus-visible:ring-2 focus-visible:ring-ring"
-              style={{ width: RESET_HIT, height: RESET_HIT, filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.75))" }}
-            >
-              <Icon name="view-reset" size={16} strokeWidth={2.1} />
-            </button>
-          </Tooltip>
         </div>
 
         {/* Box select. Off while a space is being drawn — that gesture is also a

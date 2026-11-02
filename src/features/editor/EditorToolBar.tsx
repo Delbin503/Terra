@@ -14,6 +14,8 @@ const VIEW_HELPERS: { id: ViewHelper; icon: IconName; label: string }[] = [
   { id: "axes", icon: "view-axes", label: "Axes" },
 ];
 
+const RESET_VIEW = { id: "reset", icon: "view-reset", label: "Reset view" } as const;
+
 const TOOLS: { id: ToolId; icon: IconName; label: string }[] = [
   { id: "scene", icon: "scene", label: "Scene objects" },
   // No Space button. A space is a thing you bring INTO the scene, so it is
@@ -56,6 +58,7 @@ export function EditorToolBar({
   onCloseFlyout,
   view,
   onToggleView,
+  onResetView,
 }: {
   active: ToolId[];
   /**
@@ -65,6 +68,8 @@ export function EditorToolBar({
    */
   view?: Record<ViewHelper, boolean>;
   onToggleView?: (h: ViewHelper) => void;
+  /** eases the camera back to the view the editor opens on */
+  onResetView?: () => void;
   /**
    * Unread counts per tool. A finished generation used to announce itself once,
    * in a toast, and then be gone — so anything produced while you were looking
@@ -134,6 +139,8 @@ export function EditorToolBar({
           {VIEW_HELPERS.map((h) => (
             <ToolButton key={h.id} tool={h} active={view[h.id]} onClick={() => onToggleView(h.id)} />
           ))}
+          {/* A one-shot action, so it never lights up like the two switches. */}
+          {onResetView && <ToolButton tool={RESET_VIEW} active={false} onClick={onResetView} />}
         </>
       )}
     </GlassBar>
@@ -155,7 +162,7 @@ function ToolButton({
   badge,
   onClick,
 }: {
-  tool: { id: ToolId | ViewHelper; icon: IconName; label: string };
+  tool: { id: ToolId | ViewHelper | "reset"; icon: IconName; label: string };
   active: boolean;
   /** unread items behind this tool — shown as a count, hidden at zero */
   badge?: number;
@@ -170,7 +177,7 @@ function ToolButton({
       <button
         type="button"
         aria-label={tool.label}
-        aria-pressed={active}
+        aria-pressed={tool.id === "reset" ? undefined : active}
         data-ui={`toolbar-${tool.id}`}
         onClick={onClick}
         className={cn(
