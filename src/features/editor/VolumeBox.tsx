@@ -148,12 +148,26 @@ export function VolumeBox({
   /** Faces to flash: an object is clamped against them right now. */
   contact,
   onSelect,
+  sideLabels = false,
+  highlight = false,
 }: {
   volume: SceneVolume;
   selected?: boolean;
   contact?: WallId[];
   /** Click the footprint to focus this space. Omit for a read-only box. */
   onSelect?: () => void;
+  /**
+   * Name the four sides on the floor — Front, Back, Left, Right.
+   *
+   * For the space SAB works in: "put the car at the front" only means
+   * something if the room says which side that is. Front is −Z, the
+   * `north` face and three.js' forward, so it agrees with the orientation
+   * cube and with the arrangement solver's walls.
+   */
+  sideLabels?: boolean;
+  /** SAB's area while the chat is open: lit orange whether or not it is
+   *  selected — see `VOLUME.sabEdge`. */
+  highlight?: boolean;
 }) {
   // Everything below is drawn in the room's OWN frame and turned as one group,
   // so a rotated room is one transform rather than a rotation baked into every
@@ -168,8 +182,8 @@ export function VolumeBox({
   // Purple while you have hold of it, grey while you don't — see `VOLUME.idle`.
   // The unselected box steps back in COLOUR, not in visibility: dimming it as
   // well took it off the screen entirely over bright ground.
-  const ink = selected ? VOLUME.edge : VOLUME.idle;
-  const dim = selected ? 1 : 0.8;
+  const ink = highlight ? VOLUME.sabEdge : selected ? VOLUME.edge : VOLUME.idle;
+  const dim = selected || highlight ? 1 : 0.8;
 
   return (
     <group position={[cx, 0, cz]} rotation={[0, (volume.rotationY * Math.PI) / 180, 0]}>
@@ -196,9 +210,9 @@ export function VolumeBox({
       >
         <planeGeometry args={[l, w]} />
         <meshBasicMaterial
-          color={selected ? VOLUME.floor : VOLUME.idle}
+          color={highlight ? VOLUME.sabFloor : selected ? VOLUME.floor : VOLUME.idle}
           transparent
-          opacity={0.14 * dim}
+          opacity={(highlight ? 0.22 : 0.14) * dim}
           depthWrite={false}
           side={DoubleSide}
         />
@@ -215,7 +229,7 @@ export function VolumeBox({
         points={edges}
         segments
         color={ink}
-        lineWidth={selected ? 2.2 : 1.7}
+        lineWidth={selected || highlight ? 2.2 : 1.7}
         transparent
         opacity={0.95 * dim}
         raycast={() => null}
@@ -258,6 +272,39 @@ export function VolumeBox({
         );
       })}
 
+      {sideLabels &&
+        (
+          [
+            ["Front", [0, cy, min[2]]],
+            ["Back", [0, cy, max[2]]],
+            ["Left", [min[0], cy, 0]],
+            ["Right", [max[0], cy, 0]],
+          ] as const
+        ).map(([label, at]) => (
+          <Html
+            key={label}
+            position={at as unknown as Vec3}
+            center
+            style={{ pointerEvents: "none", userSelect: "none" }}
+            zIndexRange={[20, 0]}
+          >
+            <div
+              data-ui={`volume-side-${label.toLowerCase()}`}
+              style={{
+                background: READOUT.bg,
+                border: `1px solid ${READOUT.border}`,
+                color: READOUT.ink,
+                borderRadius: 7,
+                padding: "3px 8px",
+                fontSize: 12,
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {label}
+            </div>
+          </Html>
+        ))}
     </group>
   );
 }

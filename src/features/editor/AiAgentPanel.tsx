@@ -5,14 +5,14 @@ import { DockPanel } from "./panel-dock";
 import { Icon, type IconName } from "@/components/icons";
 import { AssetThumb } from "./AssetThumb";
 import { typeIcon } from "./assets-data";
-import { MessagePart, PermissionCardView, RunView, TaskCardView, Thinking } from "./ai-agent-parts";
+import { MessagePart, PermissionCardView, RunView, SabMark, TaskCardView, Thinking } from "./ai-agent-parts";
+import { useSettings } from "@/features/settings/settings-store";
 import { AddObjectFlow } from "./ai-agent-add-flow";
 import {
   addTarget,
   captureFollowUp,
   nodeRef,
   planFor,
-  STARTERS,
   type AgentContext,
   type NodeRef,
   type Op,
@@ -52,11 +52,25 @@ import { LOOSE_SPREAD, expandVolume } from "./scene-volume";
  * model would slot in without this file changing.
  */
 
-const MODELS = [
-  { id: "terra", name: "Terra AI", blurb: "Balanced — plans, builds, restyles" },
-  { id: "fast", name: "Terra AI Fast", blurb: "Quicker, shallower edits" },
-  { id: "pro", name: "Terra AI Pro", blurb: "Long capture plans and audits" },
-] as const;
+/** One conversation. The live one's turns are mirrored here as they change,
+ *  so switching away and back finds the thread where it was left. */
+interface Chat {
+  id: string;
+  turns: Turn[];
+  /** A name someone gave it. Absent, the chat is named by its first question. */
+  name?: string;
+}
+
+let chatCounter = 0;
+const newChat = (): Chat => ({ id: `chat-${(chatCounter += 1)}`, turns: [] });
+
+/** A chat is named by the first thing that was asked in it — unless renamed. */
+function chatTitle(c: Chat): string {
+  if (c.name) return c.name;
+  const first = c.turns.find((t) => t.role === "user");
+  const text = first?.parts.find((p) => p.kind === "md");
+  return text && text.kind === "md" && text.text.trim() ? text.text.trim() : "New chat";
+}
 
 /** Seeded near the cap so the limit warning is visible in this build. */
 const USAGE = { used: 17, limit: 20 };
@@ -96,6 +110,7 @@ export function AiAgentPanel({
   onPlaceAsset,
   onOpenGenerate3D,
   initialPrompt = "",
+  areaId = null,
 }: {
   scene: SceneApi;
   /** the asset library — the chatbot pulls objects from it in the add flow */
@@ -113,14 +128,32 @@ export function AiAgentPanel({
    * before it becomes a turn.
    */
   initialPrompt?: string;
+  /**
+   * The space SAB works in while it is open — the box drawn in the scene with
+   * its sides named. A FOCUSED space still wins: picking a room in the
+   * viewport is the more specific thing to have said.
+   */
+  areaId?: string | null;
 }) {
+  const { account } = useSettings();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState(initialPrompt);
   const [attached, setAttached] = useState<Attachment[]>([]);
-  const [model, setModel] = useState<(typeof MODELS)[number]>(MODELS[0]);
-  const [modelOpen, setModelOpen] = useState(false);
+  /**
+   * THE CHATS. Every conversation SAB has had in this project, newest first,
+   * one of them live. Kept as a list rather than one thread because the
+   * questions are separate jobs — the kitchen and the loading bay — and
+   * starting the second shouldn't wipe the first.
+   */
+  const [chats, setChats] = useState<Chat[]>(() => [newChat()]);
+  const [chatId, setChatId] = useState(() => chats[0].id);
+  const [chatsOpen, setChatsOpen] = useState(false);
+  /** The header title being renamed, and what is typed into it so far. */
+  const [titleDraft, setTitleDraft] = useState<string | null>(null);
+  // Set by Escape, so the blur that follows the field unmounting can't save
+  // what Escape just threw away.
+  const titleCancelled = useRef(false);
   const [menu, setMenu] = useState<null | "attach">(null);
-  const [showContext, setShowContext] = useState(true);
   // Start clean: the usage/limit banner is noise the moment the chatbot opens,
   // so it stays hidden until something actually needs to raise it.
   const [showLimit, setShowLimit] = useState(false);
@@ -158,7 +191,12 @@ export function AiAgentPanel({
   // selection now, so "add a chair in this confined space" has to mean the same
   // room a drop would land in — otherwise the agent and the drag would disagree
   // about which space "this" is.
-  const armedVolumeId = scene.selectedVolumeId;
+  // SAB'S AREA FIRST, ALWAYS. It is the box drawn in the scene while the chat
+  // is open, and what SAB builds is meant to land in it — so a space focused in
+  // the viewport no longer redirects the agent; it only stands in when there
+  // is no area at all (a panel opened without one).
+  const armedVolumeId = areaId ?? scene.selectedVolumeId ?? null;
+  const armedVolume = scene.volumes.find((v) => v.id === armedVolumeId) ?? null;
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
 
@@ -171,11 +209,10 @@ export function AiAgentPanel({
     setAttached((prev) => {
       const manual = prev.filter((a) => !a.auto);
       const auto: Attachment[] = [];
-      // The space comes first: it is the wider context, and it is the one that
-      // changes what the composer offers to write.
-      if (volume) {
-        auto.push({ id: `auto-space`, kind: "space", volumeId: volume.id, label: volume.name, auto: true });
-      }
+      // NO SPACE CHIP. The area is not optional context you can detach — it is
+      // where SAB builds, and the box in the scene already shows it — so a chip
+      // with a remove button offered a choice that isn't one.
+      void volume;
       if (object && !manual.some((a) => a.kind === "node" && a.node.id === object.id)) {
         auto.push({ id: `auto-node`, kind: "node", node: nodeRef(object), auto: true });
       }
@@ -254,6 +291,55 @@ export function AiAgentPanel({
     });
   }, []);
 
+  // Mirror the live thread into its chat, so the list's titles and a later
+  // switch back both see what is on screen now.
+  useEffect(() => {
+    setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, turns } : c)));
+  }, [turns, chatId]);
+
+  /**
+   * Leave the live chat. Anything still scheduled belongs to it — a scripted
+   * reply landing in the chat you switched to would be the agent answering a
+   * question that was never asked there — so pending steps are dropped.
+   */
+  const leaveChat = () => {
+    timers.current.forEach((t) => window.clearTimeout(t));
+    timers.current = [];
+    setBusy(false);
+  };
+  const openChat = (id: string) => {
+    if (id === chatId) return setChatsOpen(false);
+    leaveChat();
+    setTurns(chats.find((c) => c.id === id)?.turns ?? []);
+    setChatId(id);
+    setChatsOpen(false);
+  };
+  const startChat = () => {
+    // An empty chat is already a new chat — another would be a second blank row.
+    if (turns.length === 0) return setChatsOpen(false);
+    leaveChat();
+    const c = newChat();
+    setChats((prev) => [c, ...prev]);
+    setTurns([]);
+    setChatId(c.id);
+    setChatsOpen(false);
+    inputRef.current?.focus();
+  };
+  /** An empty name hands the chat back its automatic title. */
+  const renameChat = (id: string, name: string) =>
+    setChats((prev) => prev.map((c) => (c.id === id ? { ...c, name: name.trim() || undefined } : c)));
+  const currentChat = chats.find((c) => c.id === chatId);
+  const currentTitle = currentChat ? chatTitle({ ...currentChat, turns }) : "New chat";
+  const deleteChat = (id: string) => {
+    const rest = chats.filter((c) => c.id !== id);
+    if (id !== chatId) return setChats(rest);
+    leaveChat();
+    const next = rest[0] ?? newChat();
+    setChats(rest.length ? rest : [next]);
+    setTurns(next.turns);
+    setChatId(next.id);
+  };
+
   const run = useCallback(
     (script: Script, revert?: () => void) => {
       setBusy(true);
@@ -305,7 +391,7 @@ export function AiAgentPanel({
    * decides whether this is the right answer at all.
    */
   const spawnIntoSpace = (text: string): boolean => {
-    const volume = scene.selectedVolume;
+    const volume = armedVolume;
     if (!volume) return false;
     const requests = parseSpawn(text);
     if (requests.length === 0) return false;
@@ -406,8 +492,10 @@ export function AiAgentPanel({
     const mentions = attached.filter((a) => a.kind === "mention");
     if (mentions.length)
       parts.push({ kind: "md", text: mentions.map((m) => `\`@${m.label}\``).join(" ") });
-    const space = attached.find((a) => a.kind === "space");
-    if (space && space.kind === "space") parts.push({ kind: "md", text: `\`${space.label}\`` });
+    // The armed space is NOT echoed into the bubble. It rides along on every
+    // message while SAB is open, so tagging each one with the area's name
+    // repeated a fact the box in the scene and the chip above the composer
+    // already show — the bubble is what you asked, and nothing else.
 
     applyOps([{ op: "add", turn: { role: "user", parts } }]);
     setInput("");
@@ -424,7 +512,7 @@ export function AiAgentPanel({
      * sentence is not an answer. It only fires when a space is armed; without
      * one there is nowhere to put anything and the ordinary flow is right.
      */
-    if (scene.selectedVolume) {
+    if (armedVolume) {
       run([{ after: 0, ops: [{ op: "add", turn: { role: "thinking" } }] }]);
       const built = spawnIntoSpace(text);
       if (built) {
@@ -506,14 +594,19 @@ export function AiAgentPanel({
   const empty = turns.length === 0;
 
   /** The worked example, offered only while there is a space to put things in. */
-  const spacePrompt = attached.some((a) => a.kind === "space") ? SPACE_PROMPT : null;
+  const spacePrompt = armedVolume ? SPACE_PROMPT : null;
 
   /* The composer is pinned under the transcript, so the dock shell takes it
      as a footer rather than as the last child of a scrolling body. */
   const footer = (
-      <div className="shrink-0 border-t border-glass/10 p-2.5">
+      <div className="shrink-0 px-2.5 pb-2 pt-1.5">
+        {/* GEMINI'S COMPOSER: one tall rounded box that holds everything —
+            what's attached, the text, + on the left and send on the right —
+            with no rule above it, so it reads as the conversation's next line
+            rather than a form under it. */}
+        <div className="rounded-[26px] border border-glass/14 bg-glass/8 transition-colors focus-within:border-glass/30">
         {attached.length > 0 && (
-          <div data-ui="ai-attachments" className="mb-2 flex flex-wrap gap-1.5">
+          <div data-ui="ai-attachments" className="flex flex-wrap gap-1.5 px-3 pt-2.5">
             {attached.map((a) => (
               <AttachmentChip
                 key={a.id}
@@ -531,11 +624,6 @@ export function AiAgentPanel({
           </div>
         )}
 
-        {/* The well carries the focus state, not the textarea. The global
-            :focus-visible ring is right for a button, but on a composer that
-            autofocuses on open it draws a brand-coloured box around the whole
-            control before the user has typed anything. */}
-        <div className="field-well rounded-xl border transition-colors focus-within:border-brand/50">
           <textarea
             ref={inputRef}
             data-ui="ai-input"
@@ -552,17 +640,17 @@ export function AiAgentPanel({
                request that actually works — typing it verbatim builds the room
                it describes — because "Ask AI anything" in front of a box you
                just drew tells you nothing about what the box is for. */
-            placeholder={spacePrompt ?? "Ask AI anything…"}
-            className="type-body max-h-28 w-full resize-none bg-transparent px-3 pb-1 pt-2.5 text-content outline-none placeholder:text-content-subtle focus-visible:ring-0 focus-visible:ring-offset-0"
+            placeholder={spacePrompt ?? "Ask SAB"}
+            className="type-body max-h-28 w-full resize-none bg-transparent px-4 pb-1 pt-3 text-content outline-none placeholder:text-content-subtle focus-visible:ring-0 focus-visible:ring-offset-0"
           />
 
-          <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
+          <div className="flex items-center gap-0.5 px-2 pb-2">
             <div className="relative">
               <GlassGhostButton
                 ui="ai-attach"
                 size="sm"
-                icon="attach"
-                label="Attach objects, images or files"
+                icon="create"
+                label="Add objects, images or files"
                 onClick={() => setMenu((m) => (m === "attach" ? null : "attach"))}
               />
               {menu === "attach" && (
@@ -616,17 +704,15 @@ export function AiAgentPanel({
               onClick={() => send()}
               disabled={!input.trim() || busy}
               aria-label="Send"
-              className="grid h-8 w-8 place-items-center rounded-full bg-brand text-brand-foreground transition-colors hover:bg-brand-hover disabled:bg-glass/15 disabled:text-content-subtle"
+              className="grid h-9 w-9 place-items-center rounded-full bg-brand text-brand-foreground transition-colors hover:bg-brand-hover disabled:bg-transparent disabled:text-content-subtle"
             >
-              <Icon name={busy ? "spinner" : "send"} size={15} className={cn(busy && "animate-spin")} />
+              <Icon name={busy ? "spinner" : "send-up"} size={17} strokeWidth={2.2} className={cn(busy && "animate-spin")} />
             </button>
           </div>
         </div>
 
         <p className="type-caption mt-1.5 text-center text-content-subtle">
-          <kbd className="font-sans">Enter</kbd> to send ·{" "}
-          <kbd className="font-sans">Shift</kbd>+<kbd className="font-sans">Enter</kbd> for a new
-          line
+          Switching chats cancels pending actions.
         </p>
       </div>
   );
@@ -635,11 +721,14 @@ export function AiAgentPanel({
     <DockPanel
       ui="ai-agent"
       title="AI"
-      defaultHeight={400}
+      /* Taller than the other dock panels: Gemini's composer is a generous
+         box, and at 400 px it left the conversation a strip two lines high.
+         The dock still clamps this to the room below the panel's top. */
+      defaultHeight={600}
       /* No percentage: a reply has no measurable progress, and a bar that
          invents one would be the only dishonest thing in the dock. The shell
          runs the indeterminate track instead. */
-      job={busy ? { title: "Terra AI is working", hint: "Reading the scene and drafting a reply" } : null}
+      job={busy ? { title: "SAB is working", hint: "Reading the scene and drafting a reply" } : null}
       /* The transcript already shows a thinking row while it works, so the
          shell only steps in when the transcript isn't on screen. */
       jobDisplay="collapsed"
@@ -653,61 +742,62 @@ export function AiAgentPanel({
          wear a costume, and the panel is already named by the model it's set to.
          The only thing marking it as interactive is the chevron. */
       headerOverride={
-      <div className="flex w-full items-center gap-1">
-        <div className="relative min-w-0 flex-1">
+      <div className="flex w-full items-center gap-1.5">
+        {/* THE CHAT'S NAME, and the place to change it. With several chats the
+            panel title is the only thing saying which one you are in, so it
+            names the chat rather than the tool — and a click renames it, the
+            same rename the chat list offers. */}
+        {titleDraft !== null ? (
+          <input
+            autoFocus
+            data-ui="ai-chat-title-input"
+            aria-label="Chat name"
+            value={titleDraft}
+            maxLength={80}
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={() => {
+              if (!titleCancelled.current) renameChat(chatId, titleDraft);
+              titleCancelled.current = false;
+              setTitleDraft(null);
+            }}
+            onKeyDown={(e) => {
+              // Escape cancels the rename here, not the whole panel.
+              e.stopPropagation();
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") {
+                titleCancelled.current = true;
+                setTitleDraft(null);
+              }
+            }}
+            className="type-panel-title -mx-1.5 min-w-0 flex-1 rounded-md border border-brand/50 bg-glass/10 px-1.5 py-0.5 text-content outline-none"
+          />
+        ) : (
           <button
             type="button"
-            data-ui="ai-model-select"
-            onClick={() => setModelOpen((v) => !v)}
-            className="-mx-1.5 flex max-w-full items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-glass/15"
+            data-ui="ai-chat-title"
+            title="Rename chat"
+            onClick={() => setTitleDraft(currentTitle)}
+            className="type-panel-title -mx-1.5 min-w-0 flex-1 truncate rounded-md px-1.5 py-0.5 text-left text-content transition-colors hover:bg-glass/15"
           >
-            <span className="type-panel-title truncate text-content">{model.name}</span>
-            <Icon
-              name="chevron-down"
-              size={14}
-              className={cn(
-                "shrink-0 text-content-subtle transition-transform",
-                modelOpen && "rotate-180"
-              )}
-            />
+            {currentTitle}
           </button>
-          {modelOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setModelOpen(false)} aria-hidden />
-              <GlassPanel
-                thickness="overlay"
-                ui="ai-model-menu"
-                className="absolute left-0 top-full z-20 mt-1 w-56 !rounded-xl p-1"
-              >
-                {MODELS.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => {
-                      setModel(m);
-                      setModelOpen(false);
-                    }}
-                    className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-glass/15"
-                  >
-                    <Icon
-                      name="check"
-                      size={13}
-                      className={cn(
-                        "mt-0.5 shrink-0 text-brand",
-                        m.id !== model.id && "invisible"
-                      )}
-                    />
-                    <span className="min-w-0">
-                      <span className="type-label-strong block text-content">{m.name}</span>
-                      <span className="type-caption block text-content-subtle">{m.blurb}</span>
-                    </span>
-                  </button>
-                ))}
-              </GlassPanel>
-            </>
-          )}
-        </div>
-
+        )}
+        <GlassGhostButton
+          ui="ai-chats"
+          size="sm"
+          icon="feedback"
+          label={chatsOpen ? "Hide chats" : "Show chats"}
+          aria-pressed={chatsOpen}
+          onClick={() => setChatsOpen((v) => !v)}
+          className={chatsOpen ? "!bg-glass/20 !text-content" : undefined}
+        />
+        <span
+          data-ui="ai-status"
+          className="type-caption-strong shrink-0 rounded-full bg-brand/15 px-2 py-0.5 text-brand-on-glass"
+        >
+          online
+        </span>
         <GlassGhostButton
           ui="ai-collapse"
           size="sm"
@@ -744,42 +834,36 @@ export function AiAgentPanel({
         </div>
       )}
 
-      {/* ------------------------------------------------------------ thread */}
-      <div ref={threadRef} className="flex-1 overflow-y-auto px-3 py-3">
-        {showContext && (
-          <div
-            data-ui="ai-context-banner"
-            className="mb-3 flex items-center gap-2 rounded-lg border border-glass/12 bg-glass/8 px-2 py-1.5"
-          >
-            <Icon name="scene" size={13} className="shrink-0 text-content-subtle" />
-            <p className="type-caption min-w-0 flex-1 truncate text-content-muted">
-              {scene.selected ? `${scene.selected.name} selected` : "Nothing selected"} ·{" "}
-              {scene.objects.length} {scene.objects.length === 1 ? "object" : "objects"} in{" "}
-              {projectName} · Terra Library on
-            </p>
-            <button
-              type="button"
-              onClick={() => setShowContext(false)}
-              aria-label="Dismiss context banner"
-              className="shrink-0 text-content-subtle transition-colors hover:text-content"
-            >
-              <Icon name="close" size={12} />
-            </button>
-          </div>
-        )}
+      {/* ------------------------------------------------------------- chats */}
+      {chatsOpen && (
+        <ChatList
+          chats={chats}
+          activeId={chatId}
+          onOpen={openChat}
+          onNew={startChat}
+          onDelete={deleteChat}
+          onRename={renameChat}
+          onClose={() => setChatsOpen(false)}
+        />
+      )}
 
+      {/* ------------------------------------------------------------ thread */}
+      <div
+        ref={threadRef}
+        /* A column at least as tall as the body, so an empty chat can centre
+           its greeting in the space. */
+        className={cn("flex min-h-full flex-1 flex-col overflow-y-auto px-3 py-3", chatsOpen && "hidden")}
+      >
         {empty ? (
-          <EmptyState
-            hasObjects={scene.objects.length > 0}
-            hasSelection={scene.selected !== null}
-            onPick={send}
-          />
+          <EmptyState name={account.firstName || "there"} />
         ) : (
           <div className="space-y-3">
-            {turns.map((turn) => (
+            {turns.map((turn, i) => (
               <TurnRow
                 key={turn.id}
                 turn={turn}
+                isLast={i === turns.length - 1}
+                prompt={promptBefore(turns, i)}
                 store={store}
                 onNode={focusNode}
                 onUndo={() => undo(turn.id)}
@@ -799,8 +883,22 @@ export function AiAgentPanel({
 
 /* ------------------------------------------------------------------- turns */
 
+/** The user's words that an agent turn is answering — what Retry resends. */
+function promptBefore(turns: Turn[], i: number): string | undefined {
+  for (let j = i - 1; j >= 0; j--) {
+    const t = turns[j];
+    if (t.role === "user") {
+      const md = t.parts.find((p) => p.kind === "md");
+      return md && md.kind === "md" ? md.text : undefined;
+    }
+  }
+  return undefined;
+}
+
 function TurnRow({
   turn,
+  isLast = false,
+  prompt,
   store,
   onNode,
   onUndo,
@@ -810,6 +908,10 @@ function TurnRow({
   onOpenGenerate3D,
 }: {
   turn: Turn;
+  /** the newest turn — its reply actions stay visible, older ones show on hover */
+  isLast?: boolean;
+  /** what the user asked that this turn answers */
+  prompt?: string;
   store: AssetStore;
   onNode: (id: string) => void;
   onUndo: () => void;
@@ -818,7 +920,9 @@ function TurnRow({
   onPlaceAsset: (asset: Asset) => void;
   onOpenGenerate3D: () => void;
 }) {
-  if (turn.role === "thinking") return <Thinking />;
+  // A thinking row means "the next thing is on its way". Once something has
+  // arrived after it, it is a stale promise — and some scripts never drop it.
+  if (turn.role === "thinking") return isLast ? <Thinking /> : null;
 
   if (turn.role === "run") return <RunView run={turn} onNode={onNode} onUndo={onUndo} />;
 
@@ -844,9 +948,10 @@ function TurnRow({
       <div className="flex justify-end">
         <div
           data-ui="ai-user-message"
-          /* The user's own turns carry a soft brand (orange) wash so they read
-             as "mine" against the agent's bubble-less prose — tinted, not loud. */
-          className="max-w-[85%] rounded-2xl rounded-br-md border border-brand/25 bg-brand/15 px-3 py-2 [&_p]:text-content"
+          /* Gemini's shape: a soft grey bubble, square-ish at the top-right
+             corner it hangs from. Grey, not orange — the colour in this thread
+             belongs to SAB's mark, and the question is just the question. */
+          className="max-w-[85%] rounded-[20px] rounded-tr-md bg-glass/15 px-4 py-2.5 [&_p]:text-content"
         >
           {turn.parts.map((part, i) => (
             <MessagePart key={i} part={part} refs={[]} onNode={onNode} />
@@ -866,7 +971,9 @@ function TurnRow({
   );
 
   return (
-    <div data-ui="ai-agent-message">
+    <div data-ui="ai-agent-message" className="group/msg flex gap-3">
+      <SabMark size={20} className="mt-0.5" />
+      <div className="min-w-0 flex-1">
       {turn.tone === "error" ? (
         <div className="rounded-xl border border-danger/30 bg-danger/10 px-2.5 py-2">
           <p className="type-label-strong mb-1 flex items-center gap-1.5 text-danger">
@@ -896,6 +1003,85 @@ function TurnRow({
             <PromptChip key={s} label={s} onClick={() => onRetry(s)} />
           ))}
         </div>
+      )}
+
+      {turn.tone !== "error" && (
+        <ReplyActions
+          text={turn.parts.flatMap((p) => (p.kind === "md" ? [p.text] : [])).join("\n\n")}
+          visible={isLast}
+          onRetry={prompt ? () => onRetry(prompt) : undefined}
+        />
+      )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Under a reply: copy it, say whether it was any good, or ask again.
+ *
+ * The newest reply keeps its row; older ones show theirs on hover, as Gemini's
+ * do — a column of identical icon rows down the whole transcript is noise.
+ * The thumbs are a prototype's: they light and they stay lit, and go nowhere.
+ */
+function ReplyActions({
+  text,
+  visible,
+  onRetry,
+}: {
+  text: string;
+  visible: boolean;
+  onRetry?: () => void;
+}) {
+  const [vote, setVote] = useState<"up" | "down" | null>(null);
+  const [copied, setCopied] = useState(false);
+  const btn =
+    "grid h-7 w-7 place-items-center rounded-full text-content-subtle transition-colors hover:bg-glass/15 hover:text-content";
+  return (
+    <div
+      data-ui="ai-reply-actions"
+      className={cn(
+        "-ml-1.5 mt-1.5 flex items-center gap-0.5 transition-opacity",
+        visible ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover/msg:opacity-100"
+      )}
+    >
+      <button
+        type="button"
+        aria-label={copied ? "Copied" : "Copy reply"}
+        title={copied ? "Copied" : "Copy"}
+        className={btn}
+        onClick={() => {
+          void navigator.clipboard?.writeText(text);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1400);
+        }}
+      >
+        <Icon name={copied ? "check" : "copy"} size={14} />
+      </button>
+      <button
+        type="button"
+        aria-label="Good reply"
+        aria-pressed={vote === "up"}
+        title="Good reply"
+        className={cn(btn, vote === "up" && "text-brand-on-glass")}
+        onClick={() => setVote((v) => (v === "up" ? null : "up"))}
+      >
+        <Icon name="like" size={14} />
+      </button>
+      <button
+        type="button"
+        aria-label="Bad reply"
+        aria-pressed={vote === "down"}
+        title="Bad reply"
+        className={cn(btn, vote === "down" && "text-brand-on-glass")}
+        onClick={() => setVote((v) => (v === "down" ? null : "down"))}
+      >
+        <Icon name="dislike" size={14} />
+      </button>
+      {onRetry && (
+        <button type="button" aria-label="Ask again" title="Ask again" className={btn} onClick={onRetry}>
+          <Icon name="retry" size={14} />
+        </button>
       )}
     </div>
   );
@@ -936,55 +1122,19 @@ function PromptChip({
 /* -------------------------------------------------------------- empty state */
 
 /**
- * The opening state — a short list of prompts you can click, and nothing else.
- *
- * It used to be a centred hero (badge, heading, paragraph) over six full-width
- * cards, each a bold title above an explanatory line. That is the shape of a
- * help centre, and it read as one: nothing about it looked like the start of a
- * conversation, and it pushed the composer most of a panel-height down.
- *
- * What's left is what earns its place:
- *
- *   · The openers are prompt chips — the identical control the agent already
- *     offers as follow-up suggestions. One idiom for "a prompt you can click",
- *     wherever it appears.
- *   · The blurbs are on hover. They were the FAQ tell: a subtitle under every
- *     title turns a list of prompts into a list of articles, and they cost six
- *     lines to say what the prompt itself already says.
- *   · No greeting. A line of prose explaining what the agent can do is the same
- *     claim the chips make by existing, and the composer's own placeholder
- *     already invites the question.
+ * The empty chat: a greeting, centred, and nothing else.
  */
-function EmptyState({
-  hasObjects,
-  hasSelection,
-  onPick,
-}: {
-  hasObjects: boolean;
-  hasSelection: boolean;
-  onPick: (prompt: string) => void;
-}) {
-  // Only offer what the scene can actually answer — an empty project offering
-  // "Audit my scene" is a prompt whose only possible reply is "there's nothing
-  // here".
-  const offered = STARTERS.filter((s) =>
-    s.needs === "selection" ? hasSelection : s.needs === "objects" ? hasObjects : true
-  );
-
+function EmptyState({ name }: { name: string }) {
+  /* Just the greeting, in the middle of the empty thread — no starter chips:
+     the composer below is the one place to begin, and a menu of canned asks
+     above it made the first screen read as a form. Plain ink, no gradient. */
   return (
-    <div data-ui="ai-empty">
-      <p className="type-eyebrow text-content-subtle">Try</p>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {offered.map((s) => (
-          <PromptChip
-            key={s.title}
-            label={s.title}
-            icon={s.icon}
-            title={s.blurb}
-            onClick={() => onPick(s.prompt)}
-          />
-        ))}
-      </div>
+    <div data-ui="ai-empty" className="flex flex-1 flex-col items-center justify-center pb-6 text-center">
+      {/* SAB's own mark, the one beside every reply — so the greeting and
+          the answers that follow it are visibly the same speaker. */}
+      <SabMark size={28} className="mb-3" />
+      <p className="text-[19px] font-semibold leading-tight tracking-[-0.015em] text-content">Hello, {name}</p>
+      <p className="mt-1 text-[15px] font-medium leading-snug text-content-subtle">What should we build?</p>
     </div>
   );
 }
@@ -1059,10 +1209,15 @@ function PickerMenu({
   return (
     <>
       <div className="fixed inset-0 z-10" onClick={onClose} aria-hidden />
+      {/* A SOLID BACKING, not glass alone. This menu opens inside the dock
+          panel, which is already glass — and a backdrop blur nested in
+          another blurs nothing, so the menu came out see-through, with the
+          composer's text reading straight through its items. The fill is the
+          panel's own dark at near-full strength, with a shadow to lift it. */}
       <GlassPanel
         thickness="overlay"
         ui="ai-picker"
-        className="absolute bottom-full left-0 z-20 mb-1 w-56 !rounded-xl p-1"
+        className="absolute bottom-full left-0 z-20 mb-2 w-56 !rounded-xl !bg-[hsl(28_8%_10%/0.97)] p-1 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.7)]"
       >
         {items.map((it) => (
           <button
@@ -1078,5 +1233,126 @@ function PickerMenu({
         ))}
       </GlassPanel>
     </>
+  );
+}
+
+/* ------------------------------------------------------------------- chats */
+
+/**
+ * The chat list, in place of the thread while it is open.
+ *
+ * In the panel rather than a popover: it is as tall as the list is, and a
+ * popover over a docked panel is a second panel fighting the first for the
+ * same column. The thread is one click away on the same button.
+ */
+function ChatList({
+  chats,
+  activeId,
+  onOpen,
+  onNew,
+  onDelete,
+  onRename,
+  onClose,
+}: {
+  chats: Chat[];
+  activeId: string;
+  onOpen: (id: string) => void;
+  onNew: () => void;
+  onDelete: (id: string) => void;
+  onRename: (id: string, name: string) => void;
+  onClose: () => void;
+}) {
+  /** The row being renamed, and what is typed into it so far. */
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const startRename = (c: Chat) => {
+    setDraft(chatTitle(c));
+    setEditing(c.id);
+  };
+  // A blur after Escape must not save what Escape just threw away.
+  const commit = (id: string) => {
+    if (editing !== id) return;
+    onRename(id, draft);
+    setEditing(null);
+  };
+
+  return (
+    <div data-ui="ai-chat-list" className="flex h-full flex-col px-3 py-2.5">
+      <div className="flex max-h-full flex-col rounded-xl border border-glass/12 bg-glass/5">
+        <div className="flex shrink-0 items-center gap-1 border-b border-glass/10 py-1 pl-3 pr-1.5">
+          <span className="type-label-strong flex-1 text-content">Chats</span>
+          <GlassGhostButton ui="ai-chat-new" size="sm" icon="create" label="New chat" onClick={onNew} />
+          <GlassGhostButton ui="ai-chat-list-close" size="sm" icon="close" label="Close chats" onClick={onClose} />
+        </div>
+        {/* The card is never taller than the space the composer leaves, and only
+            the rows scroll inside it — so its header and footer stay on screen
+            however many chats there are, in a panel that opens 400 px tall. */}
+        <div className="min-h-0 space-y-0.5 overflow-y-auto p-1.5">
+          {chats.map((c) => {
+            const on = c.id === activeId;
+            return (
+              <div key={c.id} className="group flex items-center gap-1">
+                {editing === c.id ? (
+                  <input
+                    autoFocus
+                    data-ui={`ai-chat-${c.id}-name`}
+                    aria-label="Chat name"
+                    value={draft}
+                    maxLength={80}
+                    onFocus={(e) => e.currentTarget.select()}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onBlur={() => commit(c.id)}
+                    onKeyDown={(e) => {
+                      // Escape here cancels the rename, not the whole panel.
+                      e.stopPropagation();
+                      if (e.key === "Enter") commit(c.id);
+                      if (e.key === "Escape") setEditing(null);
+                    }}
+                    className="type-body min-w-0 flex-1 rounded-lg border border-brand/50 bg-glass/10 px-2.5 py-[7px] text-content outline-none"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    data-ui={`ai-chat-${c.id}`}
+                    aria-current={on}
+                    onClick={() => onOpen(c.id)}
+                    onDoubleClick={() => startRename(c)}
+                    title="Double-click to rename"
+                    className={cn(
+                      "type-body min-w-0 flex-1 truncate rounded-lg px-2.5 py-2 text-left transition-colors",
+                      on
+                        ? "bg-brand/15 text-content ring-1 ring-inset ring-brand/45"
+                        : "text-content-muted hover:bg-glass/10 hover:text-content"
+                    )}
+                  >
+                    {chatTitle(c)}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  data-ui={`ai-chat-${c.id}-rename`}
+                  aria-label={`Rename chat: ${chatTitle(c)}`}
+                  title="Rename"
+                  onClick={() => startRename(c)}
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-content-subtle transition-colors hover:bg-glass/15 hover:text-content"
+                >
+                  <Icon name="edit" size={13} />
+                </button>
+                <button
+                  type="button"
+                  data-ui={`ai-chat-${c.id}-delete`}
+                  aria-label={`Delete chat: ${chatTitle(c)}`}
+                  title="Delete"
+                  onClick={() => onDelete(c.id)}
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-content-subtle transition-colors hover:bg-glass/15 hover:text-content"
+                >
+                  <Icon name="close" size={13} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }

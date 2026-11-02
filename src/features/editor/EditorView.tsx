@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { Raycaster, Vector2, Vector3, Plane } from "three";
+import { Raycaster, Vector2, Vector3, Plane, type PerspectiveCamera } from "three";
 import {
+  GIZMO_REACH,
   SceneCanvas,
   type CameraGuide,
   type CameraHandle,
 } from "./SceneCanvas";
 import { GlassBar } from "@/components/glass";
 import { Icon } from "@/components/icons";
+import { Tooltip } from "@/components/ui";
 import { EditorTopBar } from "./EditorTopBar";
 import { EditorToolBar, type ToolId, type FlyoutAction } from "./EditorToolBar";
 import { EditorActions } from "./EditorActions";
@@ -26,7 +28,7 @@ import {
   type VolumeSetting,
   type VolumeTab,
 } from "./VolumeInspector";
-import { describeVolume, volumeArea } from "./scene-volume";
+import { describeVolume, volumeArea, type SceneVolume } from "./scene-volume";
 import { newSeed } from "./arrange";
 import { floorY, isOverFootprint } from "./scene-volume";
 import { ObjectPropertiesPanel, settingKeysFor, type SettingKey } from "./ObjectPropertiesPanel";
@@ -41,6 +43,7 @@ import { PanelDock, DOCK_WIDTH } from "./panel-dock";
 import {
   autoResolution,
   canTakeRole,
+  isMaster,
   objectTypeLabel,
   type ResolutionLevel,
   type SceneObject,
@@ -58,6 +61,7 @@ import { CameraPlaceDialog } from "./CameraPlaceDialog";
 import { BackdropReplaceDialog } from "./BackdropReplaceDialog";
 import { CaptureRunPanel } from "./CaptureRunPanel";
 import { SCENE_LABEL } from "./scene-palette";
+import { NumberInput } from "./ui";
 import {
   atDistance,
   azimuthOf,
@@ -85,6 +89,41 @@ export type SceneTier = "dark" | "dim" | "bright";
 
 /** Transform setting ↔ gizmo handles. Material settings have no gizmo, so the
  *  map is partial and a miss simply leaves the current mode alone. */
+/**
+ * Where Reset view goes back to: the camera the viewport opens with (see the
+ * Canvas `camera` prop in SceneCanvas) and the orbit pivot it starts on.
+ */
+const HOME_VIEW = { position: new Vector3(7, 5, 9), target: new Vector3(0, 0, 0) };
+
+/**
+ * Reset view's hit target, px, and how far it sits from the cube's centre on
+ * each axis. 47 px is where the side triangles sit (between TRI_BASE and
+ * TRI_TIP × CUBE_PX), so up-and-left by that much puts the glyph in the
+ * ring's top-left corner — in line with the left arrow below it and the top
+ * arrow beside it, and well outside the turntable arc (radius 38 px).
+ */
+const RESET_HIT = 28;
+const RESET_OFFSET = 47;
+
+/**
+ * A spot on an area's floor for one more thing — somewhere in the middle
+ * two-thirds, turned with the room, so a single add lands inside the box and
+ * clear of its walls rather than stacked on the last one at the centre.
+ */
+function spotInArea(v: SceneVolume): [number, number, number] {
+  const u = (Math.random() - 0.5) * v.size[0] * 0.66;
+  const w = (Math.random() - 0.5) * v.size[2] * 0.66;
+  const a = (v.rotationY * Math.PI) / 180;
+  return [
+    v.center[0] + u * Math.cos(a) + w * Math.sin(a),
+    v.center[1],
+    v.center[2] - u * Math.sin(a) + w * Math.cos(a),
+  ];
+}
+
+/** The ceiling SAB's area opens with, in metres — a room, not a hangar. */
+const SAB_AREA_CEILING = 3;
+
 const SETTING_GIZMO: Partial<Record<SettingKey, GizmoMode>> = {
   position: "translate",
   rotation: "rotate",
@@ -138,8 +177,6 @@ export function EditorView({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
   const cameraRef = useRef<CameraHandle | null>(null);
-  /** the stand-in mesh waiting for a generation pass to replace it */
-  const meshPlaceholder = useRef<string | null>(null);
 
   const scene = useScene();
   // The library's contents live here, not in the panel — a generation can
@@ -622,40 +659,7 @@ export function EditorView({
     );
   };
 
-  /**
-   * "Place into Scene" on a mesh that doesn't exist yet. A stand-in goes in
-   * immediately so the click has an answer in the viewport, and the finished
-   * asset takes its place — same object, same transform, so anything the user
-   * did to the placeholder meanwhile survives.
-   */
-  const placeMeshPlaceholder = () => {
-    // The panel stays mounted on purpose: the generation pass lives inside it,
-    // so closing it here would strand the placeholder in the scene forever.
-    // Minimising is the way to watch the viewport while it runs.
-    const id = scene.add("Generating mesh…", "mesh");
-    scene.update(id, {
-      pending: true,
-      description: "A placeholder for a mesh still being generated. It becomes the real asset when the pass finishes.",
-    });
-    meshPlaceholder.current = id;
-  };
 
-  const resolveMeshPlaceholder = (asset: Asset) => {
-    const id = meshPlaceholder.current;
-    meshPlaceholder.current = null;
-    // The placeholder can be gone by the time the pass lands — deleted, or the
-    // scene reset — in which case the asset just gets placed normally.
-    if (!id || !scene.objects.some((o) => o.id === id)) {
-      place(asset.name, asset.type, undefined, asset.modelUrl, asset.skyUrl);
-      return;
-    }
-    scene.update(id, {
-      pending: false,
-      name: asset.name,
-      modelUrl: asset.modelUrl,
-      description: "A 3D model generated from your prompt and reference images.",
-    });
-  };
 
   const dropCameraRig = (focus: boolean) => {
     const at = pendingCamera ?? [0, 1.5, 0];
@@ -724,6 +728,62 @@ export function EditorView({
   const marquee = scene.selectedObjects;
 
   /**
+   * SAB'S AREA — the room the scene agent builds in, on screen while it is open.
+   *
+   * It is the project's own Space, not a second kind of box: opening SAB uses
+   * the space the project already has, and only draws one (10 × 10 m, 3 m
+   * ceiling, around the master) when there is none. So what SAB arranges into
+   * is exactly what the Arrangement axis and a drop would use, and it stays
+   * after the chat closes like any space you drew.
+   *
+   * It opens UNFOCUSED. Focusing a space brings its title, its tiles and its
+   * inspector — the whole Space editor over a chat — so the area gets one bar
+   * instead, and Edit area arms the resize grips on it without focusing it.
+   */
+  const [sabAreaId, setSabAreaId] = useState<string | null>(null);
+  const [sabEditing, setSabEditing] = useState(false);
+  const sabArea = agentOpen ? scene.volumes.find((v) => v.id === sabAreaId) ?? null : null;
+  useEffect(() => {
+    if (!agentOpen) {
+      setSabEditing(false);
+      return;
+    }
+    if (sabAreaId && scene.volumes.some((v) => v.id === sabAreaId)) return;
+    const existing = scene.activeVolume ?? scene.volumes[0] ?? null;
+    if (existing) {
+      setSabAreaId(existing.id);
+      return;
+    }
+    const master = scene.objects.find(isMaster);
+    const id = scene.addVolume(
+      [master?.position[0] ?? 0, 0, master?.position[2] ?? 0],
+      [10, SAB_AREA_CEILING, 10],
+      "SAB area"
+    );
+    // addVolume focuses what it makes — right for a room you just drew, not
+    // for one that appeared because a chat opened.
+    scene.selectVolume(null);
+    setSabAreaId(id);
+    // A room you can't see the edges of is not a room you can describe, so a
+    // NEW area is brought into frame once: same viewing angle, aimed at the
+    // area's centre, backed off until its footprint fits. An area that already
+    // existed keeps whatever view you had of it.
+    const cam = cameraRef.current?.camera as PerspectiveCamera | undefined;
+    const controls = controlsRef.current;
+    if (cam && controls?.target) {
+      const centre = new Vector3(master?.position[0] ?? 0, 0, master?.position[2] ?? 0);
+      const dir = cam.position.clone().sub(controls.target).normalize();
+      const half = Math.hypot(5, 5); // half the 10 × 10 footprint's diagonal
+      const fit = (half / Math.sin(((cam.fov ?? 50) * Math.PI) / 360)) * 1.15;
+      controls.target.copy(centre);
+      cam.position.copy(centre).addScaledVector(dir, Math.max(fit, cam.position.distanceTo(centre)));
+      controls.update?.();
+    }
+    // Re-run on open, and when the area is deleted out from under the chat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentOpen, scene.volumes.length]);
+
+  /**
    * WHAT MODEL RESOLUTION'S AUTO IS SHOWING — the level the viewport camera's
    * distance picks, re-measured while the control is open.
    *
@@ -756,6 +816,32 @@ export function EditorView({
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolutionTarget?.[0], resolutionTarget?.[1], resolutionTarget?.[2]]);
+
+  /** Viewport helpers — independent switches, so grid and axes can both be on. */
+  const [viewHelpers, setViewHelpers] = useState({ grid: false, axes: false });
+
+  /**
+   * Back to the view the editor opened on, eased rather than cut so you can
+   * see where you were taken from. Moves the orbit pivot too: a reset that
+   * kept a pivot dragged off to one side would orbit around nothing.
+   */
+  const resetView = () => {
+    const cam = cameraRef.current?.camera;
+    const controls = controlsRef.current;
+    if (!cam || !controls?.target) return;
+    const fromPos = cam.position.clone();
+    const fromTgt = controls.target.clone();
+    const t0 = performance.now();
+    const step = () => {
+      const k = Math.min(1, (performance.now() - t0) / 450);
+      const e = 1 - Math.pow(1 - k, 3);
+      cam.position.lerpVectors(fromPos, HOME_VIEW.position, e);
+      controls.target.lerpVectors(fromTgt, HOME_VIEW.target, e);
+      controls.update?.();
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  };
 
   /**
    * Right-click over a marquee selection opens its menu.
@@ -1206,9 +1292,22 @@ export function EditorView({
                 onDragging: setVolumeDragging,
                 gizmo: volumeSetting ? VOLUME_GIZMO[volumeSetting] : undefined,
               }
-            : undefined
+            : sabEditing && sabArea
+              ? {
+                  drawing: false,
+                  onDrawn: () => {},
+                  onCancelDraw: () => {},
+                  onResize: (patch) => scene.updateVolume(sabArea.id, patch),
+                  onDragging: setVolumeDragging,
+                  gizmo: "size",
+                  volumeId: sabArea.id,
+                }
+              : undefined
         }
+        labelVolumeId={sabArea?.id ?? null}
         gizmoInset={gizmoInset}
+        showGrid={viewHelpers.grid}
+        showAxes={viewHelpers.axes}
       />
 
       {/* Overlay chrome */}
@@ -1279,7 +1378,39 @@ export function EditorView({
             onSelect={selectTool}
             onFlyoutAction={handleFlyout}
             onCloseFlyout={() => setTool(null)}
+            view={viewHelpers}
+            onToggleView={(h) => setViewHelpers((v) => ({ ...v, [h]: !v[h] }))}
           />
+        </div>
+
+        {/* RESET VIEW, as part of the cube rather than next to it.
+            Drawn the way the cube's own step arrows are — a bare light glyph
+            with a dark halo that turns brand orange under the pointer — and
+            set in the ring's empty top-left corner, above the left arrow and
+            outside the turntable arc, so the ornament stays one square. A glass button hung
+            below it read as a second, unrelated control and made the ring
+            lopsided. Positioned off the cube's centre (OrientationGizmo's
+            margin), so it moves with the cube when a dock panel opens. */}
+        <div
+          data-ui="view-reset-anchor"
+          className="pointer-events-none absolute z-20 transition-[right] duration-300 ease-out"
+          style={{
+            top: 80 + GIZMO_REACH - RESET_OFFSET - RESET_HIT / 2,
+            right: 16 + gizmoInset + GIZMO_REACH + RESET_OFFSET - RESET_HIT / 2,
+          }}
+        >
+          <Tooltip label="Reset view" side="left" tone="glass">
+            <button
+              type="button"
+              data-ui="view-reset"
+              aria-label="Reset view"
+              onClick={resetView}
+              className="pointer-events-auto grid place-items-center rounded-full text-white/70 outline-none transition-colors hover:text-[#f36f16] focus-visible:ring-2 focus-visible:ring-ring"
+              style={{ width: RESET_HIT, height: RESET_HIT, filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.75))" }}
+            >
+              <Icon name="view-reset" size={16} strokeWidth={2.1} />
+            </button>
+          </Tooltip>
         </div>
 
         {/* Box select. Off while a space is being drawn — that gesture is also a
@@ -1489,8 +1620,19 @@ export function EditorView({
                 setGen3dOpen(false);
                 setPickReq(null);
               }}
-              onPlacePlaceholder={placeMeshPlaceholder}
-              onResolvePlaceholder={resolveMeshPlaceholder}
+              /* What a build made goes into the scene at once — into the
+                 project's Space when there is one, so a photo's worth of
+                 objects lands in the room rather than piled on the origin. */
+              onBuildScene={(made) => {
+                const room = scene.activeVolume;
+                made.forEach((asset, i) => {
+                  const a = (i / Math.max(1, made.length)) * Math.PI * 2;
+                  const point: [number, number, number] = room
+                    ? spotInArea(room)
+                    : [Math.cos(a) * 2.2, 0, Math.sin(a) * 2.2];
+                  place(asset.name, asset.type, point, asset.modelUrl);
+                });
+              }}
               onViewResult={() => {
                 setGen3dOpen(false);
                 openLibraryAt("meshes");
@@ -1514,11 +1656,26 @@ export function EditorView({
               store={assets}
               projectName={projectName}
               onClose={() => setAgentOpen(false)}
-              onPlaceAsset={(a) => place(a.name, a.type, undefined, a.modelUrl, a.skyUrl)}
+              /* Inside SAB's area, like everything else SAB puts down: a spot
+                 on its floor rather than wherever the editor's default drop
+                 lands. Skies and cameras keep their own placement — a sky has
+                 no spot, and a rig frames the master wherever it stands. */
+              onPlaceAsset={(a) =>
+                place(
+                  a.name,
+                  a.type,
+                  sabArea && a.type !== "environment" && a.type !== "skybox" && a.type !== "camera"
+                    ? spotInArea(sabArea)
+                    : undefined,
+                  a.modelUrl,
+                  a.skyUrl
+                )
+              }
               onOpenGenerate3D={() => {
                 setAgentOpen(false);
                 setGen3dOpen(true);
               }}
+              areaId={sabArea?.id ?? null}
             />
           )}
         </PanelDock>
@@ -1569,6 +1726,71 @@ export function EditorView({
           y={marqueeMenu.y}
           onClose={() => setMarqueeMenu(null)}
         />
+      )}
+
+      {/* SAB'S AREA BAR — what the room is, and the one way to change it.
+          Bottom-centre at bottom-6, the line every bottom bar in the editor
+          sits on, so it reads as the same row as the object tiles and the
+          selection bar rather than a third thing floating above them. It steps
+          aside whenever one of those owns the slot: a selection, a focused
+          space, or define mode. */}
+      {sabArea && !selected && !focusedVolume && marquee.length <= 1 && !drawingSpace && (
+        <div
+          data-ui="sab-area-bar"
+          className="pointer-events-none fixed bottom-6 left-1/2 z-30 -translate-x-1/2"
+          style={{ marginLeft: leftInset / 2 }}
+        >
+          <GlassBar ui="sab-area" shape="pill" className="pointer-events-auto h-11 gap-3 pl-4 pr-1.5">
+            <span className="type-body-strong whitespace-nowrap tabular-nums text-content">
+              {sabArea.size[0].toFixed(1)} × {sabArea.size[2].toFixed(1)} m
+            </span>
+            <span className="h-5 w-px shrink-0 bg-glass/20" aria-hidden />
+            <label className="flex items-center gap-2">
+              <span className="type-body text-content-muted">Ceiling</span>
+              <NumberInput
+                bordered
+                className="w-14 shrink-0"
+                aria-label="Area ceiling in metres"
+                data-ui="sab-area-ceiling"
+                step={0.5}
+                value={Number(sabArea.size[1].toFixed(1))}
+                onChange={(e) => {
+                  const h = Number(e.target.value);
+                  if (!Number.isFinite(h)) return;
+                  const next = Math.min(50, Math.max(0.5, h));
+                  scene.updateVolume(sabArea.id, {
+                    size: [sabArea.size[0], next, sabArea.size[2]],
+                  });
+                }}
+              />
+              <span className="type-body text-content-muted">m</span>
+            </label>
+            {sabEditing ? (
+              <>
+                <button
+                  type="button"
+                  data-ui="sab-area-done"
+                  onClick={() => setSabEditing(false)}
+                  className="type-caption-strong shrink-0 rounded-full border border-brand/50 bg-brand/15 px-3 py-1.5 text-brand-on-glass transition-colors hover:bg-brand/25"
+                >
+                  Done
+                </button>
+                <span className="type-caption whitespace-nowrap pr-2.5 text-content-subtle">
+                  Drag corners or edges to resize
+                </span>
+              </>
+            ) : (
+              <button
+                type="button"
+                data-ui="sab-area-edit"
+                onClick={() => setSabEditing(true)}
+                className="type-caption-strong shrink-0 rounded-full border border-glass/20 px-3 py-1.5 text-content transition-colors hover:border-glass/35 hover:bg-glass/10"
+              >
+                Edit area
+              </button>
+            )}
+          </GlassBar>
+        </div>
       )}
 
       {/* Define mode has to say so.

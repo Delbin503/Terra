@@ -6,6 +6,13 @@ import { ToolMenu, type ToolMenuItem } from "./ToolMenu";
 
 export type ToolId = "scene" | "assets" | "ai";
 export type FlyoutAction = "mat" | "gen3d" | "sab";
+/** Viewport helpers — what the editor draws over the scene to work by. */
+export type ViewHelper = "grid" | "axes";
+
+const VIEW_HELPERS: { id: ViewHelper; icon: IconName; label: string }[] = [
+  { id: "grid", icon: "view-grid", label: "Grid" },
+  { id: "axes", icon: "view-axes", label: "Axes" },
+];
 
 const TOOLS: { id: ToolId; icon: IconName; label: string }[] = [
   { id: "scene", icon: "scene", label: "Scene objects" },
@@ -21,7 +28,7 @@ const TOOLS: { id: ToolId; icon: IconName; label: string }[] = [
  *  right-hand dock — so this is a multi-select, not a menu of destinations. */
 const AI_TOOLS: ToolMenuItem<FlyoutAction>[] = [
   { id: "sab", icon: "sab", label: "SAB", hint: "Scene agent — build and edit by prompt" },
-  { id: "gen3d", icon: "input-3d", label: "3D Generate", hint: "Multi-view images into a mesh" },
+  { id: "gen3d", icon: "input-3d", label: "3D Generate", hint: "A photo into scene objects" },
   { id: "mat", icon: "mat", label: "MAT", hint: "Domain-adaptation photorealism pass" },
 ];
 
@@ -47,8 +54,17 @@ export function EditorToolBar({
   onSelect,
   onFlyoutAction,
   onCloseFlyout,
+  view,
+  onToggleView,
 }: {
   active: ToolId[];
+  /**
+   * Which viewport helpers are on. Two independent switches, not a choice:
+   * the grid gives distance and the axes give direction, and reading one
+   * against the other is the point — so both can be lit at once.
+   */
+  view?: Record<ViewHelper, boolean>;
+  onToggleView?: (h: ViewHelper) => void;
   /**
    * Unread counts per tool. A finished generation used to announce itself once,
    * in a toast, and then be gone — so anything produced while you were looking
@@ -108,6 +124,18 @@ export function EditorToolBar({
           />
         )
       )}
+
+      {/* The helpers after a rule: the three tools open panels, these change
+          what the viewport draws, and a divider says they are a different
+          kind of button without a second bar. */}
+      {view && onToggleView && (
+        <>
+          <span className="mx-1 h-6 w-px shrink-0 bg-glass/20" aria-hidden />
+          {VIEW_HELPERS.map((h) => (
+            <ToolButton key={h.id} tool={h} active={view[h.id]} onClick={() => onToggleView(h.id)} />
+          ))}
+        </>
+      )}
     </GlassBar>
   );
 }
@@ -127,7 +155,7 @@ function ToolButton({
   badge,
   onClick,
 }: {
-  tool: { id: ToolId; icon: IconName; label: string };
+  tool: { id: ToolId | ViewHelper; icon: IconName; label: string };
   active: boolean;
   /** unread items behind this tool — shown as a count, hidden at zero */
   badge?: number;

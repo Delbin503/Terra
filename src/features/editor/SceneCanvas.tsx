@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Environment, Lightformer, Line, OrbitControls, GizmoHelper, Html, TransformControls } from "@react-three/drei";
+import { Environment, Grid, Lightformer, Line, OrbitControls, GizmoHelper, Html, TransformControls } from "@react-three/drei";
 import {
   Mesh,
   Object3D,
@@ -20,7 +20,7 @@ import { CameraObjectMesh, GhostCamera } from "./CameraObjectMesh";
 import { applyUnrealGizmoSkin } from "./unreal-gizmo";
 import { ViewCube, CUBE_PX, TRI_TIP } from "./ViewCube";
 import { distance } from "./camera-rig";
-import { CAMERA_RIG, READOUT } from "./scene-palette";
+import { AXIS, CAMERA_RIG, READOUT } from "./scene-palette";
 import type { SceneApi } from "./useScene";
 import { VolumeBox, VolumeDraw, VolumeHandles, type VolumeGizmo } from "./VolumeBox";
 import { ancestorIds, subtreeIds } from "./scene-tree";
@@ -45,7 +45,14 @@ const DEG = Math.PI / 180;
 
 /** The ground projection the sky has always rendered with. A placed sky's own
  *  transform is applied ON TOP of these, so an untouched sky looks untouched
- *  and every number the Object tab shows is an offset from a known default. */
+ *  and every number the Object tab shows is an offset from a known default.
+ *
+ *  `radius` and `height` are the PICTURE: where the horizon sits and how far
+ *  the projection reaches before it curves away, which is what the sky's own
+ *  scale drives. `scale` is not part of the picture at all — it is the size of
+ *  the shell the projection is painted on, and it only has to be big enough to
+ *  surround the camera and close enough to sit inside the far plane (1000).
+ *  See `SkyFollowsCamera`. */
 const GROUND = { height: 15, radius: 60, scale: 400 };
 
 /**
@@ -68,6 +75,57 @@ const GROUND = { height: 15, radius: 60, scale: 400 };
  * than quietly: if the mesh or that line ever stops being findable — a drei or
  * three-stdlib upgrade — it says so once instead of leaving a dead slider.
  */
+/**
+ * THE SKY TRAVELS WITH THE CAMERA.
+ *
+ * The ground projection is painted on a REAL MESH — a unit sphere scaled by
+ * `ground.scale`, sitting at the world origin — and not on the scene's
+ * background, so it is finite and the camera can leave it. Nothing that places
+ * a camera is bounded by it: the capture rig stands as far back as 30× the
+ * master's radius (`farLimit`), focusing an object carries the viewport out to
+ * wherever that object is, and the sky's own scale used to shrink the shell as
+ * well. Outside it there is no backdrop to draw, so the sky simply vanished and
+ * the viewport fell through to the clear colour.
+ *
+ * Centring the shell on the camera every frame fixes all three at once: the
+ * camera is always at the middle of it, at any distance, in any direction.
+ *
+ * THE PICTURE DOES NOT MOVE WITH IT. The projection shader works in ray
+ * directions — it intersects the ray from the camera through each fragment
+ * against a sphere of `radius` and a ground disk at `-height`, both fixed at the
+ * world origin — so sliding the shell changes which fragment a pixel lands on
+ * but not the direction it samples. The horizon stays where the sky's own
+ * transform puts it; only the surface carrying it follows.
+ */
+function SkyFollowsCamera() {
+  const scene = useThree((s) => s.scene);
+  const mesh = useRef<Mesh | null>(null);
+  const tries = useRef(0);
+
+  useFrame(({ camera }) => {
+    if (mesh.current) {
+      mesh.current.position.copy(camera.position);
+      return;
+    }
+    // Mounts a frame or two after this does — looked for over the first second
+    // and then given up on, exactly as SkyBrightness does.
+    if (tries.current > 90) return;
+    tries.current += 1;
+
+    scene.traverse((o) => {
+      if (mesh.current) return;
+      const mat = (o as Mesh).material as ShaderMaterial | undefined;
+      // Same identification as SkyBrightness: by uniforms, since the class and
+      // the name are drei's and neither is stable.
+      if (mat?.uniforms?.radius && mat.uniforms.height && mat.uniforms.map) {
+        mesh.current = o as Mesh;
+      }
+    });
+  });
+
+  return null;
+}
+
 function SkyBrightness({ value }: { value: number }) {
   const scene = useThree((s) => s.scene);
   const material = useRef<ShaderMaterial | null>(null);
@@ -252,7 +310,13 @@ export function SceneWorld({
       ground: {
         height: GROUND.height + (texture?.position[2] ?? 0),
         radius: GROUND.radius * spread,
-        scale: GROUND.scale * spread,
+        /* NOT scaled by `spread`. The sky's scale means "how far the projection
+           reaches", which is `radius`; multiplying the shell by it as well shrank
+           the only thing keeping the camera inside the backdrop, so scaling a sky
+           down was enough to put the viewport outside it and lose the sky
+           altogether. A shrunken shell also starts occluding objects standing
+           further out than it reaches. */
+        scale: GROUND.scale,
       },
     };
   }, [scene.objects]);
@@ -274,6 +338,7 @@ export function SceneWorld({
       {/* Sky Brightness has to be applied by hand — see SkyBrightness. Keyed on
           the file because it finds the dome mesh once: a new sky is a new mesh. */}
       {sky.files && <SkyBrightness key={`brightness:${sky.files}`} value={sky.brightness} />}
+      {sky.files && <SkyFollowsCamera key={`follow:${sky.files}`} />}
 
       {/* KEYED ON THE FILE. drei picks its loader from the extension at mount
           (RGBELoader for .hdr, a gainmap decoder for .jpg — see useEnvironment),
@@ -408,6 +473,14 @@ export interface VolumeEdit {
   /** Which handle set is armed, from the inspector's active setting. Omit to
    *  leave the box bare — a space you are only looking at grows no grips. */
   gizmo?: VolumeGizmo;
+  /**
+   * The space the handles go on, when it is not the focused one.
+   *
+   * SAB's area is edited from its own bar without being focused: focusing a
+   * space brings its title, toolbar and inspector, which is the whole Space
+   * editor over a chat that only wanted the room a little bigger.
+   */
+  volumeId?: string;
 }
 
 interface SceneCanvasProps {
@@ -429,6 +502,13 @@ interface SceneCanvasProps {
   onSpan?: (metres: number) => void;
   /** define mode + the resize handles. Omit for a read-only box. */
   volumeEdit?: VolumeEdit;
+  /** The space whose sides are named on the floor — SAB's area, while the
+   *  chat is open. See `sideLabels` on VolumeBox. */
+  labelVolumeId?: string | null;
+  /** Draw the ground grid — 1 m cells, a heavier line every 5 m. */
+  showGrid?: boolean;
+  /** Draw the world axes at the origin, labelled X / Y / Z. */
+  showAxes?: boolean;
   /**
    * Extra px the orientation cube steps left, away from the right edge.
    *
@@ -1810,11 +1890,18 @@ export function SceneCanvas({
   onOrbit,
   onSpan,
   volumeEdit,
+  labelVolumeId,
+  showGrid = false,
+  showAxes = false,
   substitute,
   gizmoInset = 0,
   locked = false,
 }: SceneCanvasProps) {
   const [meshes, setMeshes] = useState<Record<string, Object3D>>({});
+  /** The space the handles go on: a named one (SAB's area), else the focused. */
+  const editVolume = volumeEdit?.volumeId
+    ? scene.volumes.find((v) => v.id === volumeEdit.volumeId) ?? null
+    : scene.selectedVolume;
 
   // Auto-orbit around the focused object. Held off until FocusRig's fly-in has
   // landed (otherwise the spin fights the lerp), and paused while the transform
@@ -2077,6 +2164,12 @@ export function SceneCanvas({
         />
       )}
 
+      {/* Viewport helpers. Drawn here, not in SceneWorld, for the same reason
+          as the volumes below: SceneWorld also renders captured frames, and a
+          grid across a dataset image is a picture of the tool. */}
+      {showGrid && <GroundGrid />}
+      {showAxes && <WorldAxes />}
+
       {/* The volumes, and the affordances that change them.
           Drawn AFTER the world so their translucent faces composite over the
           objects inside rather than being written into the depth buffer in
@@ -2089,7 +2182,9 @@ export function SceneCanvas({
         <VolumeBox
           key={v.id}
           volume={v}
-          selected={v.id === scene.selectedVolumeId}
+          selected={v.id === scene.selectedVolumeId || v.id === editVolume?.id}
+          sideLabels={v.id === labelVolumeId}
+          highlight={v.id === labelVolumeId}
           onSelect={() => !locked && scene.selectVolume(v.id)}
           /* Only the SELECTED object lights a face. Every object pressed to a
              wall lighting one at once would be a room outlined in amber, which
@@ -2104,9 +2199,9 @@ export function SceneCanvas({
       {/* Handles belong to the FOCUSED space. A box you can see but haven't
           picked up is scenery; growing grips on it would be nine invitations to
           resize something you were only looking at. */}
-      {volumeEdit?.gizmo && !volumeEdit.drawing && scene.selectedVolume && (
+      {volumeEdit?.gizmo && !volumeEdit.drawing && editVolume && (
         <VolumeHandles
-          volume={scene.selectedVolume}
+          volume={editVolume}
           gizmo={volumeEdit.gizmo}
           onResize={volumeEdit.onResize}
           onDragging={volumeEdit.onDragging}
@@ -2115,10 +2210,10 @@ export function SceneCanvas({
       {/* Move is the editor's own transform gizmo, not a handle set of the
           room's own. Keyed on the volume so a different room gets a fresh
           proxy rather than one that starts at the last room's centre. */}
-      {volumeEdit?.gizmo === "move" && !volumeEdit.drawing && scene.selectedVolume && (
+      {volumeEdit?.gizmo === "move" && !volumeEdit.drawing && editVolume && (
         <VolumeMoveGizmo
-          key={scene.selectedVolume.id}
-          volume={scene.selectedVolume}
+          key={editVolume.id}
+          volume={editVolume}
           onResize={volumeEdit.onResize}
         />
       )}
@@ -2260,5 +2355,73 @@ function OrientationGizmo({
           gizmo's HUD store doesn't expose — the controls carry both. */}
       <ViewCube controlsRef={controlsRef} />
     </GizmoHelper>
+  );
+}
+
+/* ---------------------------------------------------- viewport helpers -- */
+
+/**
+ * THE GROUND GRID — 1 m cells with a heavier line every 5 m, out to the
+ * horizon and fading there.
+ *
+ * A whisker above the floor so it does not z-fight the ground projection, and
+ * cool grey-blue rather than white: over a sunlit HDRI ground white lines read
+ * as part of the photograph, and the grid has to read as the tool's.
+ */
+function GroundGrid() {
+  return (
+    <Grid
+      position={[0, 0.002, 0]}
+      args={[10, 10]}
+      infiniteGrid
+      cellSize={1}
+      cellThickness={0.6}
+      cellColor="#a9bdd2"
+      sectionSize={5}
+      sectionThickness={1.1}
+      sectionColor="#d3e0ee"
+      fadeDistance={90}
+      fadeStrength={1.2}
+      followCamera={false}
+      raycast={() => null}
+    />
+  );
+}
+
+/** How far each world axis is drawn from the origin, metres. */
+const AXIS_LENGTH = 6;
+
+/**
+ * THE WORLD AXES — X, Y and Z from the origin, in the same red / green / blue
+ * the transform gizmo uses, so "X" means the same arrow everywhere. Labelled
+ * at the far end because a coloured line alone is a key you have to remember.
+ */
+function WorldAxes() {
+  const axes = [
+    ["X", AXIS.X.css, [AXIS_LENGTH, 0, 0]],
+    ["Y", AXIS.Y.css, [0, AXIS_LENGTH, 0]],
+    ["Z", AXIS.Z.css, [0, 0, AXIS_LENGTH]],
+  ] as const;
+  return (
+    <group>
+      {axes.map(([name, color, end]) => (
+        <group key={name}>
+          <Line
+            points={[[0, 0.004, 0], [end[0], end[1] + 0.004, end[2]]]}
+            color={color}
+            lineWidth={2}
+            raycast={() => null}
+          />
+          <Html position={end as unknown as [number, number, number]} center style={{ pointerEvents: "none" }}>
+            <span
+              data-ui={`world-axis-${name.toLowerCase()}`}
+              style={{ color, fontWeight: 700, fontSize: 15, textShadow: "0 1px 3px rgba(0,0,0,0.6)" }}
+            >
+              {name}
+            </span>
+          </Html>
+        </group>
+      ))}
+    </group>
   );
 }

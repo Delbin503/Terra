@@ -145,6 +145,10 @@ import {
   Eraser,
   MousePointerClick,
   Minus,
+  Grid3x3,
+  Axis3d,
+  ThumbsDown,
+  ArrowUp,
   type LucideIcon,
 } from "lucide-react";
 import { TerraCredit } from "./terra-credit";
@@ -291,6 +295,16 @@ export const iconRegistry = {
   "gizmo-focus": Focus,
   "gizmo-reset": Orbit,
   "gizmo-save": Save,
+  /** viewport helpers — the ground grid, the world axes, back to the start view */
+  "view-grid": Grid3x3,
+  "view-axes": Axis3d,
+  "view-reset": RotateCcw,
+  /** chat reply feedback */
+  dislike: ThumbsDown,
+  /** a composer's send, Gemini-style: an arrow in a circle */
+  "send-up": ArrowUp,
+  /** look before you build — 3D Generate's Preview */
+  scan: ScanSearch,
   /** the turntable capture pass */
   capture: Orbit,
 

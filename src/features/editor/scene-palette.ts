@@ -153,6 +153,15 @@ export const VOLUME = {
   contact: "#ffd84d",
   /** the rectangle being dragged out in define mode */
   draft: "#8983ea",
+  /**
+   * SAB's area, while the chat is open — lit in the brand orange the moment the
+   * chat opens, as staging does, so the room the agent will build in is the
+   * first thing you see rather than a grey outline you have to go looking for.
+   * It shares the hue with the capture rig; the two are told apart by shape
+   * (a floor footprint against a camera on a mast), and the side labels.
+   */
+  sabEdge: "#f36f16",
+  sabFloor: "#f36f16",
 } as const;
 
 /**

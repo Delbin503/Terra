@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, useId, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
 import { Meter } from "@/components/ui";
@@ -695,19 +695,52 @@ export function PermissionCardView({
 /** Working indicator: a shimmer bar for "reading", dots for "still going". */
 export function Thinking() {
   return (
-    <div data-ui="ai-thinking" className="flex items-center gap-2 py-0.5">
-      <div className="relative h-1.5 w-24 overflow-hidden rounded-full bg-glass/12">
-        <div className="absolute inset-y-0 w-1/2 animate-shimmer rounded-full bg-gradient-to-r from-transparent via-brand/70 to-transparent" />
-      </div>
-      <div className="flex gap-1">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="h-1 w-1 animate-thinking-dot rounded-full bg-content-subtle"
-            style={{ animationDelay: `${i * 140}ms` }}
-          />
-        ))}
-      </div>
+    <div data-ui="ai-thinking" className="flex items-center gap-3 py-0.5">
+      <SabMark size={20} working />
+      <span className="type-body animate-pulse text-content-muted">Thinking…</span>
     </div>
+  );
+}
+
+/**
+ * SAB'S MARK — a four-point sparkle in the brand gradient, beside every reply.
+ *
+ * Gemini's answer to "who is talking" is a mark, not a bubble: the replies are
+ * plain prose, so the eye needs one consistent thing at the start of each to
+ * find where the agent began. Amber to brand orange to violet, so it reads as
+ * Terra's rather than as a borrowed blue. `working` turns it slowly while a
+ * reply is being drafted — the same mark, alive, instead of a separate spinner.
+ */
+export function SabMark({
+  size = 20,
+  working = false,
+  className,
+}: {
+  size?: number;
+  working?: boolean;
+  className?: string;
+}) {
+  const id = useId();
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      aria-hidden
+      data-ui="ai-sab-mark"
+      className={cn("shrink-0", working && "animate-[spin_2.4s_linear_infinite]", className)}
+    >
+      <defs>
+        <linearGradient id={id} x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#ffb347" />
+          <stop offset="0.5" stopColor="#f36f16" />
+          <stop offset="1" stopColor="#c86bfa" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M12 1.5c.6 5.6 4.9 9.9 10.5 10.5-5.6.6-9.9 4.9-10.5 10.5-.6-5.6-4.9-9.9-10.5-10.5C7.1 11.4 11.4 7.1 12 1.5Z"
+        fill={`url(#${id})`}
+      />
+    </svg>
   );
 }

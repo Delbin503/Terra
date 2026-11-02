@@ -74,14 +74,6 @@ function BackgroundEditor({ order, store, assets, onBrowseLibrary }: EditorProps
 
   return (
     <div data-ui="terragen-editor-background">
-      <Cost>
-        {b.picks.length === 0
-          ? b.baseLabel
-            ? `Every frame keeps ${b.baseLabel}. Add a sky to render the run under another one too.`
-            : "No environment is placed, and none has been added."
-          : `${count} environment${count === 1 ? "" : "s"} — one subset each`}
-      </Cost>
-
       <Group title="In scene">
         {b.baseLabel ? (
           <InSceneChip label={b.baseLabel} />
@@ -252,12 +244,6 @@ function ArrangementEditor({ order, store, scene }: EditorProps) {
 
   return (
     <div data-ui="terragen-editor-arrangement">
-      <Cost>
-        {l.on
-          ? `${l.count} arrangements — one subset each`
-          : "One arrangement — the scene exactly as you posed it. Ask for two or more to sweep."}
-      </Cost>
-
       {/* ---------------------------------------------------------- the space */}
       <Group title="Space">
         {v ? (
@@ -324,9 +310,6 @@ function ArrangementEditor({ order, store, scene }: EditorProps) {
             <Icon name="seed" size={16} />
           </button>
         </div>
-        <p className="type-caption mt-1.5 text-content-subtle">
-          Write it down and this exact set of rooms comes back — here, and on the render farm.
-        </p>
       </Group>
 
       {/* ---------------------------------------------------------- preview */}
@@ -377,11 +360,6 @@ function ArrangementEditor({ order, store, scene }: EditorProps) {
             <span className="type-numeric text-content">{seedFor(l.seed, applied)}</span>
           </p>
         )}
-
-        <p className="type-caption mt-1.5 text-content-subtle">
-          Clicking one rearranges the scene so you can look at it. Undo puts it back; the run
-          rebuilds every arrangement from the seed regardless.
-        </p>
       </Group>
     </div>
   );
