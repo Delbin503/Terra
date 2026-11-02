@@ -1,4 +1,5 @@
 import {
+  BoxGeometry,
   Euler,
   Matrix4,
   Object3D,
@@ -72,13 +73,28 @@ interface GizmoRoot extends Object3D {
   gizmo: Record<string, Object3D>;
   picker: Record<string, Object3D>;
 }
+type Pointer = { x: number; y: number; button: number };
 interface Controls extends Object3D {
   gizmo?: GizmoRoot;
   _gizmo?: GizmoRoot;
   dragging: boolean;
   axis: string | null;
   mode: "translate" | "rotate" | "scale";
+  object?: Object3D;
+  scaleStart: Vector3;
+  scaleSnap: number | null;
+  changeEvent: { type: string };
+  objectChangeEvent: { type: string };
+  pointerDown: (p: Pointer) => void;
+  pointerMove: (p: Pointer) => void;
 }
+
+/** The one uniform-scale handle. Stock ships three (XYZX/XYZY/XYZZ) at the
+ *  arrow tips; we keep XYZX, move it to the centre, and switch the other two off. */
+const UNIFORM = "XYZX";
+/** How fast the centre handle scales: one NDC unit of drag (half the viewport)
+ *  multiplies the size by 2^this. */
+const UNIFORM_RATE = 1.5;
 
 const PLANES = ["XY", "YZ", "XZ"] as const;
 type PlaneName = (typeof PLANES)[number];
@@ -164,9 +180,13 @@ function restyleScale(group: Object3D) {
     } else if (isPlane(n)) {
       if (h.isLine) markHidden(h);
       else setMaterial(h, AXIS_COLOR[PLANE_XFORM[n].normal], 0.5);
-    } else if (n === "XYZX" || n === "XYZY" || n === "XYZZ") {
-      // The three uniform-scale nubs — keep them neutral so they read as one control.
-      setMaterial(h, 0xffffff, 0.5);
+    } else if (n === UNIFORM) {
+      // One white box at the centre scales everything together.
+      h.geometry.dispose();
+      h.geometry = new BoxGeometry(CENTER_SIZE, CENTER_SIZE, CENTER_SIZE);
+      setMaterial(h, 0xffffff, 0.6);
+    } else if (n === "XYZY" || n === "XYZZ") {
+      markHidden(h);
     }
   }
 }
@@ -195,6 +215,53 @@ export function applyUnrealGizmoSkin(controlsRaw: unknown, camera: Camera): () =
       p.geometry = new PlaneGeometry(CENTER_SIZE * 1.6, CENTER_SIZE * 1.6);
     }
   }
+  // Scale: the uniform hit area follows its box to the centre; the two dropped
+  // tip handles get empty geometry so nothing out at the tips can be grabbed.
+  for (const p of root.picker.scale.children as Handle[]) {
+    if (p.name === UNIFORM) {
+      p.geometry.dispose();
+      p.geometry = new BoxGeometry(CENTER_SIZE * 1.6, CENTER_SIZE * 1.6, CENTER_SIZE * 1.6);
+    } else if (p.name === "XYZY" || p.name === "XYZZ") {
+      p.geometry.dispose();
+      p.geometry = new BoxGeometry(0, 0, 0);
+    }
+  }
+
+  // The stock uniform drag scales by (distance from centre now) / (distance at
+  // press). Pressed AT the centre, that start distance is ~0 and the object
+  // would jump. So the centre box scales by screen travel instead: drag up or
+  // right to grow, down or left to shrink.
+  const origDown = controls.pointerDown;
+  const origMove = controls.pointerMove;
+  const start = { x: 0, y: 0 };
+  const isUniformDrag = () => controls.mode === "scale" && controls.axis === UNIFORM;
+  controls.pointerDown = (p) => {
+    origDown(p);
+    if (controls.dragging && isUniformDrag()) {
+      start.x = p.x;
+      start.y = p.y;
+    }
+  };
+  controls.pointerMove = (p) => {
+    const object = controls.object;
+    if (!isUniformDrag() || !controls.dragging || !object || p.button !== -1) {
+      origMove(p);
+      return;
+    }
+    const k = Math.pow(2, (p.x - start.x + (p.y - start.y)) * UNIFORM_RATE);
+    object.scale.copy(controls.scaleStart).multiplyScalar(k);
+    const snap = controls.scaleSnap;
+    if (snap) {
+      object.scale.set(
+        Math.round(object.scale.x / snap) * snap || snap,
+        Math.round(object.scale.y / snap) * snap || snap,
+        Math.round(object.scale.z / snap) * snap || snap
+      );
+    }
+    object.updateMatrixWorld();
+    controls.dispatchEvent(controls.changeEvent as never);
+    controls.dispatchEvent(controls.objectChangeEvent as never);
+  };
 
   // update() rewrites visibility and orientation for every handle each frame,
   // so these overrides must run after it — not on a React tick.
@@ -218,6 +285,8 @@ export function applyUnrealGizmoSkin(controlsRaw: unknown, camera: Camera): () =
 
   return () => {
     root.updateMatrixWorld = original;
+    controls.pointerDown = origDown;
+    controls.pointerMove = origMove;
   };
 }
 

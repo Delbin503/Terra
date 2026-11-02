@@ -410,7 +410,9 @@ export function SettingControl({
           </div>
         ) : setting === "rotation" && !isCamera ? (
           <div className="flex flex-col gap-2">
-            {AXES.map((a, i) => (
+            {/* Z on top: the spin you reach for most sits first. Indices stay
+                tied to their axis, so only the row order changes. */}
+            {AXES.map((a, i) => [a, i] as const).reverse().map(([a, i]) => (
               <AxisSlider
                 key={a}
                 axis={a}

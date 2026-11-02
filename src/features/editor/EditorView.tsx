@@ -7,6 +7,7 @@ import {
 } from "./SceneCanvas";
 import { GlassBar } from "@/components/glass";
 import { Icon } from "@/components/icons";
+import { cn } from "@/lib/utils";
 import { EditorTopBar } from "./EditorTopBar";
 import { EditorToolBar, type ToolId, type FlyoutAction } from "./EditorToolBar";
 import { EditorActions } from "./EditorActions";
@@ -16,7 +17,7 @@ import { MatPreviewPanel, type MatPreview } from "./MatPreviewPanel";
 import { EditorToast } from "./EditorToast";
 import { ExitProjectDialog } from "./ExitProjectDialog";
 import { MatPreviewView } from "./MatPreviewView";
-import { AiAgentPanel } from "./AiAgentPanel";
+import { AiAgentPanel, type SabSceneActivity } from "./AiAgentPanel";
 import {
   VOLUME_GIZMO,
   VolumeInspectorPanel,
@@ -201,6 +202,8 @@ export function EditorView({
   const [gen3dOpen, setGen3dOpen] = useState(false);
   const [matOpen, setMatOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+  /** What SAB is adding to the scene right now — the bottom-left loader. */
+  const [sabActivity, setSabActivity] = useState<SabSceneActivity | null>(null);
   /**
    * Define mode: the next drag on the ground draws a footprint.
    *
@@ -1413,8 +1416,30 @@ export function EditorView({
 
         {/* One corner, one shape, one at a time — the newest wins. Stacking
             them would push the oldest up over the object toolbar, and three
-            cards about three finished jobs is a log, not a notification. */}
-        {matToast ? (
+            cards about three finished jobs is a log, not a notification.
+            SAB's loader goes first: it is the one thing still happening. */}
+        {agentOpen && sabActivity ? (
+          <div
+            data-ui="sab-scene-loading"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className={cn(
+              "pointer-events-none absolute left-6 z-30",
+              tool === "assets" ? "bottom-[calc(3rem+clamp(260px,40vh,392px))]" : "bottom-6"
+            )}
+          >
+            <div className="flex max-w-sm items-center gap-3 rounded-2xl border border-white/20 bg-black/90 px-5 py-3 text-white shadow-pop backdrop-blur-md">
+              <Icon name="spinner" size={20} className="shrink-0 animate-spin text-brand" />
+              <div>
+                <p className="type-body-strong">{sabActivity.label}</p>
+                {sabActivity.detail && (
+                  <p className="type-caption text-white/70">{sabActivity.detail}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : matToast ? (
           <EditorToast
             ui="mat-preview-toast"
             icon="mat"
@@ -1635,6 +1660,7 @@ export function EditorView({
                 setGen3dOpen(true);
               }}
               areaId={sabArea?.id ?? null}
+              onSceneActivity={setSabActivity}
             />
           )}
         </PanelDock>

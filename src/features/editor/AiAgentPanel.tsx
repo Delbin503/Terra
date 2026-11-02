@@ -102,6 +102,11 @@ function darken(hex: string): string {
  *  request — typing it verbatim builds the room it describes. */
 const SPACE_PROMPT = "Add in door, chair, two people and a car in this confined space";
 
+/** What SAB is doing to the scene right now, shown by the editor as a loader. */
+export type SabSceneActivity = { label: string; detail?: string };
+/** How long each change holds on the loader before the next one starts. */
+const CHANGE_MS = 500;
+
 export function AiAgentPanel({
   scene,
   store,
@@ -111,6 +116,7 @@ export function AiAgentPanel({
   onOpenGenerate3D,
   initialPrompt = "",
   areaId = null,
+  onSceneActivity,
 }: {
   scene: SceneApi;
   /** the asset library — the chatbot pulls objects from it in the add flow */
@@ -134,6 +140,8 @@ export function AiAgentPanel({
    * viewport is the more specific thing to have said.
    */
   areaId?: string | null;
+  /** Raised while SAB is adding to the scene; null once it is done. */
+  onSceneActivity?: (activity: SabSceneActivity | null) => void;
 }) {
   const { account } = useSettings();
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -163,6 +171,36 @@ export function AiAgentPanel({
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const timers = useRef<number[]>([]);
+  const activityRef = useRef(onSceneActivity);
+  activityRef.current = onSceneActivity;
+
+  /**
+   * ADDING TO THE SCENE TAKES A BEAT, AND THE EDITOR SAYS SO.
+   *
+   * Counts "Change 1 of N" up to N on the editor's loader, then does the work.
+   * One change per object, the way the live SAB counts its scene commands.
+   * The steps ride on `timers`, so leaving the chat or closing the panel
+   * cancels them — and both of those clear the loader too.
+   */
+  const withAdding = (total: number, work: () => void) => {
+    const n = Math.max(1, total);
+    setBusy(true);
+    for (let i = 0; i < n; i++) {
+      timers.current.push(
+        window.setTimeout(() => {
+          activityRef.current?.({ label: "Adding objects…", detail: `Change ${i + 1} of ${n}` });
+        }, i * CHANGE_MS)
+      );
+    }
+    timers.current.push(
+      window.setTimeout(() => {
+        work();
+        activityRef.current?.(null);
+        setBusy(false);
+      }, n * CHANGE_MS)
+    );
+  };
+  const placeAsset = (asset: Asset) => withAdding(1, () => onPlaceAsset(asset));
   const ids = useRef(0);
   const nextId = () => `t${(ids.current += 1)}`;
   /** script ref → the turn id it was given when it was added */
@@ -225,7 +263,10 @@ export function AiAgentPanel({
 
   useEffect(() => {
     inputRef.current?.focus();
-    return () => timers.current.forEach((t) => window.clearTimeout(t));
+    return () => {
+      timers.current.forEach((t) => window.clearTimeout(t));
+      activityRef.current?.(null);
+    };
   }, []);
 
   useEffect(() => {
@@ -305,6 +346,7 @@ export function AiAgentPanel({
   const leaveChat = () => {
     timers.current.forEach((t) => window.clearTimeout(t));
     timers.current = [];
+    activityRef.current?.(null);
     setBusy(false);
   };
   const openChat = (id: string) => {
@@ -397,6 +439,14 @@ export function AiAgentPanel({
     if (requests.length === 0) return false;
 
     const matches = matchSpawn(requests, store.assets);
+    const total = matches.reduce((sum, m) => sum + m.count, 0);
+    withAdding(total, () => build(matches, volume));
+    return true;
+  };
+
+  const build = (matches: ReturnType<typeof matchSpawn>, volume: NonNullable<typeof armedVolume>) => {
+    // The scene as it is NOW, after the loader — not as it was at send.
+    const scene = sceneRef.current;
     const before = scene.objects.map((o) => o.id);
 
     // Place first, arrange second. Every object needs an id before the solver
@@ -446,6 +496,7 @@ export function AiAgentPanel({
     const summary = `Placed ${created.length} ${created.length === 1 ? "object" : "objects"} in ${volume.name}`;
 
     applyOps([
+      { op: "drop-thinking" },
       {
         op: "add",
         turn: {
@@ -475,7 +526,6 @@ export function AiAgentPanel({
         },
       },
     ]);
-    return true;
   };
 
   const send = (raw?: string) => {
@@ -513,12 +563,9 @@ export function AiAgentPanel({
      * one there is nowhere to put anything and the ordinary flow is right.
      */
     if (armedVolume) {
-      run([{ after: 0, ops: [{ op: "add", turn: { role: "thinking" } }] }]);
-      const built = spawnIntoSpace(text);
-      if (built) {
-        applyOps([{ op: "drop-thinking" }]);
-        return;
-      }
+      applyOps([{ op: "add", turn: { role: "thinking" } }]);
+      // A spawn keeps "thinking" up behind the loader and drops it itself.
+      if (spawnIntoSpace(text)) return;
       applyOps([{ op: "drop-thinking" }]);
     }
 
@@ -869,7 +916,7 @@ export function AiAgentPanel({
                 onUndo={() => undo(turn.id)}
                 onDecide={decide}
                 onRetry={send}
-                onPlaceAsset={onPlaceAsset}
+                onPlaceAsset={placeAsset}
                 onOpenGenerate3D={onOpenGenerate3D}
               />
             ))}
