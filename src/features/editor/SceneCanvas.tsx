@@ -451,6 +451,16 @@ export interface CameraHandle {
    * the grips inside the canvas already use on `state.controls`.
    */
   setOrbit: (enabled: boolean) => void;
+  /**
+   * The view as the user sees it, as a picture — the world only.
+   *
+   * For one shutter (two frames) the viewport stops drawing everything that is
+   * the editor rather than the scene: grid, axes, spaces, gizmos, rig guides,
+   * the view cube, the selection outline and the capture rigs. That frame is
+   * read back and the aids return. Captured from THIS canvas, not a second
+   * one, so it is exactly the lens, sky and exposure on screen. MAT uses it.
+   */
+  capture: () => Promise<string>;
 }
 
 /**
@@ -608,7 +618,13 @@ function ViewProbe({
 }
 
 /** Captures the live camera + canvas element so the DOM drop handler can raycast. */
-function CameraGrabber({ cameraRef }: { cameraRef: React.MutableRefObject<CameraHandle | null> }) {
+function CameraGrabber({
+  cameraRef,
+  capture,
+}: {
+  cameraRef: React.MutableRefObject<CameraHandle | null>;
+  capture: () => Promise<string>;
+}) {
   const { camera, gl } = useThree();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controls = useThree((s) => s.controls as any);
@@ -619,8 +635,31 @@ function CameraGrabber({ cameraRef }: { cameraRef: React.MutableRefObject<Camera
       setOrbit: (enabled: boolean) => {
         if (controls) controls.enabled = enabled;
       },
+      capture,
     };
-  }, [camera, gl, controls, cameraRef]);
+  }, [camera, gl, controls, cameraRef, capture]);
+  return null;
+}
+
+/** Frames held clean before the shutter: one for React to drop the aids, one
+ *  for the GPU to draw the frame without them. */
+const SHUTTER_FRAMES = 2;
+
+/** Reads one clean frame while `active`; see CameraHandle.capture. */
+function PureShutter({ active, onShot }: { active: boolean; onShot: (url: string) => void }) {
+  const { gl, scene, camera } = useThree();
+  const frames = useRef(0);
+  useEffect(() => {
+    frames.current = 0;
+  }, [active]);
+  useFrame(() => {
+    if (!active || ++frames.current < SHUTTER_FRAMES) return;
+    frames.current = -1e9; // once per activation
+    // Render and read in the same task — the drawing buffer is only certain
+    // to hold this picture until the next composite.
+    gl.render(scene, camera);
+    onShot(gl.domElement.toDataURL("image/png"));
+  });
   return null;
 }
 
@@ -1859,6 +1898,7 @@ function RigHandles({
         ]}
         center
         distanceFactor={10}
+        zIndexRange={[20, 0]}
         style={{ pointerEvents: "none", transform: "translateX(38px)" }}
       >
         <span
@@ -1898,6 +1938,22 @@ export function SceneCanvas({
   locked = false,
 }: SceneCanvasProps) {
   const [meshes, setMeshes] = useState<Record<string, Object3D>>({});
+  /** True for the shutter of a capture: the editor's aids stand down. */
+  const [pure, setPure] = useState(false);
+  const shotWaiting = useRef<((url: string) => void) | null>(null);
+  const capture = useCallback(
+    () =>
+      new Promise<string>((resolve) => {
+        shotWaiting.current = resolve;
+        setPure(true);
+      }),
+    []
+  );
+  const onShot = useCallback((url: string) => {
+    shotWaiting.current?.(url);
+    shotWaiting.current = null;
+    setPure(false);
+  }, []);
   /** The space the handles go on: a named one (SAB's area), else the focused. */
   const editVolume = volumeEdit?.volumeId
     ? scene.volumes.find((v) => v.id === volumeEdit.volumeId) ?? null
@@ -2123,13 +2179,18 @@ export function SceneCanvas({
         if (!suppressPick.current && !locked) scene.select(null);
       }}
     >
-      <CameraGrabber cameraRef={cameraRef} />
+      <CameraGrabber cameraRef={cameraRef} capture={capture} />
+      <PureShutter active={pure} onShot={onShot} />
 
+      {/* During a capture's shutter (`pure`) everything below that is the
+          editor rather than the scene stands down: no outline, no rigs, no
+          grid, axes, spaces, gizmos, guides or cube. */}
       <SceneWorld
         scene={scene}
         register={register}
-        selectedId={scene.selectedId}
-        litIds={litIds}
+        selectedId={pure ? null : scene.selectedId}
+        litIds={pure ? undefined : litIds}
+        hideCameras={pure}
         substitute={substitute?.object ?? null}
         onSelect={pick}
         hideIds={guideHides}
@@ -2139,7 +2200,7 @@ export function SceneCanvas({
       {/* A selected group gets the same three transforms a mesh gets. Locked
           stops it, as it stops a mesh: the lock is the one flag that means
           "listed, selectable, and not to be moved". */}
-      {selectedGroup && showGizmo && !selectedGroup.locked && (
+      {!pure && selectedGroup && showGizmo && !selectedGroup.locked && (
         <GroupGizmo
           key={selectedGroup.id}
           group={selectedGroup}
@@ -2154,7 +2215,7 @@ export function SceneCanvas({
           something. Hidden is excluded as well as locked, because a sky that
           is switched off is not rendering the horizon the handles would be
           moving. */}
-      {selectedSky && showGizmo && !selectedSky.locked && !selectedSky.hidden && (
+      {!pure && selectedSky && showGizmo && !selectedSky.locked && !selectedSky.hidden && (
         <SkyGizmo
           key={selectedSky.id}
           object={selectedSky}
@@ -2167,8 +2228,8 @@ export function SceneCanvas({
       {/* Viewport helpers. Drawn here, not in SceneWorld, for the same reason
           as the volumes below: SceneWorld also renders captured frames, and a
           grid across a dataset image is a picture of the tool. */}
-      {showGrid && <GroundGrid />}
-      {showAxes && <WorldAxes />}
+      {!pure && showGrid && <GroundGrid />}
+      {!pure && showAxes && <WorldAxes />}
 
       {/* The volumes, and the affordances that change them.
           Drawn AFTER the world so their translucent faces composite over the
@@ -2178,7 +2239,7 @@ export function SceneCanvas({
           with a violet box across it would be a picture of the tool. */}
       {/* Not drawn from inside a camera: a space is an editing aid, and a
           violet box across the lens is not what the camera photographs. */}
-      {scene.volumes.map((v) => (
+      {!pure && scene.volumes.map((v) => (
         <VolumeBox
           key={v.id}
           volume={v}
@@ -2199,7 +2260,7 @@ export function SceneCanvas({
       {/* Handles belong to the FOCUSED space. A box you can see but haven't
           picked up is scenery; growing grips on it would be nine invitations to
           resize something you were only looking at. */}
-      {volumeEdit?.gizmo && !volumeEdit.drawing && editVolume && (
+      {!pure && volumeEdit?.gizmo && !volumeEdit.drawing && editVolume && (
         <VolumeHandles
           volume={editVolume}
           gizmo={volumeEdit.gizmo}
@@ -2210,7 +2271,7 @@ export function SceneCanvas({
       {/* Move is the editor's own transform gizmo, not a handle set of the
           room's own. Keyed on the volume so a different room gets a fresh
           proxy rather than one that starts at the last room's centre. */}
-      {volumeEdit?.gizmo === "move" && !volumeEdit.drawing && editVolume && (
+      {!pure && volumeEdit?.gizmo === "move" && !volumeEdit.drawing && editVolume && (
         <VolumeMoveGizmo
           key={editVolume.id}
           volume={editVolume}
@@ -2221,7 +2282,7 @@ export function SceneCanvas({
         <VolumeDraw onDone={volumeEdit.onDrawn} onCancel={volumeEdit.onCancelDraw} />
       )}
 
-      {gizmoOn && (
+      {!pure && gizmoOn && (
         <TransformControls
           ref={gizmoRef}
           object={selMesh}
@@ -2237,8 +2298,8 @@ export function SceneCanvas({
           }}
         />
       )}
-      {gizmoOn && <UnrealGizmoSkin key={`${scene.selectedId}-${gizmoMode}`} gizmoRef={gizmoRef} />}
-      {gizmoOn && <GizmoReadout gizmoRef={gizmoRef} />}
+      {!pure && gizmoOn && <UnrealGizmoSkin key={`${scene.selectedId}-${gizmoMode}`} gizmoRef={gizmoRef} />}
+      {!pure && gizmoOn && <GizmoReadout gizmoRef={gizmoRef} />}
 
       <OrbitControls
         ref={controlsRef}
@@ -2275,16 +2336,16 @@ export function SceneCanvas({
 
       {onViewChange && <ViewProbe controlsRef={controlsRef} onChange={onViewChange} />}
 
-      {cameraGuide?.kind === "distance" && <DistanceHalos guide={cameraGuide} />}
-      {cameraGuide?.kind === "shots" && <ShotMarkers guide={cameraGuide} />}
-      {cameraGuide?.kind === "rig" && onOrbit && onSpan && (
+      {!pure && cameraGuide?.kind === "distance" && <DistanceHalos guide={cameraGuide} />}
+      {!pure && cameraGuide?.kind === "shots" && <ShotMarkers guide={cameraGuide} />}
+      {!pure && cameraGuide?.kind === "rig" && onOrbit && onSpan && (
         <RigHandles guide={cameraGuide} onOrbit={onOrbit} onSpan={onSpan} />
       )}
-      {cameraGuide?.kind === "orbit" && onOrbit && (
+      {!pure && cameraGuide?.kind === "orbit" && onOrbit && (
         <OrbitRing guide={cameraGuide} onOrbit={onOrbit} />
       )}
 
-      <OrientationGizmo inset={gizmoInset} controlsRef={controlsRef} />
+      {!pure && <OrientationGizmo inset={gizmoInset} controlsRef={controlsRef} />}
     </Canvas>
   );
 }
@@ -2412,7 +2473,9 @@ function WorldAxes() {
             lineWidth={2}
             raycast={() => null}
           />
-          <Html position={end as unknown as [number, number, number]} center style={{ pointerEvents: "none" }}>
+          {/* Low z, like every other in-scene label: drei's default stacks the
+              letters over everything on the page, full-screen views included. */}
+          <Html position={end as unknown as [number, number, number]} center zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
             <span
               data-ui={`world-axis-${name.toLowerCase()}`}
               style={{ color, fontWeight: 700, fontSize: 15, textShadow: "0 1px 3px rgba(0,0,0,0.6)" }}

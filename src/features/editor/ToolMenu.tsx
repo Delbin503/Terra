@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/icons";
+import { DropdownLayer } from "@/components/glass";
 import { Panel, PanelBody } from "./ui";
 
 export interface ToolMenuItem<T extends string> {
@@ -46,7 +47,7 @@ export function ToolMenu<T extends string>({
   onClose: () => void;
 }) {
   return (
-    <>
+    <DropdownLayer>
       <div className="fixed inset-0 z-20" onClick={onClose} aria-hidden />
       <Panel
         ui="tool-menu"
@@ -117,6 +118,6 @@ export function ToolMenu<T extends string>({
           </div>
         </PanelBody>
       </Panel>
-    </>
+    </DropdownLayer>
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, type RefObject } from "react";
+import { isInDropdownOf } from "@/components/glass";
 
 /**
  * Close an open popover on outside pointerdown / Escape — the editor's shared
@@ -18,7 +19,8 @@ export function useDismissable(
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) cb.current();
+      // A menu portalled out of the wrapper (DropdownLayer) still counts as inside.
+      if (!ref.current?.contains(e.target as Node) && !isInDropdownOf(ref.current, e.target)) cb.current();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") cb.current();

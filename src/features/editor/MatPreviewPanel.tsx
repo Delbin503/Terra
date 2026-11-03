@@ -4,12 +4,13 @@ import { Button, Dialog, DialogContent, DialogTitle } from "@/components/ui";
 import { GlassPanel } from "@/components/glass";
 import { Icon } from "@/components/icons";
 import { Panel, PanelHeader, PanelTitle, PanelClose, PanelBody, PanelFooter } from "./ui";
-import { DockPanel } from "./panel-dock";
+import { DockPanel, type DockJob } from "./panel-dock";
 import { AssetThumb } from "./AssetThumb";
 import { PlaceholderImage } from "./PlaceholderImage";
-import type { Asset } from "./assets-data";
+import type { CameraHandle } from "./SceneCanvas";
+import { flatten, matPass } from "./mat-pass";
 
-/** MAT takes exactly one source image — it's a material preview of one thing. */
+/** MAT takes exactly one source frame — it's a preview of one view. */
 const MAX_IMAGES = 1;
 
 /** Simulated render time, in ms. */
@@ -27,17 +28,25 @@ export interface MatPreview {
   seed: number;
   postProcessed: boolean;
   sourceName: string;
+  /** the preview itself, built from the captured view */
+  src?: string;
 }
 
 interface SourceImage {
   seed: number;
   name: string;
+  /** the captured view, flattened onto the editor's backdrop */
+  src: string;
 }
 
 /**
  * MatPreviewPanel — the MAT tool, opened from the AI rail flyout.
  *
- * One image in, one preview out. The panel is deliberately smaller than the 3D
+ * One view in, one preview out. The source is not an upload: it is the view
+ * the user is looking at, captured as the pure scene — no panels, no gizmos,
+ * no cube (CameraHandle.capture) — because MAT is a pass over THIS world, and
+ * the question it answers is "what does the shot I have set up look like for
+ * real?". The panel is deliberately smaller than the 3D
  * Generate flow next to it in the flyout: MAT has a single input and a single
  * switch, so it gets a single screen with no minimise state and no prompt.
  *
@@ -47,18 +56,17 @@ interface SourceImage {
  * completion toast alone would disappear.
  */
 export function MatPreviewPanel({
-  incoming,
+  cameraRef,
   history,
   historyOpen,
   onToggleHistory,
   onOpenPreview,
   onClose,
   onComplete,
-  onPickFromLibrary,
-  onIncomingConsumed,
+  onJobChange,
 }: {
-  /** an asset chosen in the library's pick mode, waiting to become the source */
-  incoming: Asset | null;
+  /** the live viewport camera — whose view is captured */
+  cameraRef: React.MutableRefObject<CameraHandle | null>;
   /**
    * Every preview this project has produced, newest first.
    *
@@ -74,9 +82,8 @@ export function MatPreviewPanel({
   onOpenPreview: (preview: MatPreview) => void;
   onClose: () => void;
   onComplete: (preview: MatPreview) => void;
-  /** open the library as a chooser for the source image */
-  onPickFromLibrary: () => void;
-  onIncomingConsumed: () => void;
+  /** the running pass, for the editor's bottom-left activity card */
+  onJobChange?: (job: DockJob | null) => void;
 }) {
   const [image, setImage] = useState<SourceImage | null>(null);
   const [postProcess, setPostProcess] = useState(false);
@@ -88,9 +95,40 @@ export function MatPreviewPanel({
   const [previewOpen, setPreviewOpen] = useState(false);
 
   const seed = useRef(320);
-  const fileRef = useRef<HTMLInputElement>(null);
+  /** true while the viewport is taking the shot */
+  const [capture, setCapture] = useState(false);
+  const shots = useRef(0);
 
   const hasImage = image !== null;
+
+  const job: DockJob | null = busy
+    ? {
+        title: "Generating MAT preview",
+        hint: postProcess ? "Rendering with post-processing" : "Rendering the material",
+        progress,
+      }
+    : null;
+  // Reported to the editor's bottom-left corner, beside SAB's adds.
+  const jobCb = useRef(onJobChange);
+  jobCb.current = onJobChange;
+  useEffect(() => {
+    jobCb.current?.(job);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, progress, postProcess]);
+  useEffect(() => () => jobCb.current?.(null), []);
+
+  const captureView = async () => {
+    const cam = cameraRef.current;
+    if (!cam || capture) return;
+    setCapture(true);
+    try {
+      const src = await flatten(await cam.capture());
+      shots.current += 1;
+      setImage({ seed: (seed.current += 13), name: `View ${shots.current}`, src });
+    } finally {
+      setCapture(false);
+    }
+  };
 
   /* ------------------------------------------------------------------- job */
 
@@ -107,7 +145,12 @@ export function MatPreviewPanel({
       setProgress(Math.min(100, ((performance.now() - started) / DURATION) * 100));
     }, 80);
 
-    const finish = window.setTimeout(() => {
+    // The pass is built while the bar runs; the bar's end is when it lands.
+    let cancelled = false;
+    const result = matPass(image.src, postProcess);
+    const finish = window.setTimeout(async () => {
+      const src = await result.catch(() => undefined);
+      if (cancelled) return;
       setBusy(false);
       setProgress(100);
       onComplete({
@@ -115,10 +158,12 @@ export function MatPreviewPanel({
         seed: image.seed,
         postProcessed: postProcess,
         sourceName: image.name,
+        src,
       });
     }, DURATION);
 
     return () => {
+      cancelled = true;
       window.clearInterval(tick);
       window.clearTimeout(finish);
     };
@@ -128,23 +173,8 @@ export function MatPreviewPanel({
 
   /* --------------------------------------------------------------- actions */
 
-  // An asset picked in the library arrives as a prop, since the chooser is the
-  // library panel rather than anything this component owns. Its seed rides
-  // along so the slot shows that asset's real thumbnail.
-  useEffect(() => {
-    if (!incoming) return;
-    setImage({ seed: incoming.seed, name: incoming.name });
-    onIncomingConsumed();
-  }, [incoming, onIncomingConsumed]);
-
-  const handleFiles = (list: FileList | null) => {
-    const file = list?.[0];
-    if (!file) return;
-    setImage({ seed: (seed.current += 13), name: file.name });
-  };
-
-  // Dropping the image drops the switch with it: post-processing is a statement
-  // about an image, and leaving it armed for whatever gets uploaded next is a
+  // Dropping the view drops the switch with it: post-processing is a statement
+  // about a frame, and leaving it armed for whatever gets captured next is a
   // setting the user never made.
   const clearImage = () => {
     setImage(null);
@@ -155,18 +185,6 @@ export function MatPreviewPanel({
 
   return (
     <>
-      <input
-        ref={fileRef}
-        type="file"
-        hidden
-        accept="image/*"
-        data-ui="mat-image-input"
-        onChange={(e) => {
-          handleFiles(e.target.files);
-          e.target.value = "";
-        }}
-      />
-
       <DockPanel
         ui="mat-preview"
         title="MAT Preview"
@@ -174,15 +192,13 @@ export function MatPreviewPanel({
         /* Both generate flows are forms: opening one with its primary button
            below the fold makes the first act after opening it a scroll. */
         fitContent
-        job={
-          busy
-            ? {
-                title: "Generating MAT preview",
-                hint: postProcess ? "Rendering with post-processing" : "Rendering the material",
-                progress,
-              }
-            : null
-        }
+        /* A capture is taller than the empty slot it lands in; grow once so
+           the frame and the post-processing switch are both in view. */
+        refitKey={image?.src ? image.name : "empty"}
+        job={job}
+        /* The full block lives in the editor's corner now; the shell keeps
+           only its collapsed-header spinner. */
+        jobDisplay="collapsed"
         collapsed={collapsed}
         onToggleCollapsed={() => setCollapsed((c) => !c)}
         onClose={onClose}
@@ -272,7 +288,7 @@ export function MatPreviewPanel({
                     className="group overflow-hidden rounded-xl border border-glass/12 bg-glass/6 text-left transition-colors hover:border-brand/50"
                   >
                     <span className="relative block aspect-[4/3] w-full overflow-hidden">
-                      <AssetThumb type="image" seed={p.seed} />
+                      <AssetThumb type="image" seed={p.seed} src={p.src} />
                     </span>
                     <span className="block px-2 py-1.5">
                       <span className="type-caption-strong block truncate text-content">
@@ -292,26 +308,30 @@ export function MatPreviewPanel({
           <section className="flex flex-col gap-2.5">
             <div className="flex items-center justify-between gap-3">
               <span className="type-body shrink-0 text-content-subtle">
-                Image ({image ? 1 : 0}/{MAX_IMAGES})
+                View ({image ? 1 : 0}/{MAX_IMAGES})
               </span>
-              <button
-                type="button"
-                aria-label="Choose a source image from the asset library"
-                title="Choose from library"
-                data-ui="mat-pick-from-library"
-                disabled={busy || hasImage}
-                onClick={onPickFromLibrary}
-                className="grid h-8 w-8 place-items-center rounded-lg border border-brand/30 bg-brand/12 text-content transition-colors hover:bg-brand/20 disabled:pointer-events-none disabled:opacity-40"
-              >
-                <Icon name="library-picker" size={16} />
-              </button>
+              {/* Recapture without deleting first: frame the shot again, press. */}
+              {hasImage && (
+                <button
+                  type="button"
+                  aria-label="Capture the view again"
+                  title="Recapture view"
+                  data-ui="mat-recapture"
+                  disabled={busy || capture}
+                  onClick={captureView}
+                  className="type-caption-strong flex h-8 items-center gap-1.5 rounded-lg border border-brand/30 bg-brand/12 px-2.5 text-content transition-colors hover:bg-brand/20 disabled:pointer-events-none disabled:opacity-40"
+                >
+                  <Icon name="camera" size={14} />
+                  Recapture
+                </button>
+              )}
             </div>
 
             {image ? (
               <div className="flex gap-2 rounded-xl bg-glass/6 p-2">
                 <div
                   data-ui="mat-source-image"
-                  className="group relative aspect-[92/84] w-[92px] overflow-hidden rounded-lg bg-glass/8 ring-1 ring-glass/10"
+                  className="group relative aspect-video w-full overflow-hidden rounded-lg bg-glass/8 ring-1 ring-glass/10"
                 >
                   {/* The thumbnail is the way in, exactly as it is for a mesh
                       reference: at 92px you can't tell what material you're
@@ -323,7 +343,7 @@ export function MatPreviewPanel({
                     onClick={() => setPreviewOpen(true)}
                     className="absolute inset-0"
                   >
-                    <AssetThumb type="image" seed={image.seed} />
+                    <AssetThumb type="image" seed={image.seed} src={image.src} />
                   </button>
                   <button
                     type="button"
@@ -340,13 +360,21 @@ export function MatPreviewPanel({
             ) : (
               <button
                 type="button"
-                data-ui="mat-upload-image"
-                onClick={() => fileRef.current?.click()}
-                className="relative flex min-h-[100px] w-full flex-col items-center justify-center gap-1.5 overflow-hidden rounded-xl border border-dashed border-glass/25 bg-glass/5 text-content-subtle transition-colors hover:border-glass/40 hover:bg-glass/8 hover:text-content"
+                data-ui="mat-capture-view"
+                disabled={capture}
+                onClick={captureView}
+                className="relative flex min-h-[100px] w-full flex-col items-center justify-center gap-1.5 overflow-hidden rounded-xl border border-dashed border-glass/25 bg-glass/5 text-content-subtle transition-colors hover:border-glass/40 hover:bg-glass/8 hover:text-content disabled:cursor-wait"
               >
                 <PlaceholderImage className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-20" />
-                <Icon name="create" size={20} className="relative" />
-                <span className="type-body relative">Upload image</span>
+                <Icon
+                  name={capture ? "spinner" : "camera"}
+                  size={20}
+                  className={cn("relative", capture && "animate-spin")}
+                />
+                <span className="type-body relative">{capture ? "Capturing…" : "Capture view"}</span>
+                <span className="type-caption relative text-content-subtle">
+                  The scene as you see it — no panels
+                </span>
               </button>
             )}
           </section>
@@ -410,21 +438,19 @@ function SourceImagePreviewDialog({
         <Panel ui="mat-source-preview" className="overflow-hidden">
           <PanelHeader>
             <DialogTitle asChild>
-              <PanelTitle>Source image</PanelTitle>
+              <PanelTitle>Captured view</PanelTitle>
             </DialogTitle>
             <PanelClose label="Close preview" onClick={onClose} />
           </PanelHeader>
 
           <PanelBody className="p-4">
-            <div className="aspect-[4/3] w-full overflow-hidden rounded-xl ring-1 ring-glass/10">
-              <AssetThumb type="image" seed={image.seed} />
+            <div className="aspect-video w-full overflow-hidden rounded-xl ring-1 ring-glass/10">
+              <AssetThumb type="image" seed={image.seed} src={image.src} />
             </div>
           </PanelBody>
 
           <PanelFooter className="items-center justify-between p-3">
-            {/* The filename is the only thing MAT knows about the image, and the
-                thumbnail is generated from a seed rather than being the file —
-                so without it the dialog can't say WHICH image this is. */}
+            {/* Which capture this is, when there have been several. */}
             <span className="type-body min-w-0 truncate text-content-subtle">{image.name}</span>
 
             <Button

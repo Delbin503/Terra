@@ -137,6 +137,12 @@ export interface DockPanelProps {
    * its content changed would resize itself while being read.
    */
   fitContent?: boolean;
+  /**
+   * Fit again when this changes. For content that grows because the user just
+   * DID something in the panel — a captured frame landing in its slot — rather
+   * than as they read it. Only grows, never shrinks, and stops at the screen.
+   */
+  refitKey?: string | number;
   /** pinned below the scrolling body — composer, primary action */
   footer?: React.ReactNode;
   children: React.ReactNode;
@@ -162,6 +168,7 @@ export function DockPanel({
   onClose,
   defaultHeight = 340,
   fitContent = false,
+  refitKey,
   footer,
   children,
 }: DockPanelProps) {
@@ -191,10 +198,11 @@ export function DockPanel({
     const missing = body.scrollHeight - body.clientHeight;
     if (missing <= 0) return;
     setHeight((h) => Math.min(maxHeight(), h + missing));
-    // Mount only. Re-fitting on every content change would resize the panel
-    // under the user as they filled the form in.
+    // Mount, and when the owner says its content grew by the user's own
+    // action (refitKey). Re-fitting on every content change would resize the
+    // panel under the user as they filled the form in.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refitKey]);
 
   /**
    * Drag the bottom grip to set a height; double-click it to go back to the

@@ -2,14 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { Raycaster, Vector2, Vector3, Plane, type PerspectiveCamera } from "three";
 import {
   SceneCanvas,
+  GIZMO_REACH,
   type CameraGuide,
   type CameraHandle,
 } from "./SceneCanvas";
 import { GlassBar } from "@/components/glass";
 import { Icon } from "@/components/icons";
-import { cn } from "@/lib/utils";
 import { EditorTopBar } from "./EditorTopBar";
 import { EditorToolBar, type ToolId, type FlyoutAction } from "./EditorToolBar";
+import { ViewHelpersBar } from "./ViewHelpersBar";
+import { EditorActivity, type Activity } from "./EditorActivity";
+import type { DockJob } from "./panel-dock";
 import { EditorActions } from "./EditorActions";
 import { AssetLibrary } from "./AssetLibrary";
 import { Generate3DMeshPanel } from "./Generate3DMeshPanel";
@@ -204,6 +207,9 @@ export function EditorView({
   const [agentOpen, setAgentOpen] = useState(false);
   /** What SAB is adding to the scene right now — the bottom-left loader. */
   const [sabActivity, setSabActivity] = useState<SabSceneActivity | null>(null);
+  /** The generate passes in flight, shown in the same corner as SAB's adds. */
+  const [matJob, setMatJob] = useState<DockJob | null>(null);
+  const [meshJob, setMeshJob] = useState<DockJob | null>(null);
   /**
    * Define mode: the next drag on the ground draws a footprint.
    *
@@ -247,9 +253,8 @@ export function EditorView({
   // Two panels borrow the library as an image chooser, and only one library is
   // ever mounted — so the request says who asked and how many slots are free,
   // and the result is routed back to that panel alone.
-  const [pickReq, setPickReq] = useState<{ target: "mesh" | "mat"; max: number } | null>(null);
+  const [pickReq, setPickReq] = useState<{ target: "mesh"; max: number } | null>(null);
   const [meshRefs, setMeshRefs] = useState<Asset[] | null>(null);
-  const [matRef, setMatRef] = useState<Asset | null>(null);
   /**
    * Every MAT preview this project has produced, newest first, plus how many
    * of them nobody has looked at yet.
@@ -357,6 +362,13 @@ export function EditorView({
    *  is never held open for nothing. */
   const dockBusy = layersOpen || agentOpen || gen3dOpen || matOpen;
   const gizmoInset = dockBusy ? DOCK_INSET : 0;
+
+  /** Everything in flight, for the bottom-left activity card. */
+  const activity: Activity[] = [
+    ...(agentOpen && sabActivity ? [{ id: "sab", label: sabActivity.label, detail: sabActivity.detail }] : []),
+    ...(matJob ? [{ id: "mat", label: matJob.title, detail: matJob.hint, progress: matJob.progress }] : []),
+    ...(meshJob ? [{ id: "mesh", label: meshJob.title, detail: meshJob.hint, progress: meshJob.progress }] : []),
+  ];
 
   /** Open the library focused on one category — used by "Click to view". */
   const openLibraryAt = (cat: CategoryId) => {
@@ -1369,11 +1381,18 @@ export function EditorView({
             onSelect={selectTool}
             onFlyoutAction={handleFlyout}
             onCloseFlyout={() => setTool(null)}
-            view={viewHelpers}
-            onToggleView={(h) => setViewHelpers((v) => ({ ...v, [h]: !v[h] }))}
-            onResetView={resetView}
           />
         </div>
+
+        {/* Grid · Axes · Reset view, under the view cube — the viewport's own
+            controls beside the viewport's own ornament. Draggable by its grip. */}
+        <ViewHelpersBar
+          view={viewHelpers}
+          onToggleView={(h) => setViewHelpers((v) => ({ ...v, [h]: !v[h] }))}
+          onResetView={resetView}
+          inset={gizmoInset}
+          reach={GIZMO_REACH}
+        />
 
         {/* Box select. Off while a space is being drawn — that gesture is also a
             drag on the ground, and two things reading the same drag is one of
@@ -1417,28 +1436,10 @@ export function EditorView({
         {/* One corner, one shape, one at a time — the newest wins. Stacking
             them would push the oldest up over the object toolbar, and three
             cards about three finished jobs is a log, not a notification.
-            SAB's loader goes first: it is the one thing still happening. */}
-        {agentOpen && sabActivity ? (
-          <div
-            data-ui="sab-scene-loading"
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-            className={cn(
-              "pointer-events-none absolute left-6 z-30",
-              tool === "assets" ? "bottom-[calc(3rem+clamp(260px,40vh,392px))]" : "bottom-6"
-            )}
-          >
-            <div className="flex max-w-sm items-center gap-3 rounded-2xl border border-white/20 bg-black/90 px-5 py-3 text-white shadow-pop backdrop-blur-md">
-              <Icon name="spinner" size={20} className="shrink-0 animate-spin text-brand" />
-              <div>
-                <p className="type-body-strong">{sabActivity.label}</p>
-                {sabActivity.detail && (
-                  <p className="type-caption text-white/70">{sabActivity.detail}</p>
-                )}
-              </div>
-            </div>
-          </div>
+            Work still running goes first, all of it in one card: SAB's adds,
+            a MAT preview, a 3D generation. */}
+        {activity.length > 0 ? (
+          <EditorActivity items={activity} dockOpen={tool === "assets"} />
         ) : matToast ? (
           <EditorToast
             ui="mat-preview-toast"
@@ -1517,13 +1518,9 @@ export function EditorView({
                 ? undefined
                 : {
                     max: pickReq.max,
-                    purpose:
-                      pickReq.target === "mat"
-                        ? "a source image"
-                        : `up to ${pickReq.max} reference ${pickReq.max === 1 ? "image" : "images"}`,
+                    purpose: `up to ${pickReq.max} reference ${pickReq.max === 1 ? "image" : "images"}`,
                     onConfirm: (picked) => {
-                      if (pickReq.target === "mat") setMatRef(picked[0] ?? null);
-                      else setMeshRefs(picked);
+                      setMeshRefs(picked);
                       setPickReq(null);
                       setTool(null);
                     },
@@ -1565,7 +1562,8 @@ export function EditorView({
           )}
           {matOpen && (
             <MatPreviewPanel
-              incoming={matRef}
+              cameraRef={cameraRef}
+              onJobChange={setMatJob}
               history={matPreviews}
               historyOpen={matHistoryOpen}
               onToggleHistory={() => {
@@ -1576,10 +1574,7 @@ export function EditorView({
                 });
               }}
               onOpenPreview={openPreviewTab}
-              onClose={() => {
-                setMatOpen(false);
-                setPickReq(null);
-              }}
+              onClose={() => setMatOpen(false)}
               onComplete={(preview) => {
                 // The panel STAYS open, holding the result in its history — it's
                 // the only route to it now that the top bar's play button is
@@ -1588,17 +1583,12 @@ export function EditorView({
                 setMatUnseen((n) => n + 1);
                 setMatToast(true);
               }}
-              onPickFromLibrary={() => {
-                setPickReq({ target: "mat", max: 1 });
-                setLibraryCategory("uploads");
-                setTool("assets");
-              }}
-              onIncomingConsumed={() => setMatRef(null)}
             />
           )}
           {gen3dOpen && (
             <Generate3DMeshPanel
               store={assets}
+              onJobChange={setMeshJob}
               incoming={meshRefs}
               onClose={() => {
                 setGen3dOpen(false);

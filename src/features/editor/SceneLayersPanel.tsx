@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { GlassPanel, GlassGhostButton } from "@/components/glass";
+import { GlassPanel, GlassGhostButton, DropdownLayer } from "@/components/glass";
 import { ContextMenu, IS_MAC, MOD, type MenuItem } from "./ContextMenu";
 import { DockPanel } from "./panel-dock";
 import { Button } from "@/components/ui";
@@ -841,7 +841,7 @@ function TypeFilter({
       </button>
 
       {open && (
-        <>
+        <DropdownLayer>
           <div className="fixed inset-0 z-40" onClick={() => onOpenChange(false)} aria-hidden />
           <GlassPanel
             ui="scene-layers-type-menu"
@@ -878,7 +878,7 @@ function TypeFilter({
               </button>
             )}
           </GlassPanel>
-        </>
+        </DropdownLayer>
       )}
     </div>
   );

@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui";
 import { GlassPanel } from "@/components/glass";
 import { Icon } from "@/components/icons";
-import { DockPanel } from "./panel-dock";
+import { DockPanel, type DockJob } from "./panel-dock";
 import { AssetThumb } from "./AssetThumb";
 import type { AssetStore } from "./useAssets";
 import type { Asset } from "./assets-data";
@@ -99,6 +99,7 @@ export function Generate3DMeshPanel({
   onPickFromLibrary,
   onIncomingConsumed,
   onDone,
+  onJobChange,
 }: {
   store: AssetStore;
   /** an asset chosen in the library's pick mode, waiting to become the photo */
@@ -114,6 +115,8 @@ export function Generate3DMeshPanel({
   /** a build finished — the editor raises the corner toast for when the panel
    *  isn't where you're looking */
   onDone?: (kind: "multiview" | "mesh") => void;
+  /** the running pass, for the editor's bottom-left activity card */
+  onJobChange?: (job: DockJob | null) => void;
 }) {
   /** `url` is set for an uploaded file, so the panel shows the actual photo;
    *  a library pick draws from its seed like every other library thumbnail. */
@@ -146,6 +149,15 @@ export function Generate3DMeshPanel({
 
   const busy = job !== null;
   const plan = planObjects(keywords, maxObjects);
+
+  // Progress shows in the editor's bottom-left corner, beside SAB's adds —
+  // not pinned in this panel, which is only where you look while you stay.
+  const jobCb = useRef(onJobChange);
+  jobCb.current = onJobChange;
+  useEffect(() => {
+    jobCb.current?.(job ? { ...JOB_COPY[job], progress } : null);
+  }, [job, progress]);
+  useEffect(() => () => jobCb.current?.(null), []);
 
   /* ------------------------------------------------------------------ build */
 
@@ -299,6 +311,9 @@ export function Generate3DMeshPanel({
         defaultHeight={380}
         fitContent
         job={job ? { ...JOB_COPY[job], progress } : null}
+        /* The full block lives in the editor's corner now; the shell keeps
+           only its collapsed-header spinner. */
+        jobDisplay="collapsed"
         collapsed={collapsed}
         onToggleCollapsed={() => setCollapsed((c) => !c)}
         onClose={onClose}

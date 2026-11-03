@@ -92,6 +92,7 @@ import {
   ListFilter,
   Grip,
   GripHorizontal,
+  GripVertical,
   Crown,
   SunMedium,
   ScanSearch,
@@ -237,6 +238,7 @@ export const iconRegistry = {
   lock: Lock,
   unlock: LockOpen,
   drag: GripHorizontal,
+  "grip-vertical": GripVertical,
   master: Crown,
 
   // Scene layers (tree rows + their context menu)

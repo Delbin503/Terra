@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { GlassPanel, GlassGhostButton } from "@/components/glass";
+import { GlassPanel, GlassGhostButton, DropdownLayer } from "@/components/glass";
 import { Button } from "@/components/ui";
 import { Icon, type IconName } from "@/components/icons";
 import { AssetCard } from "./AssetCard";
@@ -884,7 +884,7 @@ function TagFilter({
       </button>
 
       {open && (
-        <>
+        <DropdownLayer>
           <div className="fixed inset-0 z-40" onClick={() => onOpenChange(false)} />
           <GlassPanel
             ui="tag-menu"
@@ -924,7 +924,7 @@ function TagFilter({
               </button>
             )}
           </GlassPanel>
-        </>
+        </DropdownLayer>
       )}
     </div>
   );
@@ -972,7 +972,7 @@ function TypeFilter({
       </button>
 
       {open && (
-        <>
+        <DropdownLayer>
           <div className="fixed inset-0 z-40" onClick={() => onOpenChange(false)} />
           <GlassPanel
             ui="asset-type-menu"
@@ -1013,7 +1013,7 @@ function TypeFilter({
               </button>
             )}
           </GlassPanel>
-        </>
+        </DropdownLayer>
       )}
     </div>
   );
@@ -1064,7 +1064,7 @@ function SortMenu({
       </button>
 
       {open && (
-        <>
+        <DropdownLayer>
           <div className="fixed inset-0 z-40" onClick={() => onOpenChange(false)} />
           <GlassPanel
             ui="asset-sort-menu"
@@ -1118,7 +1118,7 @@ function SortMenu({
               );
             })}
           </GlassPanel>
-        </>
+        </DropdownLayer>
       )}
     </div>
   );

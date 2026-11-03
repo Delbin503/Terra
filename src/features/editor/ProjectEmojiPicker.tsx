@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "@/components/ui";
 import { Panel, PanelHeader, PanelEyebrow, PanelBody, PanelSection } from "./ui";
+import { DropdownLayer, isInDropdownOf } from "@/components/glass";
 
 /** Picker palette, grouped so the list stays scannable rather than a wall of glyphs. */
 const EMOJI_GROUPS: { label: string; emoji: string[] }[] = [
@@ -64,7 +65,7 @@ export function ProjectEmojiPicker({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+      if (!wrap.current?.contains(e.target as Node) && !isInDropdownOf(wrap.current, e.target)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     window.addEventListener("pointerdown", onDown);
@@ -94,6 +95,7 @@ export function ProjectEmojiPicker({
       </Tooltip>
 
       {open && (
+        <DropdownLayer>
         <Panel
           ui="emoji-picker"
           thickness="overlay"
@@ -142,6 +144,7 @@ export function ProjectEmojiPicker({
             ))}
           </PanelBody>
         </Panel>
+        </DropdownLayer>
       )}
     </div>
   );

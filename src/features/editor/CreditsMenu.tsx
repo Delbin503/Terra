@@ -7,6 +7,7 @@ import { useDismissable } from "./use-dismissable";
 import { useSettings } from "@/features/settings/settings-store";
 import { TopUpDialog } from "@/features/settings/TopUpDialog";
 import { workspace } from "./account-data";
+import { DropdownLayer } from "@/components/glass";
 
 /**
  * CreditsMenu — the lightning affordance in the editor's top-right cluster.
@@ -50,11 +51,13 @@ export function CreditsMenu() {
       </Tooltip>
 
       {open && (
-        <CreditsPanel
-          workspace={workspace.name}
-          onClose={() => setOpen(false)}
-          className="absolute left-0 top-[calc(100%+10px)] z-50 origin-top-left animate-menu-in"
-        />
+        <DropdownLayer>
+          <CreditsPanel
+            workspace={workspace.name}
+            onClose={() => setOpen(false)}
+            className="absolute left-0 top-[calc(100%+10px)] z-50 origin-top-left animate-menu-in"
+          />
+        </DropdownLayer>
       )}
     </div>
   );

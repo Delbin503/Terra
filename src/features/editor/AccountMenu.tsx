@@ -5,6 +5,7 @@ import { Avatar, Tooltip } from "@/components/ui";
 import { Panel, SearchInput } from "./ui";
 import { useDismissable } from "./use-dismissable";
 import { owner, collaborators } from "./account-data";
+import { DropdownLayer } from "@/components/glass";
 
 /**
  * AccountMenu — the avatar affordance in the top-right cluster. Clicking it
@@ -43,9 +44,10 @@ export function AccountMenu({ userName }: { userName: string }) {
       </Tooltip>
 
       {open && (
-        /* Sized to the project-emoji picker. A people list is a menu hanging
+        <DropdownLayer>
+        {/* Sized to the project-emoji picker. A people list is a menu hanging
            off a 48px bar, not a page: at 360px with 44px avatars it covered a
-           quarter of the viewport to say five names. */
+           quarter of the viewport to say five names. */}
         <Panel
           ui="account"
           thickness="overlay"
@@ -107,6 +109,7 @@ export function AccountMenu({ userName }: { userName: string }) {
             </ul>
           </div>
         </Panel>
+        </DropdownLayer>
       )}
     </div>
   );

@@ -9,12 +9,12 @@ export type FlyoutAction = "mat" | "gen3d" | "sab";
 /** Viewport helpers — what the editor draws over the scene to work by. */
 export type ViewHelper = "grid" | "axes";
 
-const VIEW_HELPERS: { id: ViewHelper; icon: IconName; label: string }[] = [
+export const VIEW_HELPERS: { id: ViewHelper; icon: IconName; label: string }[] = [
   { id: "grid", icon: "view-grid", label: "Grid" },
   { id: "axes", icon: "view-axes", label: "Axes" },
 ];
 
-const RESET_VIEW = { id: "reset", icon: "view-reset", label: "Reset view" } as const;
+export const RESET_VIEW = { id: "reset", icon: "view-reset", label: "Reset view" } as const;
 
 const TOOLS: { id: ToolId; icon: IconName; label: string }[] = [
   { id: "scene", icon: "scene", label: "Scene objects" },
@@ -56,20 +56,8 @@ export function EditorToolBar({
   onSelect,
   onFlyoutAction,
   onCloseFlyout,
-  view,
-  onToggleView,
-  onResetView,
 }: {
   active: ToolId[];
-  /**
-   * Which viewport helpers are on. Two independent switches, not a choice:
-   * the grid gives distance and the axes give direction, and reading one
-   * against the other is the point — so both can be lit at once.
-   */
-  view?: Record<ViewHelper, boolean>;
-  onToggleView?: (h: ViewHelper) => void;
-  /** eases the camera back to the view the editor opens on */
-  onResetView?: () => void;
   /**
    * Unread counts per tool. A finished generation used to announce itself once,
    * in a toast, and then be gone — so anything produced while you were looking
@@ -130,19 +118,8 @@ export function EditorToolBar({
         )
       )}
 
-      {/* The helpers after a rule: the three tools open panels, these change
-          what the viewport draws, and a divider says they are a different
-          kind of button without a second bar. */}
-      {view && onToggleView && (
-        <>
-          <span className="mx-1 h-6 w-px shrink-0 bg-glass/20" aria-hidden />
-          {VIEW_HELPERS.map((h) => (
-            <ToolButton key={h.id} tool={h} active={view[h.id]} onClick={() => onToggleView(h.id)} />
-          ))}
-          {/* A one-shot action, so it never lights up like the two switches. */}
-          {onResetView && <ToolButton tool={RESET_VIEW} active={false} onClick={onResetView} />}
-        </>
-      )}
+      {/* Grid · Axes · Reset view used to follow here behind a divider; they
+          now have their own cluster under the view cube (ViewHelpersBar). */}
     </GlassBar>
   );
 }
@@ -156,13 +133,16 @@ export function EditorToolBar({
  * is what turns a control into a smudge. The lit state is a brand tint and a
  * brand edge, the same active treatment the tag filter and the type filter use.
  */
-function ToolButton({
+export function ToolButton({
   tool,
   active,
   badge,
+  side = "bottom",
   onClick,
 }: {
   tool: { id: ToolId | ViewHelper | "reset"; icon: IconName; label: string };
+  /** where the label bubble opens — "left" for a column on the right edge */
+  side?: "bottom" | "left";
   active: boolean;
   /** unread items behind this tool — shown as a count, hidden at zero */
   badge?: number;
@@ -173,7 +153,7 @@ function ToolButton({
     // alone was a grey box that took a second to arrive over the scene. The
     // bubble is the bar's own material, so it reads as this button's hover tint
     // carrying a label rather than as a separate thing landing on top of it.
-    <Tooltip label={tool.label} side="bottom" tone="glass">
+    <Tooltip label={tool.label} side={side} tone="glass">
       <button
         type="button"
         aria-label={tool.label}

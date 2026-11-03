@@ -78,8 +78,9 @@ export function MatPreviewView({
           className="flex max-h-full min-h-0 flex-col items-center gap-3"
         >
           <div className="min-h-0 overflow-hidden rounded-2xl bg-glass/8 ring-1 ring-glass/15 shadow-pop">
-            <div className="aspect-[4/3] h-full max-h-[70vh] w-[min(72rem,86vw)]">
-              <AssetThumb type="image" seed={preview.seed} />
+            {/* The capture's own shape — the viewport's aspect — when there is one. */}
+            <div className={preview.src ? "aspect-video h-full max-h-[70vh] w-[min(72rem,86vw)]" : "aspect-[4/3] h-full max-h-[70vh] w-[min(72rem,86vw)]"}>
+              <AssetThumb type="image" seed={preview.seed} src={preview.src} />
             </div>
           </div>
           <figcaption className="type-caption text-content-muted">

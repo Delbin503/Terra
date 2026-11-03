@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { AssetType } from "./assets-data";
 import { THUMB, VOLUME } from "./scene-palette";
 import { PlaceholderImage } from "./PlaceholderImage";
@@ -10,7 +11,22 @@ const shift = (h: number, by: number) => (h + by) % 360;
  * self-contained SVG mini-scene (seeded, offline, theme-agnostic) when no photo
  * is available.
  */
-export function AssetThumb({ type, seed }: { type: AssetType; seed: number }) {
+export function AssetThumb({ type, seed, src }: { type: AssetType; seed: number; src?: string }) {
+  // A real preview (the Assets API screenshot) when there is one; the seeded
+  // art if it's missing or fails, so a dead link never shows a broken image.
+  const [failed, setFailed] = useState(false);
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        className="h-full w-full bg-[hsl(28_8%_12%)] object-cover"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
   return (
     <PlaceholderImage
       className="h-full w-full object-cover"
