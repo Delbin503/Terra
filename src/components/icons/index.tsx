@@ -53,6 +53,7 @@ import {
   LogOut,
   HelpCircle,
   Check,
+  Pipette,
   UsersRound,
   Undo2,
   Redo2,
@@ -360,6 +361,7 @@ export const iconRegistry = {
   "image-credits": Images,
   "render-time": Clock,
   check: Check,
+  eyedropper: Pipette,
 
   // Settings
   /** email preferences */

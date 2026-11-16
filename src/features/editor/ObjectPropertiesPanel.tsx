@@ -12,6 +12,7 @@ import {
   type SceneObject,
 } from "./scene-types";
 import { formatZoom, type CameraRig } from "./camera-rig";
+import { swatchCss } from "./scene-palette";
 
 export type SettingKey =
   | "position"
@@ -216,7 +217,7 @@ function summarize(
     // an object with three materials has three different roughnesses and the
     // row has to say which one you are looking at.
     case "color":
-      return { swatch: mat.color };
+      return { swatch: swatchCss(mat.color) };
     case "metallic":
       return { text: mat.metalness.toFixed(2) };
     case "roughness":
@@ -371,7 +372,7 @@ export function ObjectPropertiesPanel({
                 >
                   <span
                     className="h-4 w-4 shrink-0 rounded-md ring-1 ring-glass/20"
-                    style={{ background: m.color }}
+                    style={{ background: swatchCss(m.color) }}
                   />
                   <span className="min-w-0 flex-1">
                     {/* Element N first: it is the name the engine end uses, and

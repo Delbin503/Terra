@@ -1,3 +1,4 @@
+import { albedoTint } from "./scene-palette";
 import {
   DEFAULT_SKY_INFLUENCE,
   slotEdited,
@@ -122,7 +123,7 @@ export function buildMaterialPayload(objects: SceneObject[]): MaterialPayload {
       .map(({ m, slot }) => ({
         slot,
         name: m.name,
-        albedoTint: m.color,
+        albedoTint: albedoTint(m.color),
         metallicFactor: m.metalness,
         roughnessFactor: m.roughness,
         specularFactor: m.specular,

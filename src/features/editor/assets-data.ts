@@ -1,4 +1,5 @@
 import type { IconName } from "@/components/icons";
+import type { RemoteDetails } from "./assets-api";
 
 /**
  * The asset kinds Terra works with.
@@ -87,6 +88,10 @@ export interface Asset {
    */
   smartTags?: string[];
   manualTags?: string[];
+  /** a real preview image — the Assets API's screenshot — over the seeded art */
+  thumbUrl?: string;
+  /** the Assets API record this came from (see assets-api.ts) */
+  remote?: RemoteDetails;
 }
 
 /**
@@ -468,7 +473,28 @@ export interface AssetDetails {
   status: string;
 }
 
+const fmtBytes = (n: number) =>
+  n >= 1e6 ? `${(n / 1e6).toFixed(2)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`;
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
 export function deriveDetails(a: Asset): AssetDetails {
+  const r = a.remote;
+  if (r) {
+    return {
+      description: r.description || descByType[a.type],
+      smartTags: a.smartTags ?? [],
+      manualTags: a.manualTags ?? [],
+      savedIn: r.category ? `Library · ${r.category}` : "Library",
+      typeLabel: typeBadge[a.type],
+      format: r.format?.toUpperCase() ?? formatByType[a.type],
+      size: r.sizeBytes ? fmtBytes(r.sizeBytes) : "—",
+      dimensions: r.triangles ? `${r.triangles.toLocaleString("en-US")} triangles` : "—",
+      owner: "Sigmawave",
+      createdAt: r.createdAt ? fmtDate(r.createdAt) : "—",
+      status: r.access === "private" ? "Private" : "Public",
+    };
+  }
   return {
     description: descByType[a.type],
     smartTags: a.smartTags ?? defaultSmartTags(a.seed),

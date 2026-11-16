@@ -16,7 +16,7 @@ import {
   type WorkOrder,
 } from "./work-order";
 import type { WorkOrderStore } from "./useWorkOrder";
-import { Cost, Group, Note, InSceneChip, MultiSelectField } from "./terragen-parts";
+import { Cost, Group, Note, InSceneChip, MultiSelectField, Switch } from "./terragen-parts";
 import { arrange, makeRule, newSeed, seedFor } from "./arrange";
 import { describeVolume } from "./scene-volume";
 import { isContentObject } from "./scene-types";
@@ -580,13 +580,35 @@ function OutputEditor({ order, store }: EditorProps) {
         />
       </Group>
 
-      {/* A fact, not a toggle — MAT runs as a post-render step either way. */}
-      <div className="flex items-center gap-2 rounded-lg border border-glass/10 bg-glass/6 px-2.5 py-2">
-        <Icon name="mat" size={14} className="text-accent" />
-        <span className="type-body text-content-muted">
-          MAT photorealism is applied to every frame after render.
-        </span>
-      </div>
+      {/* MAT was stated here as a fact until it became a switch: the pass is
+          what makes a frame photoreal, but a team measuring what the pass is
+          worth needs the raw render to compare against, and the only place to
+          ask for that is the order that produces it. The row carries the
+          consequence rather than the feature name, because "off" has one. */}
+      <Group title="Photorealism" hint="post-render pass">
+        <div
+          data-ui="terragen-mat-row"
+          className="flex items-center gap-2.5 rounded-xl border border-glass/12 bg-glass/6 px-2.5 py-2"
+        >
+          <Icon name="mat" size={14} className="shrink-0 text-accent" />
+          <span className="min-w-0 grow">
+            <span className="type-body-strong block truncate text-content">
+              Enable photorealism (MAT)
+            </span>
+            <span className="type-caption block text-content-subtle">
+              {o.mat
+                ? "Applied to every frame after render"
+                : "Off — the archive comes back as raw render"}
+            </span>
+          </span>
+          <Switch
+            ui="terragen-mat"
+            label="Enable photorealism (MAT)"
+            on={o.mat}
+            onToggle={() => store.setOutput({ mat: !o.mat })}
+          />
+        </div>
+      </Group>
 
       <p className="type-body-dense mt-3 flex items-center gap-1.5 text-content-subtle">
         <Icon name="info" size={13} className="shrink-0" />

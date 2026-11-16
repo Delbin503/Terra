@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useGLTF } from "@react-three/drei";
 import {
   BackSide,
@@ -11,7 +11,7 @@ import {
   type Object3D,
 } from "three";
 import { materialOf, UNNAMED_SLOT, type ObjectShape, type SceneObject } from "./scene-types";
-import { OUTLINE } from "./scene-palette";
+import { colorCss, isOriginalColor, OUTLINE } from "./scene-palette";
 
 const D2R = Math.PI / 180;
 
@@ -272,6 +272,9 @@ function Model({
       let mine = byName.get(name);
       if (!mine) {
         mine = src.clone() as MeshStandardMaterial;
+        // The file's own colour, kept so the Default swatch can put it back:
+        // the tint below overwrites `color` in place.
+        mine.userData.originalColor = mine.color.clone();
         byName.set(name, mine);
       }
       mesh.material = mine;
@@ -304,7 +307,8 @@ function Model({
     object.materials.forEach((slot) => {
       const mat = materials.get(slot.name);
       if (!mat) return;
-      mat.color.set(slot.color);
+      if (isOriginalColor(slot.color)) mat.color.copy(mat.userData.originalColor ?? mat.color);
+      else mat.color.set(slot.color);
       mat.metalness = slot.metalness;
       mat.roughness = slot.roughness;
       if ("specularIntensity" in mat) mat.specularIntensity = slot.specular;
@@ -387,7 +391,14 @@ export function SceneObjectMesh({
       {object.source === "splat" ? (
         <SplatField object={object} lit={selected || hovered} />
       ) : object.modelUrl ? (
-        <Model url={object.modelUrl} object={object} onMaterials={report} />
+        /* Library models stream from the Assets API and can take a while; a
+           boundary per object keeps the rest of the scene drawing meanwhile,
+           and a file that fails to load leaves a box rather than a blank. */
+        <ModelBoundary key={object.modelUrl}>
+          <Suspense fallback={<LoadingBox />}>
+            <Model url={object.modelUrl} object={object} onMaterials={report} />
+          </Suspense>
+        </ModelBoundary>
       ) : (
         <>
           {/* A pending object is a placeholder for something still generating.
@@ -398,7 +409,7 @@ export function SceneObjectMesh({
             {/* A placeholder shape is one surface, so it is slot 0 and only
                 ever slot 0 — the switcher doesn't appear for it. */}
             <meshStandardMaterial
-              color={material.color}
+              color={colorCss(material.color)}
               metalness={material.metalness}
               roughness={material.roughness}
               transparent={object.pending}
@@ -441,4 +452,34 @@ export function SceneObjectMesh({
       )}
     </group>
   );
+}
+
+/** Stands in while a model downloads: a faint wire box where it will land. */
+function LoadingBox() {
+  return (
+    <mesh position={[0, 0.5, 0]}>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshBasicMaterial color="#f36f16" wireframe transparent opacity={0.45} />
+    </mesh>
+  );
+}
+
+/** A model that won't load (bad file, upstream down) degrades to a plain box. */
+class ModelBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(error: unknown) {
+    console.warn("[SceneObjectMesh] model failed to load", error);
+  }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <mesh position={[0, 0.5, 0]} castShadow receiveShadow>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial color="#6b6460" roughness={0.8} />
+      </mesh>
+    );
+  }
 }

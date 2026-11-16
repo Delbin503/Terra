@@ -252,6 +252,33 @@ export const OBJECT_SWATCHES = OBJECT_COLORS.map((c) => c.hex);
 export const DEFAULT_OBJECT_COLOR = OBJECT_COLORS[0].hex;
 
 /**
+ * THE MODEL'S OWN COLOURS — no tint at all.
+ *
+ * A slot's colour multiplies the file's albedo, so every swatch is a tint laid
+ * over the model. This is the value that lays nothing over it: the viewport
+ * puts back the colour the file shipped with, and the engine end receives
+ * white, which is what an Albedo Tint of "unchanged" is. It is what a slot
+ * starts as, and what the Color panel's Default button returns to.
+ *
+ * Not a hex, so anything that paints a slot's colour as CSS goes through
+ * `colorCss`, and anything that prints it goes through `colorLabel`.
+ */
+export const ORIGINAL_COLOR = "original";
+export const isOriginalColor = (c: string): boolean => c === ORIGINAL_COLOR;
+/** A slot's colour as CSS. A plain placeholder shape has no file colour to put
+ *  back, so its "original" is the neutral it has always rendered as. */
+export const colorCss = (c: string): string => (isOriginalColor(c) ? DEFAULT_OBJECT_COLOR : c);
+/** A slot's colour as a UI swatch. The original is not one colour, so it gets
+ *  the Default button's split dot (file white / placeholder gray) rather than
+ *  a flat gray that would read as "tinted gray". */
+export const ORIGINAL_SWATCH = "linear-gradient(135deg, #f1ede8 0 50%, #9a958f 50% 100%)";
+export const swatchCss = (c: string): string => (isOriginalColor(c) ? ORIGINAL_SWATCH : c);
+/** A slot's colour as text: the hex, or "Default". */
+export const colorLabel = (c: string): string => (isOriginalColor(c) ? "Default" : c.toUpperCase());
+/** What the engine end is sent: white leaves the albedo untouched. */
+export const albedoTint = (c: string): string => (isOriginalColor(c) ? "#ffffff" : c);
+
+/**
  * Colour words the AI assistant understands, built from OBJECT_COLORS plus the
  * extras that have no swatch of their own. Anything the assistant can name is
  * a colour the Color tab can also produce.

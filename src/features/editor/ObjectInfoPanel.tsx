@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { PlaceholderImage } from "./PlaceholderImage";
+import { colorCss, colorLabel, swatchCss } from "./scene-palette";
 import {
   Panel,
   PanelHeader,
@@ -127,7 +128,7 @@ export function ObjectInfoPanel({
             fallback={
               <div
                 className="grid h-full w-full place-items-center"
-                style={{ background: material.color }}
+                style={{ background: colorCss(material.color) }}
               >
                 <Icon name="input-3d" size={28} className="text-white/70" />
               </div>
@@ -232,9 +233,9 @@ export function ObjectInfoPanel({
                     <span className="inline-flex items-center gap-1.5">
                       <span
                         className="h-3 w-3 rounded-full ring-1 ring-glass/25"
-                        style={{ background: material.color }}
+                        style={{ background: swatchCss(material.color) }}
                       />
-                      <span className="type-code-sm uppercase">{material.color}</span>
+                      <span className="type-code-sm uppercase">{colorLabel(material.color)}</span>
                     </span>
                   }
                 />

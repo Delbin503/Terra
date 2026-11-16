@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Grid, Lightformer, Line, OrbitControls, GizmoHelper, Html, TransformControls } from "@react-three/drei";
 import {
@@ -335,16 +335,21 @@ export function SceneWorld({
           Influence is what it contributes to everything standing in front of it.
           With nothing placed the scene falls back to exactly what it rendered
           before the controls existed, so an untouched project looks untouched. */}
-      {/* Sky Brightness has to be applied by hand — see SkyBrightness. Keyed on
-          the file because it finds the dome mesh once: a new sky is a new mesh. */}
-      {sky.files && <SkyBrightness key={`brightness:${sky.files}`} value={sky.brightness} />}
-      {sky.files && <SkyFollowsCamera key={`follow:${sky.files}`} />}
+      {/* Sky Brightness has to be applied by hand — see SkyBrightness, mounted
+          with the sky below. Keyed on the file because it finds the dome mesh
+          once: a new sky is a new mesh. */}
 
       {/* KEYED ON THE FILE. drei picks its loader from the extension at mount
           (RGBELoader for .hdr, a gainmap decoder for .jpg — see useEnvironment),
           so swapping the path on a live instance asks one loader's texture to
           come out of another's. Remounting is the honest way to change sky. */}
+      {/* ITS OWN SUSPENSE. A library HDRI is a 20–40 MB file from the Assets
+          API's storage, which can take minutes. Without a boundary here the
+          whole canvas suspended with it — objects, grid and view cube gone —
+          so until it lands the scene keeps the studio light and stays usable. */}
       {sky.files ? (
+        <SkyBoundary key={sky.files} fallback={<StudioLight influence={sky.influence} />}>
+        <Suspense fallback={<StudioLight influence={sky.influence} />}>
         <Environment
           key={sky.files}
           files={sky.files}
@@ -358,16 +363,14 @@ export function SceneWorld({
           environmentRotation={sky.rotation}
           ground={sky.ground}
         />
+        {/* Inside the boundary so they mount with the dome, not before it:
+            each finds the dome mesh once, on mount. */}
+        <SkyBrightness key={`brightness:${sky.files}`} value={sky.brightness} />
+        <SkyFollowsCamera key={`follow:${sky.files}`} />
+        </Suspense>
+        </SkyBoundary>
       ) : (
-        /* NO SKY YET: light without a picture. Three soft panels and nothing
-           drawn behind them, so an object placed before any environment still
-           reads as a solid instead of a black cut-out, and the viewport stays
-           the empty dark stage a new project opens on. */
-        <Environment key="studio" resolution={128} environmentIntensity={sky.influence}>
-          <Lightformer intensity={2} position={[0, 6, -6]} scale={[12, 6, 1]} />
-          <Lightformer intensity={1} position={[-6, 3, 4]} scale={[8, 4, 1]} />
-          <Lightformer intensity={1} position={[6, 3, 4]} scale={[8, 4, 1]} />
-        </Environment>
+        <StudioLight influence={sky.influence} />
       )}
 
       {/* The sweep each rig will travel. Drawn before the cameras so the line
@@ -2487,4 +2490,33 @@ function WorldAxes() {
       ))}
     </group>
   );
+}
+
+/* NO SKY YET: light without a picture. Three soft panels and nothing drawn
+   behind them, so an object placed before any environment still reads as a
+   solid instead of a black cut-out, and the viewport stays the empty dark stage
+   a new project opens on. Also what stands in while a sky file is loading. */
+function StudioLight({ influence }: { influence: number }) {
+  return (
+    <Environment key="studio" resolution={128} environmentIntensity={influence}>
+      <Lightformer intensity={2} position={[0, 6, -6]} scale={[12, 6, 1]} />
+      <Lightformer intensity={1} position={[-6, 3, 4]} scale={[8, 4, 1]} />
+      <Lightformer intensity={1} position={[6, 3, 4]} scale={[8, 4, 1]} />
+    </Environment>
+  );
+}
+
+/* A sky file that fails (missing, corrupt, upstream down) used to take the whole
+   canvas with it. It falls back to the studio light instead. */
+class SkyBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(error: unknown) {
+    console.warn("[SceneCanvas] sky failed to load", error);
+  }
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
 }

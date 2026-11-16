@@ -117,6 +117,45 @@ export function SceneLayersPanel({
     });
   }, [selectedId, objects]);
 
+  /**
+   * …AND SCROLL TO IT.
+   *
+   * Opening a group is not enough when the row is below the fold: picking an
+   * object in the viewport left its row out of sight, at the bottom edge of a
+   * short panel or far down a long list, so the panel still wasn't saying what
+   * was selected. The row is brought into view whenever the selection changes,
+   * whenever the panel is unfolded, and once a group the selection was hidden
+   * in has opened.
+   *
+   * Only the panel's own body scrolls — not `scrollIntoView`, which would also
+   * scroll the dock column the panel sits in — and only as far as needed: a
+   * row already in view stays put, so clicking rows in the list never makes it
+   * jump. It is pending until the row exists, because the row inside a closed
+   * group only renders a frame after the effect above opens it.
+   */
+  const treeRef = useRef<HTMLDivElement>(null);
+  const revealRef = useRef<string | null>(null);
+  useEffect(() => {
+    revealRef.current = selectedId;
+  }, [selectedId, folded]);
+  useEffect(() => {
+    const id = revealRef.current;
+    if (!id || folded) return;
+    const tree = treeRef.current;
+    const row = tree?.querySelector<HTMLElement>(`[data-ui="scene-layer-${CSS.escape(id)}"]`);
+    if (!tree || !row) return;
+    revealRef.current = null;
+    const body = tree.closest<HTMLElement>('[data-ui="scene-layers-body"]');
+    if (!body) return;
+    const margin = 8;
+    const top = row.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+    const bottom = top + row.offsetHeight;
+    let to: number | null = null;
+    if (top - margin < body.scrollTop) to = top - margin;
+    else if (bottom + margin > body.scrollTop + body.clientHeight) to = bottom + margin - body.clientHeight;
+    if (to !== null) body.scrollTo({ top: Math.max(0, to), behavior: "smooth" });
+  }, [selectedId, folded, rows]);
+
   useEffect(() => {
     if (searchOpen) searchRef.current?.focus();
   }, [searchOpen]);
@@ -300,6 +339,7 @@ export function SceneLayersPanel({
           tree: right-clicking down there is how you reach Paste when the thing
           you want to paste next to isn't in the scene yet. */}
       <div
+        ref={treeRef}
         className="min-h-full p-1.5"
         onContextMenu={(e) => {
           e.preventDefault();

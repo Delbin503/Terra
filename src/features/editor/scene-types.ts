@@ -1,5 +1,5 @@
 import type { AssetType } from "./assets-data";
-import { DEFAULT_OBJECT_COLOR, OBJECT_SWATCHES } from "./scene-palette";
+import { ORIGINAL_COLOR, OBJECT_SWATCHES } from "./scene-palette";
 
 /** Placeholder geometry variants (until real GLB assets are wired in). */
 export type ObjectShape = "sphere" | "cylinder" | "cone" | "torus" | "capsule" | "ico" | "dodec";
@@ -180,9 +180,10 @@ export const DEFAULT_SKY_INFLUENCE = 0.35;
 
 /** What every slot starts as, and the values "unedited" is measured against. */
 export const DEFAULT_MATERIAL: Omit<MaterialSlot, "name"> = {
-  // Straight from the palette rather than through `OBJECT_COLORS` below, which
-  // is only a re-export of it and is declared further down this file.
-  color: DEFAULT_OBJECT_COLOR,
+  // The model's own colours: a slot starts untinted, so what the viewport shows
+  // is what the file (and Unreal, which is sent nothing for an unedited slot)
+  // shows. A placeholder shape paints this as the palette's warm gray.
+  color: ORIGINAL_COLOR,
   metalness: 0.1,
   roughness: 0.8,
   specular: 0.5,

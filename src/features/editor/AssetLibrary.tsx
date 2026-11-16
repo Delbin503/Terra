@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { pauseThumbPreload } from "./thumb-cache";
 import { cn } from "@/lib/utils";
 import { GlassPanel, GlassGhostButton, DropdownLayer } from "@/components/glass";
 import { Button } from "@/components/ui";
@@ -239,6 +240,29 @@ export function AssetLibrary({
     // which ones did.
     return sortAssets(filtered, sort);
   }, [scope, query, tags, types, sort]);
+  // The background thumbnail queue steps aside while the library is open.
+  useEffect(() => {
+    pauseThumbPreload(true);
+    return () => pauseThumbPreload(false);
+  }, []);
+  /* THE GRID GROWS AS YOU SCROLL. The Assets API catalogue is ~1,600 records;
+     mounting a card for each at once stalls the panel, so it starts with a few
+     screens' worth and adds more when the end comes into view. */
+  const PAGE = 60;
+  const [shown, setShown] = useState(PAGE);
+  const listKey = `${category}|${query}|${tags.join()}|${types.join()}|${sort}|${openFolder?.id ?? ""}`;
+  useEffect(() => setShown(PAGE), [listKey]);
+  const moreRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = moreRef.current;
+    if (!el || shown >= visible.length) return;
+    const io = new IntersectionObserver(
+      (entries) => entries.some((e) => e.isIntersecting) && setShown((n) => n + PAGE),
+      { rootMargin: "400px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [shown, visible.length]);
   const tagOptions = useMemo(() => collectTags(scope), [scope]);
   // Only the types this view actually contains, so the menu never offers a
   // filter that would empty the grid. Sorted by CONTENT_TYPES rather than by
@@ -605,6 +629,24 @@ export function AssetLibrary({
 
           {/* Grid */}
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            {/* Where the real catalogue stands — only while it matters. */}
+            {!showFolderGrid && !picking && store.catalogue.status !== "ready" && (
+              <p data-ui="catalogue-status" className="type-caption mb-3 flex items-center gap-2 text-content-subtle">
+                {store.catalogue.status === "loading" ? (
+                  <>
+                    <Icon name="spinner" size={12} className="animate-spin" />
+                    Loading the Sigmawave library
+                    {store.catalogue.total > 0 &&
+                      ` · ${store.catalogue.loaded.toLocaleString("en-US")} of ${store.catalogue.total.toLocaleString("en-US")}`}
+                  </>
+                ) : (
+                  <>
+                    <Icon name="warning" size={12} className="text-warning" />
+                    Couldn't reach the Sigmawave library — showing sample assets.
+                  </>
+                )}
+              </p>
+            )}
             {showFolderGrid ? (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-3">
                 {creatingFolder && (
@@ -653,7 +695,7 @@ export function AssetLibrary({
                 {category === "utilities" && onDefineSpace && (
                   <SpaceTile onPick={onDefineSpace} />
                 )}
-                {visible.map((a) => (
+                {visible.slice(0, shown).map((a) => (
                   <AssetCard
                     key={a.id}
                     asset={a}
@@ -667,6 +709,9 @@ export function AssetLibrary({
                     onMenu={openMenu}
                   />
                 ))}
+                {shown < visible.length && (
+                  <div ref={moreRef} className="col-span-full h-px" aria-hidden />
+                )}
               </div>
             ) : (
               <EmptyState

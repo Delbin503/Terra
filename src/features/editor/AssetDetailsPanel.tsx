@@ -90,7 +90,7 @@ export function AssetDetailsPanel({
 
       <PanelBody className="p-4">
         <div className="mb-4 aspect-[16/10] overflow-hidden rounded-xl ring-1 ring-glass/10">
-          <AssetThumb type={type} seed={asset.seed} />
+          <AssetThumb type={type} seed={asset.seed} src={asset.thumbUrl} />
         </div>
 
         {mode ? (

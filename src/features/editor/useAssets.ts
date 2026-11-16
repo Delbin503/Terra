@@ -1,5 +1,9 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { loadCatalogue } from "./assets-api";
+import { preloadThumbs, prioritizeThumbs } from "./thumb-cache";
 import {
+  filterByCategory,
+  sortAssets,
   initialAssets,
   initialFolders,
   type Asset,
@@ -42,13 +46,89 @@ export interface AssetStore {
   remove: (id: string) => void;
   createFolder: (name: string, assetIds?: string[]) => AssetFolder;
   fileInto: (folderId: string, assetIds: string[]) => void;
+  /** the Assets API catalogue: still arriving, all in, or unreachable */
+  catalogue: { status: "loading" | "ready" | "error"; loaded: number; total: number };
 }
+
+/**
+ * The seeded stand-ins the real catalogue replaces. Meshes and HDRIs come from
+ * the Assets API once it answers; the two meshes with a real local GLB stay,
+ * and so do skyboxes and the camera, which the API doesn't carry.
+ */
+const isStandIn = (a: Asset) =>
+  !a.remote && !a.uploaded && !a.generated &&
+  ((a.type === "mesh" && !a.modelUrl) || a.type === "environment");
 
 export function useAssets(): AssetStore {
   const [assets, setAssets] = useState<Asset[]>(initialAssets);
   const [folders, setFolders] = useState<AssetFolder[]>(initialFolders);
   // Monotonic counter — ids and seeds stay deterministic across renders.
   const counter = useRef(0);
+  const [catalogue, setCatalogue] = useState<AssetStore["catalogue"]>({
+    status: "loading",
+    loaded: 0,
+    total: 0,
+  });
+
+  /* THE REAL CATALOGUE, page by page. The first page swaps the stand-ins out
+     (if the API is unreachable they stay, so the library is never empty);
+     later pages append. Local uploads and generations keep their place. */
+  useEffect(() => {
+    const ctrl = new AbortController();
+    let first = true;
+    /* …and its thumbnails, in the background (see thumb-cache.ts), so the
+       library opens onto pictures rather than onto empty tiles filling in.
+       The first screen of each kind goes ahead of the rest. */
+    const perType = new Map<string, number>();
+    const FIRST_SCREEN = 60;
+    loadCatalogue((page, meta) => {
+      if (ctrl.signal.aborted) return;
+      const lead: string[] = [];
+      const later: string[] = [];
+      for (const a of page) {
+        if (!a.thumbUrl) continue;
+        const n = perType.get(a.type) ?? 0;
+        perType.set(a.type, n + 1);
+        (n < FIRST_SCREEN ? lead : later).push(a.thumbUrl);
+      }
+      preloadThumbs(lead, true);
+      preloadThumbs(later);
+      const swap = first;
+      first = false;
+      setAssets((prev) => {
+        const kept = swap ? prev.filter((a) => !isStandIn(a)) : prev;
+        const have = new Set(kept.map((a) => a.id));
+        return [...kept, ...page.filter((a) => !have.has(a.id))];
+      });
+      setCatalogue((c) => ({
+        status: meta.page >= meta.totalPages ? "ready" : "loading",
+        loaded: c.loaded + page.length,
+        total: meta.total,
+      }));
+    }, ctrl.signal).catch((err: unknown) => {
+      if (ctrl.signal.aborted) return;
+      console.warn("[Assets API]", err);
+      setCatalogue((c) => ({ ...c, status: c.loaded > 0 ? "ready" : "error" }));
+    });
+    return () => ctrl.abort();
+  }, []);
+
+  /* Once the whole catalogue is in, the order is final: the cards the library
+     shows first — All Assets and Environments, sorted the way the grid sorts —
+     go to the front of the thumbnail queue. Arrival order only approximates
+     it, since the grid sorts by its own key rather than the API's. */
+  const settled = catalogue.status === "ready";
+  useEffect(() => {
+    if (!settled) return;
+    const screen = (cat: "all" | "environments") =>
+      sortAssets(filterByCategory(assets, cat), "descending")
+        .slice(0, 60)
+        .map((a) => a.thumbUrl)
+        .filter((u): u is string => Boolean(u));
+    prioritizeThumbs([...screen("all"), ...screen("environments")]);
+    // Only when the catalogue settles — not on every later edit to the list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settled]);
 
   const add = useCallback<AssetStore["add"]>((init) => {
     const n = (counter.current += 1);
@@ -103,7 +183,7 @@ export function useAssets(): AssetStore {
   }, []);
 
   return useMemo(
-    () => ({ assets, folders, add, addMany, update, remove, createFolder, fileInto }),
-    [assets, folders, add, addMany, update, remove, createFolder, fileInto]
+    () => ({ assets, folders, add, addMany, update, remove, createFolder, fileInto, catalogue }),
+    [assets, folders, add, addMany, update, remove, createFolder, fileInto, catalogue]
   );
 }

@@ -395,6 +395,12 @@ export interface OutputSpec {
   video: boolean;
   resolution: Resolution;
   annotations: Record<AnnotationId, boolean>;
+  /** the domain-adaptation pass, run over every frame after render. On by
+   *  default, because photoreal frames are the point of the product and a
+   *  run that quietly skipped the pass would be the surprise. It is a switch
+   *  rather than a stated fact because a team comparing a model's response to
+   *  raw render against adapted frames needs the raw archive on request. */
+  mat: boolean;
 }
 
 export interface WorkOrder {
@@ -540,6 +546,7 @@ export function deriveWorkOrder(scene: SceneApi, assets: Asset[]): WorkOrder {
         keypoint: false,
         cosmos: false,
       },
+      mat: true,
     },
     prompt: "",
   };

@@ -37,7 +37,7 @@ export function AssetCard({
     return (
       <div className="relative aspect-square overflow-hidden rounded-2xl ring-1 ring-brand/40">
         <div className="absolute inset-0 opacity-40">
-          <AssetThumb type={asset.type} seed={asset.seed} />
+          <AssetThumb type={asset.type} seed={asset.seed} src={asset.thumbUrl} />
         </div>
         <div className="absolute inset-0 grid place-items-center bg-black/45 text-center">
           <div className="flex flex-col items-center gap-1.5 px-2">
@@ -93,7 +93,7 @@ export function AssetCard({
       )}
     >
       <div className="absolute inset-0">
-        <AssetThumb type={asset.type} seed={asset.seed} />
+        <AssetThumb type={asset.type} seed={asset.seed} src={asset.thumbUrl} />
       </div>
 
       {/* TYPE BADGE (top-right) — icon AND word.

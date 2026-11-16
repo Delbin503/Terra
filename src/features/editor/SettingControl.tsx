@@ -28,6 +28,8 @@ import {
   type CameraRig,
 } from "./camera-rig";
 import { CaptureExplainer, type CaptureTopic } from "./CaptureExplainer";
+import { ColorPicker } from "./ColorPicker";
+import { DEFAULT_OBJECT_COLOR, isOriginalColor, ORIGINAL_COLOR, ORIGINAL_SWATCH } from "./scene-palette";
 import { SettingExplainer, type ExplainSource } from "./SettingExplainer";
 import type { SettingKey } from "./ObjectPropertiesPanel";
 
@@ -192,7 +194,10 @@ export function SettingControl({
     object.materials.length > 1 &&
     (["color", "metallic", "roughness", "specular", "normal"] as SettingKey[]).includes(setting);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const isCustom = !(OBJECT_COLORS as readonly string[]).includes(material.color);
+  const isOriginal = isOriginalColor(material.color);
+  const isCustom = !isOriginal && !(OBJECT_COLORS as readonly string[]).includes(material.color);
+  /** the in-panel picker under Custom — opened by Custom, closed by a swatch or Default */
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   /** A wrapped sky can only travel up and down — see the Position block. */
   const skyOnlyZ =
@@ -446,51 +451,88 @@ export function SettingControl({
 
         {setting === "color" && (
           <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap gap-2">
+            {/* DEFAULT LEADS THE ROW. It is a colour choice like the others —
+                the model's own colours, no tint — so it sits with them, as the
+                first dot, rather than in a box of its own. It is also what a
+                slot starts as, so it is the way back after trying a few. */}
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                aria-label="Default — the model's original colours"
+                title="Default · original colours"
+                aria-pressed={isOriginal}
+                data-ui="color-default"
+                onClick={() => {
+                  setPickerOpen(false);
+                  onMaterial({ color: ORIGINAL_COLOR });
+                }}
+                style={{ background: ORIGINAL_SWATCH }}
+                className={cn(
+                  "grid h-7 w-7 place-items-center rounded-full ring-2 ring-offset-2 ring-offset-transparent transition-transform hover:scale-105",
+                  isOriginal ? "ring-brand" : "ring-transparent"
+                )}
+              >
+                <Icon name="undo" size={12} className="text-black/70" />
+              </button>
               {OBJECT_COLORS.map((c) => (
                 <button
                   key={c}
                   type="button"
                   aria-label={c}
+                  aria-pressed={material.color === c}
                   data-ui={`color-${c}`}
-                  onClick={() => onMaterial({ color: c })}
+                  onClick={() => {
+                    setPickerOpen(false);
+                    onMaterial({ color: c });
+                  }}
                   style={{ background: c }}
                   className={cn(
-                    "h-8 w-8 rounded-full ring-2 ring-offset-2 ring-offset-transparent transition-transform hover:scale-105",
+                    "h-7 w-7 rounded-full ring-2 ring-offset-2 ring-offset-transparent transition-transform hover:scale-105",
                     material.color === c ? "ring-brand" : "ring-transparent"
                   )}
                 />
               ))}
             </div>
 
-            {/* Custom colour. The native picker is a full-size transparent
-                overlay so the visible swatch can be styled freely — styling
-                <input type="color"> directly is inconsistent across browsers. */}
-            <label
+            {/* CUSTOM, on its own row. The picker — drawn in this panel's
+                glass, not the browser's white system popover — only opens when
+                Custom is clicked, and folds away again on a second click or
+                when a dot is picked. */}
+            <button
+              type="button"
               data-ui="color-custom"
-              className="flex cursor-pointer items-center gap-2.5 border-t border-glass/10 pt-3"
+              aria-expanded={pickerOpen}
+              onClick={() => setPickerOpen((o) => !o)}
+              className="flex w-full items-center gap-2.5 border-t border-glass/10 pt-3 text-left"
             >
               <span
-                style={{ background: material.color }}
+                style={{ background: isCustom ? material.color : undefined }}
                 className={cn(
-                  "relative grid h-8 w-8 shrink-0 place-items-center rounded-full ring-2 ring-offset-2 ring-offset-transparent transition-transform hover:scale-105",
-                  isCustom ? "ring-brand" : "ring-glass/25"
+                  "grid h-8 w-8 shrink-0 place-items-center rounded-full ring-2 ring-offset-2 ring-offset-transparent transition-transform hover:scale-105",
+                  isCustom ? "ring-brand" : "bg-glass/15 ring-glass/25"
                 )}
               >
-                {!isCustom && <Icon name="create" size={13} className="text-white/90" />}
-                <input
-                  type="color"
-                  aria-label="Custom colour"
-                  value={material.color}
-                  onChange={(e) => onMaterial({ color: e.target.value })}
-                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                />
+                {!isCustom && <Icon name="create" size={13} className="text-content" />}
               </span>
-              <span className="min-w-0">
+              <span className="min-w-0 flex-1">
                 <span className="type-label block text-content">Custom</span>
-                <span className="type-eyebrow block tabular-nums text-content-subtle">{material.color}</span>
+                <span className="type-caption block tabular-nums text-content-subtle">
+                  {isCustom ? material.color.toUpperCase() : "Pick any colour"}
+                </span>
               </span>
-            </label>
+              <Icon
+                name="chevron-down"
+                size={14}
+                className={cn("shrink-0 text-content-subtle transition-transform", pickerOpen && "rotate-180")}
+              />
+            </button>
+
+            {pickerOpen && (
+              <ColorPicker
+                value={isOriginal ? DEFAULT_OBJECT_COLOR : material.color}
+                onChange={(hex) => onMaterial({ color: hex })}
+              />
+            )}
           </div>
         )}
 

@@ -1654,7 +1654,11 @@ function cameraSummary(rig: ReturnType<typeof rigState>): string {
 function outputSummary(order: WorkOrder): string {
   const { width, height } = order.output.resolution;
   const annotations = Object.values(order.output.annotations).filter(Boolean).length;
-  return `${order.output.images ? "Images" : "No type"} · ${width}×${height} · ${annotations} annotations`;
+  const base = `${order.output.images ? "Images" : "No type"} · ${width}×${height} · ${annotations} annotations`;
+  /* Only the off state earns a word here. MAT on is the default and the row
+     is already long; MAT off changes what lands in the archive, and finding
+     that out after the run is exactly what this panel exists to prevent. */
+  return order.output.mat ? base : `${base} · no MAT`;
 }
 
 /** The master row, closed: the hero first, then what else is in the frame with
