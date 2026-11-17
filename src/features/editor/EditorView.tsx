@@ -2026,8 +2026,9 @@ export function EditorView({
           onCancel={() => setExitAsking(false)}
           onConfirm={() => {
             setExitAsking(false);
-            // The app is a hash router — clearing the hash IS going home.
-            window.location.hash = "";
+            // The app is a hash router — #home IS going home. (An empty hash
+            // is the PRD front page now.)
+            window.location.hash = "#home";
           }}
         />
       )}

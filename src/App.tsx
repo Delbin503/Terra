@@ -9,10 +9,14 @@ import { SettingsProvider } from "@/features/settings/settings-store";
 import { SettingsToast } from "@/features/settings/settings-toast";
 import { isSettingsPage } from "@/features/settings/settings-data";
 import { isPlanId } from "@/features/settings/subscription-data";
+import { PrdHub } from "@/features/prd/PrdHub";
+import { PrdPage } from "@/features/prd/PrdPage";
+import { prdById } from "@/features/prd/prd-data";
 
-/** Minimal hash router — #editor is the 3D editor, #settings the account shell;
- *  everything else is the home page. The design system reference is a static
- *  page at /_sb-preview.html. */
+/** Minimal hash router — no hash is the PRD front page, #prd/<id> one PRD,
+ *  #editor the 3D editor, #settings the account shell; everything else (#home
+ *  included) is the home page. The design system reference is a static page at
+ *  /_sb-preview.html. */
 function useHash() {
   return useSyncExternalStore(
     (cb) => {
@@ -73,14 +77,23 @@ export default function App() {
 
   const exit = (to: Destination = "home") => {
     setLanding(to);
-    window.location.hash = "";
+    // The front page is the PRD hub now, so "back to the app" has to name it.
+    window.location.hash = "#home";
   };
+
+  /* The front page: whatever the server opens on. Only an empty hash lands
+     here, so every other link into the app (#home, #editor, #settings, a
+     shared #whats-new link) goes where it always did. */
+  const onFrontPage = hash === "" || hash === "#";
+  const prd = hash.startsWith("#prd/") ? prdById(hash.slice("#prd/".length)) : undefined;
 
   let view = <HomePage at={landing} runs={runs} />;
   if (inEditor) {
     view = <EditorView runs={runs} {...(editorName ? { projectName: editorName } : null)} />;
   }
   if (inSettings) view = <SettingsView onExit={exit} />;
+  if (prd) view = <PrdPage prd={prd} />;
+  if (onFrontPage || (hash.startsWith("#prd/") && !prd)) view = <PrdHub />;
 
   /**
    * THE ACCOUNT STORE WRAPS ALL THREE VIEWS, not just Settings.

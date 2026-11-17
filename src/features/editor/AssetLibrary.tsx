@@ -245,34 +245,48 @@ export function AssetLibrary({
     pauseThumbPreload(true);
     return () => pauseThumbPreload(false);
   }, []);
-  /* TWO ROWS, PAGED. The Assets API catalogue is ~1,600 records. The grid
-     fits exactly two rows of square cards to the panel's height, as many
-     columns as the width takes, and pages through the rest — a page number
-     says where you are in the catalogue, which an endless scroll never did. */
+  /* FOUR ROWS A PAGE, TWO IN VIEW. The Assets API catalogue is ~1,600
+     records. Cards keep the library's own size (128px, stretched just enough
+     to fill the width), and the grid's window is exactly two rows of them
+     tall — the panel takes its height from that, so the view ends on the
+     second row instead of showing a slice of the third. The other two rows of
+     the page are a scroll away; the pager sits under the scrolling grid, so
+     it is always in reach, and a page number says where you are in the
+     catalogue, which an endless scroll never did. */
   const GAP = 12;
+  const CARD = 128;
+  const ROWS_PER_PAGE = 4;
+  const ROWS_IN_VIEW = 2;
   const [gridEl, setGridEl] = useState<HTMLDivElement | null>(null);
-  const [box, setBox] = useState({ w: 0, h: 0 });
+  const [gridW, setGridW] = useState(0);
   useEffect(() => {
     if (!gridEl) return;
-    const ro = new ResizeObserver(([e]) => setBox({ w: e.contentRect.width, h: e.contentRect.height }));
+    const ro = new ResizeObserver(([e]) => setGridW(e.contentRect.width));
     ro.observe(gridEl);
     return () => ro.disconnect();
   }, [gridEl]);
-  // Square cards: the row height sets the size, then the columns stretch it
-  // down just enough to fill the width exactly.
-  const rowH = box.h > 0 ? (box.h - GAP) / 2 : 128;
-  const cols = box.w > 0 ? Math.max(1, Math.ceil((box.w + GAP) / (rowH + GAP))) : 6;
-  const cell = box.w > 0 ? Math.floor((box.w - (cols - 1) * GAP) / cols) : 128;
+  /** the most a card is stretched before another column is added instead */
+  const MAX_CARD = 136;
+  const fit = (n: number) => Math.floor((gridW - (n - 1) * GAP) / n);
+  let cols = gridW > 0 ? Math.max(1, Math.floor((gridW + GAP) / (CARD + GAP))) : 6;
+  if (gridW > 0 && fit(cols) > MAX_CARD) cols += 1;
+  const cell = gridW > 0 ? fit(cols) : CARD;
+  /** the grid's visible height: two whole rows, plus the 4px the cards lift on hover */
+  const gridH = ROWS_IN_VIEW * cell + (ROWS_IN_VIEW - 1) * GAP + 4;
   const showSpace = category === "utilities" && !!onDefineSpace;
   const tiles = useMemo<(Asset | "space")[]>(
     () => [...(showSpace ? (["space"] as const) : []), ...visible],
     [showSpace, visible]
   );
-  const perPage = cols * 2;
+  const perPage = cols * ROWS_PER_PAGE;
   const pageCount = Math.max(1, Math.ceil(tiles.length / perPage));
   const [page, setPage] = useState(0);
   const listKey = `${category}|${query}|${tags.join()}|${types.join()}|${sort}|${openFolder?.id ?? ""}`;
   useEffect(() => setPage(0), [listKey]);
+  // A new page starts at its first row.
+  useEffect(() => {
+    gridEl?.scrollTo({ top: 0 });
+  }, [page, listKey, gridEl]);
   const cur = Math.min(page, pageCount - 1);
   const pageTiles = tiles.slice(cur * perPage, (cur + 1) * perPage);
   const tagOptions = useMemo(() => collectTags(scope), [scope]);
@@ -460,7 +474,7 @@ export function AssetLibrary({
            library opened by snapping into place fully formed, which on a
            surface this large reads as the screen changing rather than as a
            thing arriving — and gave no clue which button had produced it. */
-        className="pointer-events-auto absolute bottom-6 left-6 flex h-[40vh] max-h-[392px] min-h-[260px] animate-sheet-in overflow-hidden !rounded-3xl transition-[right] duration-300"
+        className="pointer-events-auto absolute bottom-6 left-6 flex max-h-[calc(100vh-120px)] min-h-[260px] animate-sheet-in overflow-hidden !rounded-3xl transition-[right] duration-300"
         // Driven by style rather than a class pair so the caller's inset can be
         // added to it — two variants became four the moment TerraGen also
         // needed to push the panel in.
@@ -640,7 +654,12 @@ export function AssetLibrary({
           )}
 
           {/* Grid */}
-          <div className={cn("flex min-h-0 flex-1 flex-col p-3", showFolderGrid && "overflow-y-auto")}>
+          {/* At least as tall as the two-row grid, so the panel keeps its size
+              when a view is empty or shows folders instead. */}
+          <div
+            className={cn("flex min-h-0 flex-1 flex-col p-3", showFolderGrid && "overflow-y-auto")}
+            style={{ minHeight: gridH + 24 }}
+          >
             {/* Where the real catalogue stands — only while it matters. */}
             {!showFolderGrid && !picking && store.catalogue.status !== "ready" && (
               <p data-ui="catalogue-status" className="type-caption mb-3 flex items-center gap-2 text-content-subtle">
@@ -699,11 +718,15 @@ export function AssetLibrary({
               </div>
             ) : tiles.length > 0 ? (
               <>
-                {/* Measured, not scrolled: the cards are laid out absolutely so
-                    their size never feeds back into the box that sizes them. */}
-                <div ref={setGridEl} data-ui="asset-grid" className="relative min-h-0 flex-1">
+                {/* The page scrolls; the pager under it does not. */}
+                <div
+                  ref={setGridEl}
+                  data-ui="asset-grid"
+                  className="-mx-1 shrink-0 overflow-y-auto overscroll-contain px-1 pt-1"
+                  style={{ height: gridH }}
+                >
                   <div
-                    className="absolute inset-0 grid content-start"
+                    className="grid content-start"
                     style={{ gridTemplateColumns: `repeat(${cols}, ${cell}px)`, gridAutoRows: `${cell}px`, gap: GAP }}
                   >
                     {pageTiles.map((a) =>
