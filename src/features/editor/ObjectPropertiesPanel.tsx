@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/icons";
 import { Panel, PanelHeader, PanelEyebrow, PanelBody } from "./ui";
-import { Tooltip } from "@/components/ui";
+import { Switch, Tooltip } from "@/components/ui";
 import {
   hasResolution,
   isWorldAsset,
@@ -260,8 +260,14 @@ export function ObjectPropertiesPanel({
   height,
   bounds,
   onToggleBounds,
+  onToggleSnap,
+  snapAvailable = true,
 }: {
   object: SceneObject;
+  /** another object is near enough to snap onto; false disables the switch */
+  snapAvailable?: boolean;
+  /** the Snap to Object switch under the transform rows; omitted, no switch */
+  onToggleSnap?: (on: boolean) => void;
   /** whether the selected object's bounding box is drawn */
   bounds?: boolean;
   /** the toggle in the Transform header; omitted, there is no button */
@@ -454,6 +460,40 @@ export function ObjectPropertiesPanel({
             </button>
           );
         })}
+
+        {/* SNAP TO OBJECT. A switch, not a setting row: there is nothing to
+            open, only a state to leave the object in. Not for a camera (the
+            rig frames the master, it doesn't stand on it) or a sky (a dome
+            has no underside). */}
+        {group === "Transform" && onToggleSnap && !isCamera && !isSky(object.source) && (
+          /* Disabled while nothing is near: the snap only ever lands on another
+             object, so with none around the switch would do nothing. It keeps
+             its value, and comes back the moment the object is moved near one. */
+          <div
+            data-ui="prop-snap-to-object"
+            title={snapAvailable ? undefined : "Move this near another object to snap onto it"}
+            className={cn(
+              "mt-1 flex items-center gap-2.5 border-t border-glass/10 px-2.5 pb-1 pt-2.5",
+              snapAvailable ? "text-content-muted" : "text-content-subtle"
+            )}
+          >
+            <Icon name="snap" size={15} />
+            <span className="min-w-0 flex-1">
+              <span className="type-body block">Snap to Object</span>
+              {!snapAvailable && (
+                <span data-ui="prop-snap-hint" className="type-caption block text-content-subtle">
+                  No object nearby
+                </span>
+              )}
+            </span>
+            <Switch
+              label="Snap to Object"
+              checked={!!object.snapToObject}
+              disabled={!snapAvailable}
+              onChange={onToggleSnap}
+            />
+          </div>
+        )}
       </PanelBody>
 
       {/* No plan footer. The sweep length, pass grid and frame total belong to

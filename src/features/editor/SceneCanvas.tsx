@@ -22,6 +22,7 @@ const UP = new Vector3(0, 1, 0);
 import { SceneObjectMesh } from "./SceneObjectMesh";
 import { CameraObjectMesh, GhostCamera } from "./CameraObjectMesh";
 import { applyUnrealGizmoSkin } from "./unreal-gizmo";
+import { hasSnapTarget, snapDown } from "./snap-to-object";
 import { ViewCube, CUBE_PX, TRI_TIP } from "./ViewCube";
 import { distance } from "./camera-rig";
 import { AXIS, CAMERA_RIG, READOUT } from "./scene-palette";
@@ -528,6 +529,8 @@ interface SceneCanvasProps {
   showAxes?: boolean;
   /** Draw an orange box around the selected object's extent. */
   showBounds?: boolean;
+  /** Told whether the selection has another object near enough to snap to. */
+  onSnapAvailable?: (available: boolean) => void;
   /**
    * Extra px the orientation cube steps left, away from the right edge.
    *
@@ -1943,6 +1946,7 @@ export function SceneCanvas({
   showGrid = false,
   showAxes = false,
   showBounds = false,
+  onSnapAvailable,
   substitute,
   gizmoInset = 0,
   locked = false,
@@ -2117,8 +2121,35 @@ export function SceneCanvas({
     !scene.selected?.locked &&
     !(scene.selectedId && guideHides?.includes(scene.selectedId));
 
+  /**
+   * What a snapping object can come to rest on: every other drawn object with a
+   * body. Not cameras (a rig marker isn't furniture), skies or splats (a dome
+   * and a point cloud have no surface to stand on), and not group containers —
+   * their members are registered on their own and are what the rays hit.
+   */
+  const snapTargets = (selfId: string) =>
+    scene.objects
+      .filter(
+        (o) =>
+          o.id !== selfId &&
+          !o.hidden &&
+          !o.group &&
+          o.source !== "camera" &&
+          o.source !== "environment" &&
+          o.source !== "skybox" &&
+          o.source !== "splat"
+      )
+      .map((o) => meshes[o.id])
+      .filter((n): n is Object3D => !!n);
+
   const commitTransform = () => {
     if (!selMesh || !scene.selectedId) return;
+    // Snap first, so the pose written below is the one resting on the surface.
+    // TransformControls recomputes the position from where the drag started on
+    // every move, so this lift never accumulates across a drag.
+    if (scene.selected?.snapToObject && !(substitute && substitute.object.id === scene.selectedId)) {
+      snapDown(selMesh, snapTargets(scene.selectedId));
+    }
     const pose = {
       position: [selMesh.position.x, selMesh.position.y, selMesh.position.z] as [
         number,
@@ -2141,6 +2172,34 @@ export function SceneCanvas({
     }
     scene.update(scene.selectedId, pose);
   };
+
+  /* Turning Snap to Object on settles the object straight away — and so does
+     selecting one that already has it on once its model has loaded — rather
+     than waiting for the next drag to drop it. Keyed on the switch, the
+     selection and the node, not on every scene change, so it never fights a
+     drag in progress. */
+  /* Whether anything is near enough to snap to — re-read whenever the scene
+     changes (a drag included) or a model finishes loading, and reported up so
+     the panel can disable its switch while there is nothing there. */
+  const snapReport = useRef(onSnapAvailable);
+  snapReport.current = onSnapAvailable;
+  useEffect(() => {
+    const id = scene.selectedId;
+    snapReport.current?.(!!selMesh && !!id && hasSnapTarget(selMesh, snapTargets(id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scene.objects, selMesh, meshes, scene.selectedId]);
+
+  const snapOn = !!scene.selected?.snapToObject;
+  useEffect(() => {
+    const id = scene.selectedId;
+    if (!snapOn || !selMesh || !id) return;
+    if (snapDown(selMesh, snapTargets(id))) {
+      scene.update(id, {
+        position: [selMesh.position.x, selMesh.position.y, selMesh.position.z],
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapOn, selMesh, scene.selectedId]);
 
   // Framing for the focus fly-in. A camera isn't framed on its own body — its
   // job is to capture, so selecting one pulls back to show the WHOLE rig (both

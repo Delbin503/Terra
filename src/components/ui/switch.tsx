@@ -11,12 +11,15 @@ export function Switch({
   checked,
   onChange,
   label,
+  disabled,
   className,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
   /** the accessible name — the visible text lives beside it, not in here */
   label: string;
+  /** shown but inert — nothing it could switch is available right now */
+  disabled?: boolean;
   className?: string;
 }) {
   return (
@@ -25,9 +28,10 @@ export function Switch({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative h-5 w-9 shrink-0 rounded-full transition-colors",
+        "relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40",
         checked ? "bg-brand" : "bg-surface-overlay border border-line/15",
         className
       )}

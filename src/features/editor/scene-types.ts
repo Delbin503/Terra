@@ -287,6 +287,13 @@ export interface SceneObject {
   hidden?: boolean;
   /** Pinned in place — selectable and listed, but the gizmo won't move it. */
   locked?: boolean;
+  /**
+   * Rests on whatever is underneath. While on, every move, turn or resize drops
+   * the object onto the highest surface below its footprint — another object,
+   * or the ground when there is nothing — so it can be slid across a table top
+   * without hovering above it or sinking into it.
+   */
+  snapToObject?: boolean;
   /** Set on the two cameras of a capture rig — which end of the sweep this is. */
   cameraRole?: "start" | "end";
   /** The rig both cameras belong to. Moving one moves the other. */

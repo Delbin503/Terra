@@ -824,6 +824,8 @@ export function EditorView({
   const [viewHelpers, setViewHelpers] = useState({ grid: false, axes: false });
   // The selected object's bounding box — on by default, toggled from Transform.
   const [showBounds, setShowBounds] = useState(true);
+  /** Whether the selection has another object near enough to snap onto. */
+  const [snapAvailable, setSnapAvailable] = useState(false);
 
   /**
    * Back to the view the editor opened on, eased rather than cut so you can
@@ -1314,6 +1316,7 @@ export function EditorView({
         showGrid={viewHelpers.grid}
         showAxes={viewHelpers.axes}
         showBounds={showBounds}
+        onSnapAvailable={setSnapAvailable}
       />
 
       {/* Overlay chrome */}
@@ -1934,6 +1937,8 @@ export function EditorView({
               height={cameraRelation?.span ?? null}
               bounds={showBounds}
               onToggleBounds={() => setShowBounds((v) => !v)}
+              onToggleSnap={(on) => scene.update(selected.id, { snapToObject: on })}
+              snapAvailable={snapAvailable}
             />
           )}
         </div>

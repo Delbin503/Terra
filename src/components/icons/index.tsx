@@ -149,6 +149,7 @@ import {
   Minus,
   Grid3x3,
   SquareDashed,
+  Magnet,
   Axis3d,
   ThumbsDown,
   ArrowUp,
@@ -304,6 +305,7 @@ export const iconRegistry = {
   "view-axes": Axis3d,
   "view-reset": RotateCcw,
   bounds: SquareDashed,
+  snap: Magnet,
   /** chat reply feedback */
   dislike: ThumbsDown,
   /** a composer's send, Gemini-style: an arrow in a circle */
