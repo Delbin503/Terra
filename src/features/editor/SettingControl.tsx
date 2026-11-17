@@ -4,7 +4,10 @@ import { GlassPanel } from "@/components/glass";
 import { Icon } from "@/components/icons";
 import { AxisNumber, AxisSlider, FactorCard } from "./controls-ui";
 import { NumberInput } from "./ui";
+import { Tooltip } from "@/components/ui";
 import {
+  DEFAULT_MATERIAL,
+  DEFAULT_SKY_INFLUENCE,
   materialOf,
   OBJECT_COLORS,
   RESOLUTION_LABEL,
@@ -15,6 +18,7 @@ import {
   type SceneObject,
 } from "./scene-types";
 import {
+  CAMERA_DEFAULTS,
   DISTANCE_SHOTS_RANGE,
   SHOTS_RANGE,
   ZOOM_STEP,
@@ -232,6 +236,73 @@ export function SettingControl({
      offers the fix in place. */
   const needsMaster = isCamera && !camera && NEEDS_MASTER.includes(setting);
 
+  /**
+   * RESET, per setting: what "back to the start" means for each one. Every
+   * setting the panel can show has one, and the button is always live —
+   * pressing it on a value that is already the default simply changes nothing.
+   *
+   * Position goes to the centre of the scene on the ground plane (X and Z to 0,
+   * height kept), the spot a new object lands on. A sky only travels in Z, so
+   * its horizon goes back to 0. A camera's orbit, reach and climb go back to
+   * what a fresh rig starts with: the full 0–360° arc from 0°, a near reach of
+   * 45% of the far one, and level.
+   */
+  const reset: (() => void) | null = (() => {
+    if (needsMaster) return null;
+    switch (setting) {
+      case "position": {
+        const [, y] = object.position;
+        return () => onChange({ position: skyOnlyZ ? [object.position[0], object.position[1], 0] : [0, y, 0] });
+      }
+      case "rotation":
+        if (isCamera)
+          return camera && onOrbit
+            ? () => {
+                onRigChange?.({ orbitStart: CAMERA_DEFAULTS.orbitStart, orbitEnd: CAMERA_DEFAULTS.orbitEnd });
+                onOrbit(CAMERA_DEFAULTS.orbitStart);
+              }
+            : null;
+        return () => onChange({ rotationDeg: [0, 0, 0] });
+      case "scale":
+        return () => onChange({ scale: [1, 1, 1] });
+      case "color":
+        return () => {
+          setPickerOpen(false);
+          onMaterial({ color: ORIGINAL_COLOR });
+        };
+      case "metallic":
+        return () => onMaterial({ metalness: DEFAULT_MATERIAL.metalness });
+      case "roughness":
+        return () => onMaterial({ roughness: DEFAULT_MATERIAL.roughness });
+      case "specular":
+        return () => onMaterial({ specular: DEFAULT_MATERIAL.specular });
+      case "normal":
+        return () => onMaterial({ normal: DEFAULT_MATERIAL.normal });
+      case "brightness":
+        return () => onChange({ brightness: 1 });
+      case "skyInfluence":
+        return () => onChange({ skyInfluence: DEFAULT_SKY_INFLUENCE });
+      case "resolution":
+        return () => onChange({ resolution: "auto" });
+      case "cameraMode":
+        return rig && onRigChange ? () => onRigChange({ mode: CAMERA_DEFAULTS.mode }) : null;
+      case "distance":
+        return camera && onDistance
+          ? () => onDistance(Math.max(camera.nearLimit, camera.farDistance * 0.45))
+          : null;
+      case "height":
+        return camera && onHeight ? () => onHeight(0) : null;
+      case "shotsPerDistance":
+        return rig && onRigChange && camera
+          ? () => onRigChange({ shotsPerDistance: Math.min(CAMERA_DEFAULTS.shotsPerDistance, maxStops(camera.sweep)) })
+          : null;
+      case "shotsPerRotation":
+        return rig && onRigChange ? () => onRigChange({ shotsPerRotation: CAMERA_DEFAULTS.shotsPerRotation }) : null;
+      default:
+        return null;
+    }
+  })();
+
   const setAxis = (key: "position" | "rotationDeg" | "scale", i: number, v: number) => {
     if (key === "scale" && uniform) return onChange({ scale: [v, v, v] });
     const next = [...object[key]] as [number, number, number];
@@ -286,6 +357,19 @@ export function SettingControl({
               >
                 <Icon name="lock" size={11} /> Uniform
               </button>
+            )}
+            {reset && (
+              <Tooltip label={setting === "position" && !skyOnlyZ ? "Reset to scene centre" : "Reset to default"} side="top" tone="glass">
+                <button
+                  type="button"
+                  aria-label={`Reset ${LABEL[setting]}`}
+                  data-ui="setting-reset"
+                  onClick={reset}
+                  className="grid h-6 w-6 place-items-center rounded-md text-content-muted transition-colors hover:bg-glass/15 hover:text-content"
+                >
+                  <Icon name="retry" size={13} />
+                </button>
+              </Tooltip>
             )}
             {/* Every setting has one — see EXPLAINS and SettingExplainer. */}
             <button

@@ -822,6 +822,8 @@ export function EditorView({
 
   /** Viewport helpers — independent switches, so grid and axes can both be on. */
   const [viewHelpers, setViewHelpers] = useState({ grid: false, axes: false });
+  // The selected object's bounding box — on by default, toggled from Transform.
+  const [showBounds, setShowBounds] = useState(true);
 
   /**
    * Back to the view the editor opened on, eased rather than cut so you can
@@ -1311,6 +1313,7 @@ export function EditorView({
         gizmoInset={gizmoInset}
         showGrid={viewHelpers.grid}
         showAxes={viewHelpers.axes}
+        showBounds={showBounds}
       />
 
       {/* Overlay chrome */}
@@ -1929,6 +1932,8 @@ export function EditorView({
                   : null
               }
               height={cameraRelation?.span ?? null}
+              bounds={showBounds}
+              onToggleBounds={() => setShowBounds((v) => !v)}
             />
           )}
         </div>

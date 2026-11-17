@@ -2,8 +2,12 @@ import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState,
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Grid, Lightformer, Line, OrbitControls, GizmoHelper, Html, TransformControls } from "@react-three/drei";
 import {
+  Box3,
+  Box3Helper,
+  Color,
   Mesh,
   Object3D,
+  type LineBasicMaterial,
   Plane,
   Vector3,
   type Camera,
@@ -522,6 +526,8 @@ interface SceneCanvasProps {
   showGrid?: boolean;
   /** Draw the world axes at the origin, labelled X / Y / Z. */
   showAxes?: boolean;
+  /** Draw an orange box around the selected object's extent. */
+  showBounds?: boolean;
   /**
    * Extra px the orientation cube steps left, away from the right edge.
    *
@@ -1936,6 +1942,7 @@ export function SceneCanvas({
   labelVolumeId,
   showGrid = false,
   showAxes = false,
+  showBounds = false,
   substitute,
   gizmoInset = 0,
   locked = false,
@@ -2233,6 +2240,15 @@ export function SceneCanvas({
           grid across a dataset image is a picture of the tool. */}
       {!pure && showGrid && <GroundGrid />}
       {!pure && showAxes && <WorldAxes />}
+      {/* The selected object's extent. Not for a sky (its box is the world)
+          or a capture rig (the frustum already draws its shape). */}
+      {!pure &&
+        showBounds &&
+        scene.selected &&
+        meshes[scene.selected.id] &&
+        !["environment", "skybox", "camera"].includes(scene.selected.source) && (
+          <SelectionBounds node={meshes[scene.selected.id]} />
+        )}
 
       {/* The volumes, and the affordances that change them.
           Drawn AFTER the world so their translucent faces composite over the
@@ -2519,4 +2535,34 @@ class SkyBoundary extends Component<{ children: ReactNode; fallback: ReactNode }
   render() {
     return this.state.failed ? this.props.fallback : this.props.children;
   }
+}
+
+/**
+ * The selected object's bounding box: an axis-aligned orange frame around
+ * everything it draws, refitted each frame so it follows a drag, a scale or a
+ * model that finishes streaming in. Drawn over the scene and never pickable,
+ * so it marks the selection without stealing clicks from what's behind it.
+ */
+function SelectionBounds({ node }: { node: Object3D }) {
+  const helper = useMemo(() => {
+    const h = new Box3Helper(new Box3(), new Color("#f36f16"));
+    const m = h.material as LineBasicMaterial;
+    m.depthTest = false;
+    m.transparent = true;
+    m.opacity = 0.9;
+    h.renderOrder = 999;
+    h.raycast = () => {};
+    return h;
+  }, []);
+  useFrame(() => {
+    helper.box.setFromObject(node);
+  });
+  useEffect(
+    () => () => {
+      helper.geometry.dispose();
+      (helper.material as LineBasicMaterial).dispose();
+    },
+    [helper]
+  );
+  return <primitive object={helper} />;
 }

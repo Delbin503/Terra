@@ -110,7 +110,7 @@ export function ObjectToolbar({
           aria-pressed={!!t.active}
           onClick={t.onClick}
           className={cn(
-            "type-label glass glass-interactive flex min-w-[76px] flex-col items-center gap-1 !rounded-2xl px-4 py-2.5",
+            "type-label glass glass-interactive flex h-10 items-center gap-2 !rounded-xl px-3.5",
             // Active tiles tint via .glass-role (globals.css) rather than a
             // `bg-<role>/x` utility: that sets background-color, which replaces
             // the glass ink and leaves the label — the same role colour — sitting
@@ -119,10 +119,10 @@ export function ObjectToolbar({
               ? "glass-role glass-role-brand text-brand-on-glass"
               : t.danger
                 ? "text-danger"
-                : "text-content-muted hover:text-content"
+                : "text-content/90 hover:text-content"
           )}
         >
-          <Icon name={t.icon} size={18} />
+          <Icon name={t.icon} size={17} />
           {t.label}
         </button>
       ))}
@@ -172,16 +172,16 @@ function RoleTile({
       title={isMaster ? "Release as master" : "Mark as the master object"}
       onClick={() => onSetRole(isMaster ? "none" : "master")}
       className={cn(
-        "type-label glass glass-interactive flex min-w-[76px] flex-col items-center gap-1 !rounded-2xl px-4 py-2.5",
+        "type-label glass glass-interactive flex h-10 items-center gap-2 !rounded-xl px-3.5",
         // Only the master state tints. A distractor or background object still
         // reads as itself in the layer tree and the viewport outline; this tile
         // answers one question, so it only lights for one answer.
         isMaster
           ? `${ROLE_GLASS.master} ${ROLE_TEXT.master}`
-          : "text-content-muted hover:text-content"
+          : "text-content/90 hover:text-content"
       )}
     >
-      <Icon name="master" size={18} />
+      <Icon name="master" size={17} />
       {isMaster ? ROLE_BADGE.master : "Master"}
     </button>
   );

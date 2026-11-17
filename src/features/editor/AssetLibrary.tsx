@@ -245,24 +245,36 @@ export function AssetLibrary({
     pauseThumbPreload(true);
     return () => pauseThumbPreload(false);
   }, []);
-  /* THE GRID GROWS AS YOU SCROLL. The Assets API catalogue is ~1,600 records;
-     mounting a card for each at once stalls the panel, so it starts with a few
-     screens' worth and adds more when the end comes into view. */
-  const PAGE = 60;
-  const [shown, setShown] = useState(PAGE);
-  const listKey = `${category}|${query}|${tags.join()}|${types.join()}|${sort}|${openFolder?.id ?? ""}`;
-  useEffect(() => setShown(PAGE), [listKey]);
-  const moreRef = useRef<HTMLDivElement>(null);
+  /* TWO ROWS, PAGED. The Assets API catalogue is ~1,600 records. The grid
+     fits exactly two rows of square cards to the panel's height, as many
+     columns as the width takes, and pages through the rest — a page number
+     says where you are in the catalogue, which an endless scroll never did. */
+  const GAP = 12;
+  const [gridEl, setGridEl] = useState<HTMLDivElement | null>(null);
+  const [box, setBox] = useState({ w: 0, h: 0 });
   useEffect(() => {
-    const el = moreRef.current;
-    if (!el || shown >= visible.length) return;
-    const io = new IntersectionObserver(
-      (entries) => entries.some((e) => e.isIntersecting) && setShown((n) => n + PAGE),
-      { rootMargin: "400px" }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [shown, visible.length]);
+    if (!gridEl) return;
+    const ro = new ResizeObserver(([e]) => setBox({ w: e.contentRect.width, h: e.contentRect.height }));
+    ro.observe(gridEl);
+    return () => ro.disconnect();
+  }, [gridEl]);
+  // Square cards: the row height sets the size, then the columns stretch it
+  // down just enough to fill the width exactly.
+  const rowH = box.h > 0 ? (box.h - GAP) / 2 : 128;
+  const cols = box.w > 0 ? Math.max(1, Math.ceil((box.w + GAP) / (rowH + GAP))) : 6;
+  const cell = box.w > 0 ? Math.floor((box.w - (cols - 1) * GAP) / cols) : 128;
+  const showSpace = category === "utilities" && !!onDefineSpace;
+  const tiles = useMemo<(Asset | "space")[]>(
+    () => [...(showSpace ? (["space"] as const) : []), ...visible],
+    [showSpace, visible]
+  );
+  const perPage = cols * 2;
+  const pageCount = Math.max(1, Math.ceil(tiles.length / perPage));
+  const [page, setPage] = useState(0);
+  const listKey = `${category}|${query}|${tags.join()}|${types.join()}|${sort}|${openFolder?.id ?? ""}`;
+  useEffect(() => setPage(0), [listKey]);
+  const cur = Math.min(page, pageCount - 1);
+  const pageTiles = tiles.slice(cur * perPage, (cur + 1) * perPage);
   const tagOptions = useMemo(() => collectTags(scope), [scope]);
   // Only the types this view actually contains, so the menu never offers a
   // filter that would empty the grid. Sorted by CONTENT_TYPES rather than by
@@ -628,7 +640,7 @@ export function AssetLibrary({
           )}
 
           {/* Grid */}
-          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          <div className={cn("flex min-h-0 flex-1 flex-col p-3", showFolderGrid && "overflow-y-auto")}>
             {/* Where the real catalogue stands — only while it matters. */}
             {!showFolderGrid && !picking && store.catalogue.status !== "ready" && (
               <p data-ui="catalogue-status" className="type-caption mb-3 flex items-center gap-2 text-content-subtle">
@@ -685,34 +697,50 @@ export function AssetLibrary({
                   />
                 )}
               </div>
-            ) : visible.length > 0 || (category === "utilities" && onDefineSpace) ? (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-3">
-                {/* A space is a utility in exactly the sense the capture rig is:
-                    scene apparatus you drop in, not content you made. It is not
-                    an Asset — it has no file, no thumbnail and no type — so it
-                    is a tile rather than a row in the list, which keeps
-                    `AssetType` from growing a member nothing else can handle. */}
-                {category === "utilities" && onDefineSpace && (
-                  <SpaceTile onPick={onDefineSpace} />
-                )}
-                {visible.slice(0, shown).map((a) => (
-                  <AssetCard
-                    key={a.id}
-                    asset={a}
-                    selectMode={selectMode}
-                    selected={selected.has(a.id)}
-                    // At the cap, unselected cards stop inviting a click they'd refuse.
-                    disabled={atPickLimit && !selected.has(a.id)}
-                    showMenu={!picking}
-                    onToggle={toggleSelect}
-                    onOpen={(x) => setDetailsId(x.id)}
-                    onMenu={openMenu}
+            ) : tiles.length > 0 ? (
+              <>
+                {/* Measured, not scrolled: the cards are laid out absolutely so
+                    their size never feeds back into the box that sizes them. */}
+                <div ref={setGridEl} data-ui="asset-grid" className="relative min-h-0 flex-1">
+                  <div
+                    className="absolute inset-0 grid content-start"
+                    style={{ gridTemplateColumns: `repeat(${cols}, ${cell}px)`, gridAutoRows: `${cell}px`, gap: GAP }}
+                  >
+                    {pageTiles.map((a) =>
+                      a === "space" ? (
+                        /* A space is a utility in exactly the sense the capture
+                           rig is: scene apparatus you drop in, not content you
+                           made. It is not an Asset — no file, no thumbnail, no
+                           type — so it is a tile rather than a row in the list. */
+                        <SpaceTile key="space" onPick={onDefineSpace!} />
+                      ) : (
+                        <AssetCard
+                          key={a.id}
+                          asset={a}
+                          selectMode={selectMode}
+                          selected={selected.has(a.id)}
+                          // At the cap, unselected cards stop inviting a click they'd refuse.
+                          disabled={atPickLimit && !selected.has(a.id)}
+                          showMenu={!picking}
+                          onToggle={toggleSelect}
+                          onOpen={(x) => setDetailsId(x.id)}
+                          onMenu={openMenu}
+                        />
+                      )
+                    )}
+                  </div>
+                </div>
+                {pageCount > 1 && (
+                  <Pager
+                    page={cur}
+                    pages={pageCount}
+                    from={cur * perPage + 1}
+                    to={Math.min(tiles.length, (cur + 1) * perPage)}
+                    total={tiles.length}
+                    onPage={setPage}
                   />
-                ))}
-                {shown < visible.length && (
-                  <div ref={moreRef} className="col-span-full h-px" aria-hidden />
                 )}
-              </div>
+              </>
             ) : (
               <EmptyState
                 icon={category === "uploads" ? "upload" : category === "meshes" ? "input-3d" : "search"}
@@ -1322,6 +1350,85 @@ function EmptyState({
           {actionLabel}
         </Button>
       )}
+    </div>
+  );
+}
+
+/**
+ * Page controls under the grid: where you are on the left, the pages on the
+ * right — first, last and the two either side of the current one, with an
+ * ellipsis for the gaps, so 139 pages still fit on one line.
+ */
+function Pager({
+  page,
+  pages,
+  from,
+  to,
+  total,
+  onPage,
+}: {
+  page: number;
+  pages: number;
+  from: number;
+  to: number;
+  total: number;
+  onPage: (p: number) => void;
+}) {
+  const nums: (number | "gap")[] = [];
+  for (let i = 0; i < pages; i++) {
+    if (i === 0 || i === pages - 1 || Math.abs(i - page) <= 1) nums.push(i);
+    else if (nums[nums.length - 1] !== "gap") nums.push("gap");
+  }
+  const btn =
+    "grid h-7 min-w-7 place-items-center rounded-lg px-1.5 type-caption-strong tabular-nums transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  return (
+    <div data-ui="asset-pager" className="mt-2.5 flex shrink-0 items-center gap-2">
+      <span className="type-caption tabular-nums text-content-subtle">
+        {from.toLocaleString("en-US")}–{to.toLocaleString("en-US")} of {total.toLocaleString("en-US")}
+      </span>
+      <div className="ml-auto flex items-center gap-1">
+        <button
+          type="button"
+          aria-label="Previous page"
+          disabled={page === 0}
+          onClick={() => onPage(page - 1)}
+          className={cn(btn, "text-content-muted hover:bg-glass/15 hover:text-content disabled:opacity-35 disabled:hover:bg-transparent")}
+        >
+          <Icon name="chevron-left" size={15} />
+        </button>
+        {nums.map((n, i) =>
+          n === "gap" ? (
+            <span key={`gap-${i}`} className="type-caption w-5 text-center text-content-subtle">
+              …
+            </span>
+          ) : (
+            <button
+              key={n}
+              type="button"
+              aria-label={`Page ${n + 1}`}
+              aria-current={n === page ? "page" : undefined}
+              onClick={() => onPage(n)}
+              className={cn(
+                btn,
+                n === page
+                  ? "bg-brand/15 text-brand ring-1 ring-brand/50"
+                  : "text-content-muted hover:bg-glass/15 hover:text-content"
+              )}
+            >
+              {n + 1}
+            </button>
+          )
+        )}
+        <button
+          type="button"
+          aria-label="Next page"
+          disabled={page >= pages - 1}
+          onClick={() => onPage(page + 1)}
+          className={cn(btn, "text-content-muted hover:bg-glass/15 hover:text-content disabled:opacity-35 disabled:hover:bg-transparent")}
+        >
+          <Icon name="chevron-right" size={15} />
+        </button>
+      </div>
     </div>
   );
 }

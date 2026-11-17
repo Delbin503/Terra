@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/icons";
 import { Panel, PanelHeader, PanelEyebrow, PanelBody } from "./ui";
+import { Tooltip } from "@/components/ui";
 import {
   hasResolution,
   isWorldAsset,
@@ -257,8 +258,14 @@ export function ObjectPropertiesPanel({
   orbit,
   zoom,
   height,
+  bounds,
+  onToggleBounds,
 }: {
   object: SceneObject;
+  /** whether the selected object's bounding box is drawn */
+  bounds?: boolean;
+  /** the toggle in the Transform header; omitted, there is no button */
+  onToggleBounds?: () => void;
   /** the capture rig this camera belongs to — null for ordinary objects */
   rig?: CameraRig | null;
   group: SettingGroup;
@@ -307,6 +314,23 @@ export function ObjectPropertiesPanel({
             ? "Appearance"
             : group}
         </PanelEyebrow>
+        {group === "Transform" && onToggleBounds && !isSky(object.source) && !isCamera && (
+          <Tooltip label={bounds ? "Hide bounding box" : "Show bounding box"} side="top" tone="glass">
+            <button
+              type="button"
+              data-ui="object-bounds-toggle"
+              aria-label={bounds ? "Hide bounding box" : "Show bounding box"}
+              aria-pressed={!!bounds}
+              onClick={onToggleBounds}
+              className={cn(
+                "-my-1 grid h-7 w-7 place-items-center rounded-lg transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                bounds ? "bg-glass/15 text-brand" : "text-content-muted hover:bg-glass/10 hover:text-content"
+              )}
+            >
+              <Icon name="bounds" size={16} strokeWidth={1.9} />
+            </button>
+          </Tooltip>
+        )}
       </PanelHeader>
 
       {/* No camera picker and no Uniform switch: the pair IS the rig, and every
