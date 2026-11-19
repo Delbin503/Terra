@@ -100,6 +100,7 @@ import {
   Send,
   ImagePlus,
   Minimize2,
+  Pause,
   Maximize2,
   ZoomIn,
   ZoomOut,
@@ -289,6 +290,7 @@ export const iconRegistry = {
   file: FileText,
   /** collapse a working panel down to its progress toast */
   minimize: Minimize2,
+  pause: Pause,
   /** open a panel at full size — the camera POV, expanded */
   maximize: Maximize2,
   "zoom-in": ZoomIn,

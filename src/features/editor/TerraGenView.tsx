@@ -244,6 +244,25 @@ export function TerraGenView({
    */
   const [collapsed, setCollapsed] = useState(false);
   /**
+   * THE DOCK STEPS ASIDE WHILE THE SWEEP PLAYS. Playing is watching, and the
+   * panel covers a third of the frame being watched — so Play folds it to its
+   * pill and Pause puts it back the way it was (a panel already folded before
+   * Play stays folded). Expanding it by hand mid-play is still allowed.
+   */
+  const [sweepPlaying, setSweepPlaying] = useState(false);
+  const foldedBeforePlay = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (sweepPlaying) {
+      if (foldedBeforePlay.current === null) foldedBeforePlay.current = collapsed;
+      setCollapsed(true);
+    } else if (foldedBeforePlay.current !== null) {
+      setCollapsed(foldedBeforePlay.current);
+      foldedBeforePlay.current = null;
+    }
+    // collapsed is read, not watched: only Play / Pause move the panel here
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sweepPlaying]);
+  /**
    * The asset library, as a bottom sheet over the stage — and what picking in
    * it means this time.
    *
@@ -747,6 +766,7 @@ export function TerraGenView({
         projectName={projectName}
         hidden={!preview}
         inset={stageInset}
+        onPlayingChange={setSweepPlaying}
       />
 
       {/* The mode switch. Top-left, where the editor keeps its project bar, so
@@ -1002,6 +1022,7 @@ function SweepRender({
   projectName,
   hidden,
   inset,
+  onPlayingChange,
 }: {
   scene: SceneApi;
   rig: ReturnType<typeof rigState>;
@@ -1018,10 +1039,21 @@ function SweepRender({
    * exact cold start the loader exists to cover.
    */
   hidden?: boolean;
+  /** told when the sweep starts and stops playing — the dock folds out of its way */
+  onPlayingChange?: (playing: boolean) => void;
 }) {
   const frames = rig.frames;
   const [frame, setFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
+  // Leaving the preview stops it: nobody is watching a sweep behind the edit stage.
+  useEffect(() => {
+    if (hidden) setPlaying(false);
+  }, [hidden]);
+  const playingCb = useRef(onPlayingChange);
+  playingCb.current = onPlayingChange;
+  useEffect(() => {
+    playingCb.current?.(playing);
+  }, [playing]);
 
   // A scrub position is only meaningful against a given sweep length. Shrinking
   // the sweep under a parked scrubber would otherwise leave it past the end,
@@ -1113,7 +1145,7 @@ function SweepRender({
               onClick={() => setPlaying((p) => !p)}
               className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-glass/12 bg-glass/8 text-content-muted transition-colors hover:text-content disabled:pointer-events-none disabled:opacity-40"
             >
-              <Icon name={playing ? "minimize" : "preview"} size={13} />
+              <Icon name={playing ? "pause" : "preview"} size={13} />
             </button>
             <input
               type="range"
@@ -1380,9 +1412,10 @@ function TerraGenDock({
   if (collapsed) {
     return (
       <Panel
+        key="folded"
         ui="terragen"
         thickness="thick"
-        className="absolute right-3 top-3 flex-row items-center gap-2 overflow-hidden py-2 pl-3 pr-2"
+        className="absolute right-3 top-3 flex-row items-center gap-2 overflow-hidden py-2 pl-3 pr-2 animate-in fade-in-0 slide-in-from-right-8 zoom-in-95 duration-300 ease-out"
       >
         <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-soft text-brand">
           <Icon name="generate" size={15} />
@@ -1414,9 +1447,10 @@ function TerraGenDock({
 
   return (
     <Panel
+      key="open"
       ui="terragen"
       thickness="thick"
-      className="absolute inset-y-3 right-3 overflow-hidden"
+      className="absolute inset-y-3 right-3 overflow-hidden animate-in fade-in-0 slide-in-from-right-12 duration-300 ease-out"
       style={{ width: TERRAGEN_WIDTH }}
     >
       {/* THE SAME HEADER AS EVERY OTHER PANEL.
