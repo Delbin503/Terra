@@ -29,6 +29,8 @@ import {
   zoomOf,
 } from "./camera-rig";
 import { DispatchReview, orderChanges } from "./terragen-budget";
+import { TerraGenGenerating, buildTiles, type GenTile } from "./terragen-generating";
+import type { WorkOrderRun } from "./work-order-runs";
 import {
   buildMaterialPayload,
   countEditedSlots,
@@ -163,6 +165,8 @@ export function TerraGenView({
   onClose,
   onDispatch,
   reframeRig,
+  runs = [],
+  onBackToEditor,
 }: {
   scene: SceneApi;
   store: WorkOrderStore;
@@ -173,11 +177,27 @@ export function TerraGenView({
   /** workspace balance, for the affordability gate */
   credits: number;
   onClose: () => void;
-  onDispatch: (order: WorkOrder, materials: MaterialPayload) => void;
+  /** queue the order; returns the run it started, so the generating screen can follow it */
+  onDispatch: (order: WorkOrder, materials: MaterialPayload) => string | void;
   /** rebuild the rig's framing around the current master */
   reframeRig: () => void;
+  /** the Work Order runs, live — the generating screen reads its own run's progress from here */
+  runs?: WorkOrderRun[];
+  /** leave TerraGen after a dispatch; the editor points at Work Orders */
+  onBackToEditor?: () => void;
 }) {
   const [dispatched, setDispatched] = useState(false);
+  /**
+   * The screen Dispatch opens onto: the run it started, the camera preview as
+   * it stood at that moment, and the subsets as cards. See terragen-generating.
+   */
+  const [generating, setGenerating] = useState<{ runId: string | null; snapshot: string | null; tiles: GenTile[]; subsets: number; rightInset: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  /** The dock, locked (inert) while the generating screen is up: the order is sent. */
+  const dockRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    dockRef.current?.toggleAttribute("inert", !!generating);
+  }, [generating]);
   const [reviewing, setReviewing] = useState(false);
   /**
    * Which stage is in front. THE CAMERA'S VIEW IS THE DEFAULT.
@@ -594,7 +614,7 @@ export function TerraGenView({
   const blockers = gates.filter((g) => g.level === "block");
 
   return (
-    <div data-ui="terragen-view" className="fixed inset-0 z-50 overflow-hidden bg-canvas">
+    <div ref={rootRef} data-ui="terragen-view" className="fixed inset-0 z-50 overflow-hidden bg-canvas">
       {/* Same themed backdrop as the editor — the two views are one project. */}
       <div
         aria-hidden
@@ -788,6 +808,9 @@ export function TerraGenView({
       )}
 
       {/* --------------------------------------------------------------- dock */}
+      {/* Wrapped so it can be made inert after Dispatch; the wrapper itself is
+          static, so the panel still positions against the view. */}
+      <div ref={dockRef} data-ui="terragen-dock-wrap" className={cn(generating && "pointer-events-none select-none")}>
       <TerraGenDock
         scene={scene}
         order={order}
@@ -827,6 +850,7 @@ export function TerraGenView({
         onFocusCamera={focusCamera}
         onCameraEdit={setCameraEdit}
       />
+      </div>
 
       {reviewing && (
         <DispatchReview
@@ -858,9 +882,44 @@ export function TerraGenView({
             // §3.1: every modified slot travels with the order. Built here, at
             // the moment of dispatch, from the scene as it stands — nothing
             // upstream has to have remembered to keep a payload in step.
-            onDispatch(order, buildMaterialPayload(scene.objects));
+            // The preview as it stands, read before anything else redraws it;
+            // the generating cards are graded copies of this one frame.
+            let snapshot: string | null = null;
+            try {
+              // The capture camera's view, not the edit stage: the cards show
+              // what the dataset sees, without gizmos or the rig drawn in.
+              const c =
+                rootRef.current?.querySelector<HTMLCanvasElement>("[data-ui=terragen-sweep-preview] canvas") ??
+                rootRef.current?.querySelector<HTMLCanvasElement>("canvas");
+              snapshot = c ? c.toDataURL("image/jpeg", 0.86) : null;
+            } catch {
+              snapshot = null;
+            }
+            const runId = onDispatch(order, buildMaterialPayload(scene.objects));
             setDispatched(true);
+            // The wall stops short of the Work Order panel, wherever it stands.
+            const dock = rootRef.current?.querySelector<HTMLElement>('[data-ui="glass-terragen"]');
+            const rightInset = dock ? Math.round(window.innerWidth - dock.getBoundingClientRect().left + 12) : TERRAGEN_WIDTH + 24;
+            setGenerating({
+              runId: runId || null,
+              snapshot,
+              // one card per frame the order makes, up to the wall's limit
+              tiles: buildTiles(scene.weather, scene.savedWeather, scene.savedTimes, scene.savedZooms, totals.frames),
+              subsets: totals.subsets,
+              rightInset,
+            });
           }}
+        />
+      )}
+
+      {generating && (
+        <TerraGenGenerating
+          run={runs.find((r) => r.id === generating.runId)}
+          snapshot={generating.snapshot}
+          tiles={generating.tiles}
+          subsets={generating.subsets}
+          rightInset={generating.rightInset}
+          onDone={onBackToEditor ?? onClose}
         />
       )}
     </div>
@@ -992,6 +1051,7 @@ function SweepRender({
        scrubber) still hold to the visible band left of the dock so they never
        hide under it. */
     <div
+      data-ui="terragen-sweep-preview"
       className={cn(
         "absolute inset-0",
         // Hidden, not unmounted — see `hidden` above.
@@ -1005,7 +1065,8 @@ function SweepRender({
         <Canvas
           className="!absolute inset-0"
           dpr={[1, 1.75]}
-          gl={{ alpha: true, antialias: true }}
+          // readable after the fact, so Dispatch can take the frame for its cards
+          gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true }}
           camera={{ position, fov: 50, near: 0.05, far: 1000 }}
         >
           <Suspense fallback={null}>

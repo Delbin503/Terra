@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { pauseThumbPreload } from "./thumb-cache";
 import { cn } from "@/lib/utils";
 import { GlassPanel, GlassGhostButton, DropdownLayer } from "@/components/glass";
-import { Button } from "@/components/ui";
+import { Button, EdgeToggle, Tooltip } from "@/components/ui";
 import { Icon, type IconName } from "@/components/icons";
 import { AssetCard } from "./AssetCard";
 import { SpaceThumb } from "./AssetThumb";
@@ -187,6 +187,27 @@ export function AssetLibrary({
   const [category, setCategory] = useState<CategoryId>(picking ? "uploads" : initialCategory);
   const [uploadView, setUploadView] = useState<UploadView>("assets");
   const [uploadsOpen, setUploadsOpen] = useState(picking || initialCategory === "uploads");
+  /**
+   * The category column folded to its icons. Remembered for the session, so
+   * someone who wants the grid's width gets it every time the library opens
+   * rather than re-folding it on each visit.
+   */
+  const [catsCollapsed, setCatsCollapsed] = useState(() => {
+    try {
+      return sessionStorage.getItem("terra.library.cats") === "collapsed";
+    } catch {
+      return false;
+    }
+  });
+  const toggleCats = () =>
+    setCatsCollapsed((v) => {
+      try {
+        sessionStorage.setItem("terra.library.cats", v ? "open" : "collapsed");
+      } catch {
+        /* private mode — the fold just isn't remembered */
+      }
+      return !v;
+    });
   const [openFolderId, setOpenFolderId] = useState<string | null>(null);
 
   const [query, setQuery] = useState("");
@@ -246,7 +267,7 @@ export function AssetLibrary({
     return () => pauseThumbPreload(false);
   }, []);
   /* FOUR ROWS A PAGE, TWO IN VIEW. The Assets API catalogue is ~1,600
-     records. Cards keep the library's own size (128px, stretched just enough
+     records. Cards are compact (96px, stretched just enough
      to fill the width), and the grid's window is exactly two rows of them
      tall — the panel takes its height from that, so the view ends on the
      second row instead of showing a slice of the third. The other two rows of
@@ -254,7 +275,7 @@ export function AssetLibrary({
      it is always in reach, and a page number says where you are in the
      catalogue, which an endless scroll never did. */
   const GAP = 12;
-  const CARD = 128;
+  const CARD = 96;
   const ROWS_PER_PAGE = 4;
   const ROWS_IN_VIEW = 2;
   const [gridEl, setGridEl] = useState<HTMLDivElement | null>(null);
@@ -265,12 +286,13 @@ export function AssetLibrary({
     ro.observe(gridEl);
     return () => ro.disconnect();
   }, [gridEl]);
-  /** the most a card is stretched before another column is added instead */
-  const MAX_CARD = 136;
-  const fit = (n: number) => Math.floor((gridW - (n - 1) * GAP) / n);
-  let cols = gridW > 0 ? Math.max(1, Math.floor((gridW + GAP) / (CARD + GAP))) : 6;
-  if (gridW > 0 && fit(cols) > MAX_CARD) cols += 1;
-  const cell = gridW > 0 ? fit(cols) : CARD;
+  // ONE CARD SIZE, everywhere: a fixed CARD px on every tab and with the
+  // category column open or folded. Cards used to stretch to fill the width,
+  // so their size — and the panel's height with them — shifted by a few px
+  // whenever the column width changed. The width now only decides how many
+  // fit across.
+  const cols = gridW > 0 ? Math.max(1, Math.floor((gridW + GAP) / (CARD + GAP))) : 6;
+  const cell = CARD;
   /** the grid's visible height: two whole rows, plus the 4px the cards lift on hover */
   const gridH = ROWS_IN_VIEW * cell + (ROWS_IN_VIEW - 1) * GAP + 4;
   const showSpace = category === "utilities" && !!onDefineSpace;
@@ -481,8 +503,18 @@ export function AssetLibrary({
         // details card: 16px right margin + 320px panel + a 16px gutter
         style={{ right: (detailsId ? 352 : 24) + rightInset }}
       >
-        {/* Category nav */}
-        <nav data-ui="asset-categories" className="flex w-48 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-glass/10 p-3">
+        {/* Category nav — collapsible to an icon rail. The wrapper carries the
+            edge toggle, which the nav's own scroll would clip. */}
+        {/* The column is sized by the panel, never the other way round: an
+            open Uploads list used to make the whole library taller. */}
+        <div className={cn("relative shrink-0 transition-[width] duration-200", catsCollapsed ? "w-[68px]" : "w-48")}>
+        <nav
+          data-ui="asset-categories"
+          className={cn(
+            "absolute inset-0 flex flex-col gap-0.5 overflow-y-auto overflow-x-hidden border-r border-glass/10 p-3",
+            catsCollapsed && "items-center"
+          )}
+        >
           {/* Pick mode collapses the nav to the one place a reference can come
               from, so there's no branch that leads to an unselectable grid. */}
           {categories
@@ -494,11 +526,12 @@ export function AssetLibrary({
                   label={c.label}
                   icon={c.icon}
                   active={category === "uploads"}
+                  collapsed={catsCollapsed}
                   onClick={() => {
                     goCategory("uploads");
                     setUploadsOpen(true);
                   }}
-                  trailing={
+                  trailing={catsCollapsed ? undefined : (
                     <span
                       role="button"
                       aria-label={uploadsOpen ? "Collapse uploads" : "Expand uploads"}
@@ -510,10 +543,10 @@ export function AssetLibrary({
                     >
                       <Icon name="chevron-down" size={15} className={cn("transition-transform", uploadsOpen && "rotate-180")} />
                     </span>
-                  }
+                  )}
                 />
                 {uploadsOpen && (
-                  <div className="ml-3.5 mt-0.5 flex flex-col gap-0.5 border-l border-glass/10 pl-2">
+                  <div className={cn("mt-0.5 flex flex-col gap-0.5", catsCollapsed ? "items-center" : "ml-3.5 border-l border-glass/10 pl-2")}>
                     {uploadViews
                       .filter((v) => !picking || v.id === "assets")
                       .map((v) => (
@@ -521,6 +554,7 @@ export function AssetLibrary({
                         key={v.id}
                         icon={v.icon}
                         label={v.label}
+                        collapsed={catsCollapsed}
                         active={category === "uploads" && uploadView === v.id}
                         onClick={() => goUploadView(v.id)}
                       />
@@ -534,16 +568,19 @@ export function AssetLibrary({
                 label={c.label}
                 icon={c.icon}
                 active={category === c.id}
+                collapsed={catsCollapsed}
                 onClick={() => goCategory(c.id)}
               />
             )
           )}
         </nav>
+        <EdgeToggle collapsed={catsCollapsed} onToggle={toggleCats} label="categories" ui="asset-categories-toggle" className="top-4" />
+        </div>
 
         {/* Content */}
         <div className="flex min-w-0 flex-1 flex-col">
           {/* Header — search · tags · primary action · close */}
-          <div className="flex items-center gap-2 border-b border-glass/10 p-3">
+          <div className="flex items-center gap-2 border-b border-glass/10 p-3 pl-6">
             <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-full border border-glass/12 bg-glass/8 px-3.5">
               <Icon name="search" size={16} className="shrink-0 text-content-subtle" />
               <input
@@ -656,30 +693,20 @@ export function AssetLibrary({
           {/* Grid */}
           {/* At least as tall as the two-row grid, so the panel keeps its size
               when a view is empty or shows folders instead. */}
-          <div
-            className={cn("flex min-h-0 flex-1 flex-col p-3", showFolderGrid && "overflow-y-auto")}
-            style={{ minHeight: gridH + 24 }}
-          >
-            {/* Where the real catalogue stands — only while it matters. */}
-            {!showFolderGrid && !picking && store.catalogue.status !== "ready" && (
-              <p data-ui="catalogue-status" className="type-caption mb-3 flex items-center gap-2 text-content-subtle">
-                {store.catalogue.status === "loading" ? (
-                  <>
-                    <Icon name="spinner" size={12} className="animate-spin" />
-                    Loading the Sigmawave library
-                    {store.catalogue.total > 0 &&
-                      ` · ${store.catalogue.loaded.toLocaleString("en-US")} of ${store.catalogue.total.toLocaleString("en-US")}`}
-                  </>
-                ) : (
-                  <>
-                    <Icon name="warning" size={12} className="text-warning" />
-                    Couldn't reach the Sigmawave library — showing sample assets.
-                  </>
-                )}
-              </p>
-            )}
-            {showFolderGrid ? (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-3">
+          <div className="flex min-h-0 flex-1 flex-col p-3 pl-6">
+            {/* ONE BOX FOR EVERY TAB: the same two-row height and the same card
+                size whether it holds assets, folders or an empty state, so the
+                panel never changes shape as you move between tabs. It is also
+                what's measured for the column count, so it has to exist on
+                every tab, not only when there are assets to show. */}
+            <div
+              ref={setGridEl}
+              data-ui="asset-grid"
+              className="-mx-1 shrink-0 overflow-y-auto overscroll-contain px-1 pt-1"
+              style={{ height: gridH }}
+            >
+            {showFolderGrid && (visibleFolders.length > 0 || creatingFolder) ? (
+              <div className="grid content-start" style={{ gridTemplateColumns: `repeat(${cols}, ${cell}px)`, gridAutoRows: `${cell}px`, gap: GAP }}>
                 {creatingFolder && (
                   <div
                     data-ui="folder-new-tile"
@@ -707,24 +734,17 @@ export function AssetLibrary({
                 {visibleFolders.map((f) => (
                   <FolderCard key={f.id} folder={f} onOpen={() => setOpenFolderId(f.id)} />
                 ))}
-                {visibleFolders.length === 0 && !creatingFolder && (
-                  <EmptyState
-                    icon="folder"
-                    message={query ? `No folders match “${query}”.` : "No folders yet. Group your uploads to find them fast."}
-                    actionLabel={query ? undefined : "Create Folder"}
-                    onAction={() => setCreatingFolder(true)}
-                  />
-                )}
+              </div>
+            ) : showFolderGrid ? (
+              <div className="grid h-full place-items-center">
+                <EmptyState
+                  icon="folder"
+                  message={query ? `No folders match “${query}”.` : "No folders yet. Group your uploads to find them fast."}
+                  actionLabel={query ? undefined : "Create Folder"}
+                  onAction={() => setCreatingFolder(true)}
+                />
               </div>
             ) : tiles.length > 0 ? (
-              <>
-                {/* The page scrolls; the pager under it does not. */}
-                <div
-                  ref={setGridEl}
-                  data-ui="asset-grid"
-                  className="-mx-1 shrink-0 overflow-y-auto overscroll-contain px-1 pt-1"
-                  style={{ height: gridH }}
-                >
                   <div
                     className="grid content-start"
                     style={{ gridTemplateColumns: `repeat(${cols}, ${cell}px)`, gridAutoRows: `${cell}px`, gap: GAP }}
@@ -752,19 +772,8 @@ export function AssetLibrary({
                       )
                     )}
                   </div>
-                </div>
-                {pageCount > 1 && (
-                  <Pager
-                    page={cur}
-                    pages={pageCount}
-                    from={cur * perPage + 1}
-                    to={Math.min(tiles.length, (cur + 1) * perPage)}
-                    total={tiles.length}
-                    onPage={setPage}
-                  />
-                )}
-              </>
             ) : (
+              <div className="grid h-full place-items-center">
               <EmptyState
                 icon={category === "uploads" ? "upload" : category === "meshes" ? "input-3d" : "search"}
                 message={
@@ -804,7 +813,56 @@ export function AssetLibrary({
                   else onGenerate3D();
                 }}
               />
+              </div>
             )}
+            </div>
+
+            {/* THE PAGER ON EVERY TAB. It used to appear only when there was a
+                second page, so the bottom of the library moved from tab to tab
+                and a short list gave no count at all. It is always there now,
+                pinned to the foot: the folder grid counts folders, an empty
+                view counts nothing, and a single page simply has its arrows
+                disabled. */}
+            <div className="mt-auto">
+              {showFolderGrid ? (
+                <Pager
+                  page={0}
+                  pages={1}
+                  from={visibleFolders.length ? 1 : 0}
+                  to={visibleFolders.length}
+                  total={visibleFolders.length}
+                  onPage={() => {}}
+                />
+              ) : (
+                <Pager
+                  status={
+                    !picking && store.catalogue.status !== "ready" ? (
+                      <span data-ui="catalogue-status" className="flex items-center gap-1.5">
+                        {store.catalogue.status === "loading" ? (
+                  <>
+                    <Icon name="spinner" size={12} className="animate-spin" />
+                    Loading the Sigmawave library
+                    {store.catalogue.total > 0 &&
+                      ` · ${store.catalogue.loaded.toLocaleString("en-US")} of ${store.catalogue.total.toLocaleString("en-US")}`}
+                  </>
+                ) : (
+                  <>
+                    <Icon name="warning" size={12} className="text-warning" />
+                    Couldn't reach the Sigmawave library — showing sample assets.
+                  </>
+                )}
+                      </span>
+                    ) : null
+                  }
+                  page={cur}
+                  pages={pageCount}
+                  from={tiles.length ? cur * perPage + 1 : 0}
+                  to={Math.min(tiles.length, (cur + 1) * perPage)}
+                  total={tiles.length}
+                  onPage={setPage}
+                />
+              )}
+            </div>
           </div>
 
           {/* Pick footer — confirm/cancel back to whoever opened the chooser */}
@@ -1298,29 +1356,36 @@ function CatButton({
   active,
   onClick,
   trailing,
+  collapsed = false,
 }: {
   label: string;
   icon: IconName;
   active: boolean;
   onClick: () => void;
   trailing?: React.ReactNode;
+  /** icon only, its name in a tooltip */
+  collapsed?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-current={active ? "true" : undefined}
-      data-ui={`asset-cat-${label.toLowerCase().replace(/\s+/g, "-")}`}
-      className={cn(
-        "type-nav group relative flex items-center gap-3 rounded-lg px-3 py-2 transition-colors",
-        active ? "bg-glass/14 text-content" : "text-content-muted hover:bg-glass/8 hover:text-content"
-      )}
-    >
-      {active && <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-brand" />}
-      <Icon name={icon} size={18} />
-      <span className="truncate">{label}</span>
-      {trailing}
-    </button>
+    <Tooltip label={label} side="right" tone="glass" hidden={!collapsed}>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-current={active ? "true" : undefined}
+        aria-label={collapsed ? label : undefined}
+        data-ui={`asset-cat-${label.toLowerCase().replace(/\s+/g, "-")}`}
+        className={cn(
+          "type-nav group relative flex items-center rounded-lg py-2 transition-colors",
+          collapsed ? "w-10 justify-center px-0" : "gap-3 px-3",
+          active ? "bg-glass/14 text-content" : "text-content-muted hover:bg-glass/8 hover:text-content"
+        )}
+      >
+        {active && <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-brand" />}
+        <Icon name={icon} size={18} />
+        {!collapsed && <span className="truncate">{label}</span>}
+        {trailing}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -1329,25 +1394,31 @@ function SubButton({
   label,
   active,
   onClick,
+  collapsed = false,
 }: {
   icon: IconName;
   label: string;
   active: boolean;
   onClick: () => void;
+  collapsed?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      data-ui={`asset-sub-${label.toLowerCase().replace(/\s+/g, "-")}`}
-      className={cn(
-        "type-body flex items-center gap-2.5 rounded-lg px-3 py-1.5 transition-colors",
-        active ? "bg-glass/12 text-content" : "text-content-muted hover:bg-glass/8 hover:text-content"
-      )}
-    >
-      <Icon name={icon} size={15} />
-      {label}
-    </button>
+    <Tooltip label={label} side="right" tone="glass" hidden={!collapsed}>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={collapsed ? label : undefined}
+        data-ui={`asset-sub-${label.toLowerCase().replace(/\s+/g, "-")}`}
+        className={cn(
+          "type-body flex items-center rounded-lg py-1.5 transition-colors",
+          collapsed ? "w-8 justify-center px-0" : "gap-2.5 px-3",
+          active ? "bg-glass/12 text-content" : "text-content-muted hover:bg-glass/8 hover:text-content"
+        )}
+      >
+        <Icon name={icon} size={15} />
+        {!collapsed && label}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -1383,6 +1454,7 @@ function EmptyState({
  * ellipsis for the gaps, so 139 pages still fit on one line.
  */
 function Pager({
+  status,
   page,
   pages,
   from,
@@ -1390,6 +1462,8 @@ function Pager({
   total,
   onPage,
 }: {
+  /** what the catalogue is doing, beside the count — it used to be a line above the grid, which made the panel taller on some tabs */
+  status?: React.ReactNode;
   page: number;
   pages: number;
   from: number;
@@ -1407,8 +1481,11 @@ function Pager({
   return (
     <div data-ui="asset-pager" className="mt-2.5 flex shrink-0 items-center gap-2">
       <span className="type-caption tabular-nums text-content-subtle">
-        {from.toLocaleString("en-US")}–{to.toLocaleString("en-US")} of {total.toLocaleString("en-US")}
+        {total === 0
+          ? "0 results"
+          : `${from.toLocaleString("en-US")}–${to.toLocaleString("en-US")} of ${total.toLocaleString("en-US")}`}
       </span>
+      {status && <span className="type-caption truncate text-content-subtle">· {status}</span>}
       <div className="ml-auto flex items-center gap-1">
         <button
           type="button"

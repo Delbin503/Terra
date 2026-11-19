@@ -249,6 +249,8 @@ export function EditorView({
   /** Dispatched runs — the list behind the Download button. Owned here so a run
    *  outlives the TerraGen mode that queued it. */
   const [ordersOpen, setOrdersOpen] = useState(false);
+  /** Lit after leaving the generating screen: the run is tracked from Work Orders now. */
+  const [ordersHint, setOrdersHint] = useState(false);
   const [libraryCategory, setLibraryCategory] = useState<CategoryId>("all");
   // Two panels borrow the library as an image chooser, and only one library is
   // ever mounted — so the request says who asked and how many slots are free,
@@ -1506,8 +1508,13 @@ export function EditorView({
             onGenerate={openTerraGen}
             onSave={handleSave}
             onExit={() => setExitAsking(true)}
-            onDownload={() => setOrdersOpen(true)}
+            onDownload={() => {
+              setOrdersHint(false);
+              setOrdersOpen(true);
+            }}
             activeRuns={runs.active}
+            highlightOrders={ordersHint}
+            onDismissOrdersHint={() => setOrdersHint(false)}
           />
         </div>
 
@@ -2105,7 +2112,7 @@ export function EditorView({
             // Credits travel with the row: the Work Orders table quotes what
             // this dispatch was charged, and this is the only place that figure
             // exists — see `WorkOrderRun.credits`.
-            runs.add({
+            return runs.add({
               project: projectName,
               total: totals.frames,
               credits: totals.credits,
@@ -2115,7 +2122,12 @@ export function EditorView({
               // with the default, and the row is the only place that fact could
               // survive the scene being edited afterwards.
               materials,
-            });
+            }).id;
+          }}
+          runs={runs.runs}
+          onBackToEditor={() => {
+            setTerraGenOpen(false);
+            setOrdersHint(true);
           }}
         />
       )}

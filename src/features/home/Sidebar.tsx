@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/icons";
-import { Avatar, ConfirmDialog, IconButton, Tooltip } from "@/components/ui";
+import { Avatar, ConfirmDialog, EdgeToggle, IconButton, Tooltip } from "@/components/ui";
 import { useDismissable } from "@/features/editor/use-dismissable";
 import { useSettings } from "@/features/settings/settings-store";
 import { TopUpDialog } from "@/features/settings/TopUpDialog";
@@ -100,19 +100,9 @@ export function Sidebar({
           alt="Terra"
           className={cn("shrink-0", collapsed ? "h-5" : "h-6")}
         />
-        <IconButton
-          icon={collapsed ? "sidebar-expand" : "sidebar-collapse"}
-          label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          variant="solid"
-          size="sm"
-          iconSize={16}
-          onClick={onToggle}
-          className={cn(
-            "ml-auto",
-            collapsed && "glass-chrome absolute -right-3.5 top-5"
-          )}
-        />
       </div>
+      {/* On the rail's edge, level with the logo, open or shut — see EdgeToggle. */}
+      <EdgeToggle collapsed={collapsed} onToggle={onToggle} label="sidebar" ui="sidebar-toggle" className="top-[18px]" />
 
       {/* Create — the icon tile carries the brand, the label stays plain text.
           A full-width orange button next to four plain nav rows made the rail

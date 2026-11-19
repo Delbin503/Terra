@@ -1,12 +1,14 @@
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
+import { Tooltip } from "@/components/ui";
 import { AssetThumb } from "./AssetThumb";
-import { badgeIcon, badgeLabel, deriveDetails, type Asset } from "./assets-data";
-import { SOURCE_LABEL } from "./scene-types";
+import { badgeIcon, badgeLabel, type Asset } from "./assets-data";
 
 /**
- * AssetCard — a library tile. Normal state shows a placeholder thumbnail with a
- * type badge, a hover ⋮ menu, and a hover quick-info line. It also renders the
+ * AssetCard — a library tile. Compact: the thumbnail carries the card, with the
+ * type as an icon in the corner (its word on hover of the icon) and the name
+ * only while the card is hovered or focused — at 96px a permanent caption and a
+ * worded badge covered half the picture you were choosing by. Also renders the
  * `generating` pipeline state (spinner + label).
  *
  * A plain click means "open info" until multi-select is armed from the ⋮ menu,
@@ -49,7 +51,6 @@ export function AssetCard({
     );
   }
 
-  const details = deriveDetails(asset);
   const activate = () => {
     if (disabled) return;
     selectMode ? onToggle(asset.id) : onOpen(asset);
@@ -96,22 +97,23 @@ export function AssetCard({
         <AssetThumb type={asset.type} seed={asset.seed} src={asset.thumbUrl} />
       </div>
 
-      {/* TYPE BADGE (top-right) — icon AND word.
-          It used to be the glyph alone, which is fine while the tab you are on
-          already tells you what everything is. On All Assets it doesn't: a
-          skybox and an HDRI map both render as scenery, and two similar icons
-          at 13px is not a distinction anyone can make at a glance. */}
-      <span
-        title={
-          asset.generated
-            ? `${SOURCE_LABEL[asset.type]} · generated`
-            : SOURCE_LABEL[asset.type]
-        }
-        className="absolute right-2 top-2 flex h-6 items-center gap-1 rounded-md bg-black/45 px-1.5 text-white/90 backdrop-blur-sm"
+      {/* TYPE BADGE (top-right) — the icon alone, its word on hover.
+          The word used to sit in the badge permanently, because a skybox and
+          an HDRI map are two similar glyphs; it is still one hover away, on
+          the icon itself, without covering a corner of every small card. */}
+      <Tooltip
+        label={asset.generated ? `${badgeLabel(asset)} · generated` : badgeLabel(asset)}
+        side="top"
+        tone="glass"
       >
-        <Icon name={badgeIcon(asset)} size={12} strokeWidth={2} />
-        <span className="type-caption-strong leading-none">{badgeLabel(asset)}</span>
-      </span>
+        <span
+          data-ui={`asset-badge-${asset.id}`}
+          aria-label={badgeLabel(asset)}
+          className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-md bg-black/45 text-white/90 backdrop-blur-sm"
+        >
+          <Icon name={badgeIcon(asset)} size={12} strokeWidth={2} />
+        </span>
+      </Tooltip>
 
       {/* Select mode owns the top-left slot entirely: a persistent checkbox
           (empty until ticked) and no ⋮ — the only meaning of a click here is
@@ -121,7 +123,7 @@ export function AssetCard({
           aria-hidden
           data-ui={`asset-check-${asset.id}`}
           className={cn(
-            "absolute left-2 top-2 grid h-6 w-6 place-items-center rounded-md border backdrop-blur-sm transition-colors",
+            "absolute left-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-md border backdrop-blur-sm transition-colors",
             selected
               ? "border-brand bg-brand text-brand-foreground"
               : "border-white/70 bg-black/40 text-transparent"
@@ -139,19 +141,19 @@ export function AssetCard({
               e.stopPropagation();
               onMenu(asset, (e.currentTarget as HTMLElement).getBoundingClientRect());
             }}
-            className="absolute left-2 top-2 hidden h-6 w-6 place-items-center rounded-md bg-black/50 text-white/90 backdrop-blur-sm hover:bg-black/70 group-hover:grid"
+            className="absolute left-1.5 top-1.5 hidden h-6 w-6 place-items-center rounded-md bg-black/50 text-white/90 backdrop-blur-sm hover:bg-black/70 group-hover:grid"
           >
             <Icon name="more" size={15} />
           </button>
         )
       )}
 
-      {/* Name + hover quick-info */}
-      <span className="absolute inset-x-0 bottom-0 scrim-strong p-2 pt-6">
-        <span className="type-label block truncate text-white">{asset.name}</span>
-        <span className="type-caption mt-0.5 hidden truncate text-white/70 group-hover:block">
-          {details.typeLabel} · {details.smartTags[0]}
-        </span>
+      {/* Name, on hover or keyboard focus only. */}
+      <span
+        data-ui={`asset-name-${asset.id}`}
+        className="pointer-events-none absolute inset-x-0 bottom-0 scrim-strong px-1.5 pb-1.5 pt-5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+      >
+        <span className="type-caption-strong block truncate text-white">{asset.name}</span>
       </span>
     </div>
   );

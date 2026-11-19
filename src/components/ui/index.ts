@@ -11,6 +11,7 @@ export { Select, type SelectOption, type SelectProps } from "./select";
 export { DataTable, type Column } from "./data-table";
 export { ContextMenu, type MenuItem } from "./context-menu";
 export { Tooltip, TooltipProvider, type TooltipTone } from "./tooltip";
+export { EdgeToggle } from "./edge-toggle";
 export { ConfirmDialog } from "./confirm-dialog";
 export {
   Dialog,
