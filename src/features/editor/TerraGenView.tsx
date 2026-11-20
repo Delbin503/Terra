@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useProgress } from "@react-three/drei";
 import { cn } from "@/lib/utils";
@@ -243,25 +243,6 @@ export function TerraGenView({
    * every overlay that was keeping clear of it reclaims the width.
    */
   const [collapsed, setCollapsed] = useState(false);
-  /**
-   * THE DOCK STEPS ASIDE WHILE THE SWEEP PLAYS. Playing is watching, and the
-   * panel covers a third of the frame being watched — so Play folds it to its
-   * pill and Pause puts it back the way it was (a panel already folded before
-   * Play stays folded). Expanding it by hand mid-play is still allowed.
-   */
-  const [sweepPlaying, setSweepPlaying] = useState(false);
-  const foldedBeforePlay = useRef<boolean | null>(null);
-  useEffect(() => {
-    if (sweepPlaying) {
-      if (foldedBeforePlay.current === null) foldedBeforePlay.current = collapsed;
-      setCollapsed(true);
-    } else if (foldedBeforePlay.current !== null) {
-      setCollapsed(foldedBeforePlay.current);
-      foldedBeforePlay.current = null;
-    }
-    // collapsed is read, not watched: only Play / Pause move the panel here
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sweepPlaying]);
   /**
    * The asset library, as a bottom sheet over the stage — and what picking in
    * it means this time.
@@ -766,7 +747,7 @@ export function TerraGenView({
         projectName={projectName}
         hidden={!preview}
         inset={stageInset}
-        onPlayingChange={setSweepPlaying}
+        output={order.output.resolution}
       />
 
       {/* The mode switch. Top-left, where the editor keeps its project bar, so
@@ -1022,7 +1003,7 @@ function SweepRender({
   projectName,
   hidden,
   inset,
-  onPlayingChange,
+  output,
 }: {
   scene: SceneApi;
   rig: ReturnType<typeof rigState>;
@@ -1039,8 +1020,8 @@ function SweepRender({
    * exact cold start the loader exists to cover.
    */
   hidden?: boolean;
-  /** told when the sweep starts and stops playing — the dock folds out of its way */
-  onPlayingChange?: (playing: boolean) => void;
+  /** the order's output size — the preview is framed to it */
+  output: { width: number; height: number };
 }) {
   const frames = rig.frames;
   const [frame, setFrame] = useState(0);
@@ -1049,11 +1030,27 @@ function SweepRender({
   useEffect(() => {
     if (hidden) setPlaying(false);
   }, [hidden]);
-  const playingCb = useRef(onPlayingChange);
-  playingCb.current = onPlayingChange;
-  useEffect(() => {
-    playingCb.current?.(playing);
-  }, [playing]);
+  /**
+   * THE PREVIEW IS THE OUTPUT FRAME. The render used to fill the whole stage,
+   * so the Work Order panel sat on top of a third of it and you had to fold the
+   * panel to see the shot. Now it is drawn at the order's own aspect (16:9 for
+   * 1920 × 1080) and fitted into the band LEFT of the panel, with its size
+   * written under it — what you see is exactly the frame the dataset gets.
+   * Folding the panel just gives the frame the whole width.
+   */
+  const band = useRef<HTMLDivElement>(null);
+  const [bandBox, setBandBox] = useState({ w: 0, h: 0 });
+  useLayoutEffect(() => {
+    const el = band.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setBandBox({ w: e.contentRect.width, h: e.contentRect.height }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const aspect = output.width / output.height;
+  const CAPTION = 30;
+  const frameW = Math.max(0, Math.floor(Math.min(bandBox.w, (bandBox.h - CAPTION) * aspect)));
+  const frameH = Math.floor(frameW / aspect);
 
   // A scrub position is only meaningful against a given sweep length. Shrinking
   // the sweep under a parked scrubber would otherwise leave it past the end,
@@ -1069,7 +1066,40 @@ function SweepRender({
   }, [playing, frames]);
 
   const sample = frameSample(rig, frame);
-  const position = sample.position;
+
+  /* ZOOM AND INCREMENTS — the same two steppers as the Camera view panel.
+     Zoom stops: the rig's own framing, each saved zoom set, and Zoom Distance,
+     farthest first; the multiple pulls the camera in along its line to the
+     master. Increments: the stops along the climb; stepping one jumps the
+     sweep to that increment's first frame. */
+  const far = rig.farDistance;
+  const zoomStops = useMemo(() => {
+    if (!rig.hasMaster || !rig.hasRig || !(far > 0)) return [];
+    const list: { key: string; near: number; note: string }[] = [{ key: "rig", near: far, note: "Rig framing" }];
+    for (const z of scene.savedZooms)
+      list.push({ key: z.id, near: Math.min(z.nearDistance, far), note: z.inRun ? "Zoom set" : "Zoom set · not in run" });
+    list.push({ key: "current", near: Math.min(rig.nearDistance, far), note: "Zoom Distance" });
+    list.sort((a, b) => b.near - a.near);
+    return list.filter((z, i) => i === 0 || Math.abs(z.near - list[i - 1].near) > 0.01);
+  }, [rig.hasMaster, rig.hasRig, far, rig.nearDistance, scene.savedZooms]);
+  const [zoomIdx, setZoomIdx] = useState(0);
+  const zi = Math.min(zoomIdx, Math.max(0, zoomStops.length - 1));
+  const zoomStop = zoomStops[zi] ?? null;
+  const multiple = zoomStop && far > 0 ? zoomOf(far, zoomStop.near) : 1;
+  const plan =
+    rig.hasRig && rig.start && rig.end && rig.rig
+      ? planCapture(atDistance(rig.target, rig.start.position, rig.nearDistance), rig.end.position, rig.rig)
+      : null;
+  const passes = plan?.passes.length ?? 0;
+  const perPass = Math.max(1, plan?.shotsPerPass ?? 1);
+  const incAt = passes > 0 ? Math.floor(frame / perPass) % passes : 0;
+  const stepInc = (d: number) => {
+    setPlaying(false);
+    setFrame(Math.min(Math.max(0, incAt + d), Math.max(0, passes - 1)) * perPass);
+  };
+  const reach = Math.hypot(...sample.position.map((v, i) => v - rig.target[i]));
+  const position: Vec3 = multiple > 1.0001 ? atDistance(rig.target, sample.position, reach / multiple) : sample.position;
+  const shown = multiple > 1.0001 ? reach / multiple : sample.distance;
 
   const round = (v: number) => Math.round(v * 10) / 10;
   const heading = ((Math.round(sample.yaw) % 360) + 360) % 360;
@@ -1094,6 +1124,17 @@ function SweepRender({
           doing the loading. The loader is painted over it and lifts when
           `Ready` reports the Suspense boundary resolved. */}
       {rig.hasMaster && (
+        <div
+          ref={band}
+          data-ui="terragen-output-band"
+          className="absolute left-6 top-[76px] bottom-[96px] flex flex-col items-center justify-center"
+          style={{ right: inset + 24 }}
+        >
+        <div
+          data-ui="terragen-output-frame"
+          className="relative shrink-0 overflow-hidden rounded-2xl bg-black shadow-[0_0_0_1px_rgb(255_255_255/0.16),0_24px_60px_rgb(0_0_0/0.5)]"
+          style={{ width: frameW, height: frameH }}
+        >
         <Canvas
           className="!absolute inset-0"
           dpr={[1, 1.75]}
@@ -1110,6 +1151,11 @@ function SweepRender({
             <Ready onReady={onReady} />
           </Suspense>
         </Canvas>
+        </div>
+        <p data-ui="terragen-output-caption" className="type-caption mt-2.5 tabular-nums text-content-subtle">
+          Output: {output.width.toLocaleString("en-US")} × {output.height.toLocaleString("en-US")} px
+        </p>
+        </div>
       )}
 
       {/* No master means no canvas, so nothing is loading and `loading` would
@@ -1136,7 +1182,72 @@ function SweepRender({
           alone left the readout barely legible. */}
       {!loading && rig.hasMaster && rig.hasRig && (
         <div className="absolute bottom-0 left-0 p-4" style={{ right: inset }}>
-          <div className="mx-auto flex max-w-[560px] items-center gap-2.5 rounded-2xl border border-glass/15 bg-canvas/75 px-3 py-2.5 backdrop-blur-md">
+          <div className="mx-auto flex max-w-[860px] items-center gap-2.5 rounded-2xl border border-glass/15 bg-canvas/75 px-3 py-2 backdrop-blur-md">
+            {zoomStops.length > 0 && (
+              <div
+                data-ui="terragen-preview-zoom"
+                role="group"
+                aria-label="Zoom"
+                className="flex shrink-0 items-center gap-0.5 rounded-lg border border-glass/12 p-0.5"
+              >
+                <GlassGhostButton
+                  ui="terragen-preview-zoom-out"
+                  size="sm"
+                  icon="zoom-out"
+                  label="Zoom out"
+                  disabled={zi <= 0}
+                  onClick={() => setZoomIdx(Math.max(0, zi - 1))}
+                />
+                <span
+                  data-ui="terragen-preview-zoom-value"
+                  title={zoomStop?.note}
+                  className="type-caption-strong min-w-[36px] text-center tabular-nums text-content"
+                >
+                  {formatZoom(multiple)}
+                </span>
+                <GlassGhostButton
+                  ui="terragen-preview-zoom-in"
+                  size="sm"
+                  icon="zoom-in"
+                  label="Zoom in"
+                  disabled={zi >= zoomStops.length - 1}
+                  onClick={() => setZoomIdx(Math.min(zoomStops.length - 1, zi + 1))}
+                />
+              </div>
+            )}
+            {passes > 1 && (
+              <div
+                data-ui="terragen-preview-increments"
+                role="group"
+                aria-label="Increments"
+                className="flex shrink-0 items-center gap-0.5 rounded-lg border border-glass/12 p-0.5"
+              >
+                <GlassGhostButton
+                  ui="terragen-preview-inc-prev"
+                  size="sm"
+                  icon="chevron-left"
+                  label="Previous increment"
+                  disabled={incAt <= 0}
+                  onClick={() => stepInc(-1)}
+                />
+                <span
+                  data-ui="terragen-preview-inc-value"
+                  title="Increment"
+                  aria-label={`Increment ${incAt + 1} of ${passes}`}
+                  className="type-caption-strong min-w-[36px] text-center tabular-nums text-content"
+                >
+                  {incAt + 1} / {passes}
+                </span>
+                <GlassGhostButton
+                  ui="terragen-preview-inc-next"
+                  size="sm"
+                  icon="chevron-right"
+                  label="Next increment"
+                  disabled={incAt >= passes - 1}
+                  onClick={() => stepInc(1)}
+                />
+              </div>
+            )}
             <button
               type="button"
               aria-label={playing ? "Pause sweep" : "Play sweep"}
@@ -1164,7 +1275,7 @@ function SweepRender({
             {/* The pose, not the frame number: where the camera is standing is
                 what this preview is for, and a count belongs to the bill. */}
             <span className="type-numeric-sm shrink-0 tabular-nums text-content-subtle">
-              {round(sample.pitch)}° · {heading}° · {round(sample.distance)} m
+              {round(sample.pitch)}° · {heading}° · {round(shown)} m
             </span>
           </div>
         </div>
@@ -1695,7 +1806,7 @@ function TerraGenDock({
               <p
                 data-ui="terragen-preflight"
                 className={cn(
-                  "type-caption flex items-start gap-1.5 rounded-lg border px-2.5 py-2",
+                  "type-caption flex items-center gap-2 rounded-lg border px-2.5 py-2",
                   first.level === "block"
                     ? "border-danger/40 bg-danger-soft/40 text-danger-on-glass"
                     : "border-warning/40 bg-warning-soft/40 text-warning"
@@ -1704,7 +1815,7 @@ function TerraGenDock({
                 <Icon
                   name={first.level === "block" ? "error" : "warning"}
                   size={13}
-                  className="mt-px shrink-0"
+                  className="shrink-0"
                 />
                 <span className="grow">{first.message}</span>
                 {gates.length > 1 && (

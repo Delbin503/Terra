@@ -6,7 +6,7 @@ import { dayPhase, describeLayers, formatClock, type SavedTime, type SavedWeathe
 import type { SavedZoom } from "./camera-rig";
 
 /**
- * THE GENERATING SCREEN — what Dispatch opens onto, for about three seconds.
+ * THE GENERATING SCREEN — what Dispatch opens onto, for 4.5 seconds.
  * -------------------------------------------------------------------------
  * Confirming the review is the moment the order turns into a dataset, so it
  * gets a beat of its own: a wall of frames building out over the stage, one
@@ -26,7 +26,7 @@ import type { SavedZoom } from "./camera-rig";
 /** How many cards the wall shows at most — enough to fill the stage, few enough to read. */
 export const CARD_LIMIT = 24;
 /** How long the screen holds before handing back to the editor. */
-export const GENERATING_HOLD_MS = 3200;
+export const GENERATING_HOLD_MS = 4500;
 
 export interface GenTile {
   weather: string;
@@ -120,9 +120,10 @@ export function TerraGenGenerating({
   /** after the hold: back to the editor */
   onDone: () => void;
 }) {
-  // The wall builds out inside the first two seconds, however many cards.
+  // The wall builds out over the first ~2.6 s of the hold, however many cards,
+  // and then holds full for the rest of it.
   const [shown, setShown] = useState(0);
-  const step = Math.min(220, 1700 / tiles.length);
+  const step = Math.min(260, 2300 / tiles.length);
   useEffect(() => {
     if (shown >= tiles.length) return;
     const id = window.setTimeout(() => setShown((k) => k + 1), shown === 0 ? 300 : step);

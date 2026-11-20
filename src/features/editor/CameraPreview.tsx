@@ -14,8 +14,10 @@ import {
   formatZoom,
   orbitPoint,
   orbitSweep,
+  planCapture,
   zoomOf,
 } from "./camera-rig";
+import { frameSample, rigState } from "./work-order";
 import type { SceneApi } from "./useScene";
 import type { SceneObject } from "./scene-types";
 
@@ -191,8 +193,12 @@ export function CameraView({
 }) {
   const rig = scene.rigs.find((r) => r.id === camera.rigId) ?? null;
   const ends = rig ? scene.rigCameras(rig) : null;
-  const [which, setWhich] = useState<"start" | "end">(camera.cameraRole === "end" ? "end" : "start");
-  const viewCam = (which === "end" ? ends?.end : ends?.start) ?? camera;
+  /* ONE VIEW, THROUGH THE START CAMERA. The Start / End toggle showed the two
+     ends of the sweep as two separate pictures, which said nothing about what
+     lies between them. The sweep itself does: Play runs every frame the rig
+     will shoot (the same frames as Scene preview), and the increment arrows
+     step through each stop along the climb. */
+  const viewCam = ends?.start ?? camera;
   const master = scene.master;
   const target: Vec3 = master ? master.position : [0, 0.5, 0];
 
@@ -228,22 +234,82 @@ export function CameraView({
   const sweep = rig ? orbitSweep(rig.orbitStart, rig.orbitEnd) : 360;
   const canTurn = !!master && !!rig;
   const t = Math.min(Math.max(0, turn), sweep);
-  const turnTo = (deg: number) => setTurn(Math.min(Math.max(0, deg), sweep));
+  const turnTo = (deg: number) => {
+    setPlaying(false);
+    setTurn(Math.min(Math.max(0, deg), sweep));
+  };
 
-  const [idx, setIdx] = useState(0);
+  const [idx, setIdxRaw] = useState(0);
   const clamped = Math.min(idx, Math.max(0, stops.length - 1));
   const stop = stops[clamped] ?? null;
-  const step = (d: number) => setIdx((i) => Math.min(Math.max(0, Math.min(i, stops.length - 1) + d), Math.max(0, stops.length - 1)));
+
+  /* THE SWEEP: increments (stops along the climb from near to far) and the
+     frames shot at each, planned exactly as the run and Scene preview plan
+     them. */
+  const rs = rigState(scene);
+  const plan =
+    rs.hasRig && rs.start && rs.end && rs.rig
+      ? planCapture(atDistance(rs.target, rs.start.position, rs.nearDistance), rs.end.position, rs.rig)
+      : null;
+  const passes = plan?.passes ?? [];
+  const shotsPerPass = Math.max(1, plan?.shotsPerPass ?? 1);
+  const totalFrames = Math.max(1, plan?.totalFrames ?? 1);
+  /** which increment the view stands at; null = the zoom stop's own reach */
+  const [inc, setInc] = useState<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    if (!playing || totalFrames <= 1) return;
+    const id = window.setInterval(() => setFrame((f) => (f + 1) % totalFrames), 220);
+    return () => window.clearInterval(id);
+  }, [playing, totalFrames]);
+  /** Pause where it is: the view keeps that increment and that angle. */
+  const togglePlay = () => {
+    if (playing) {
+      setPlaying(false);
+      if (passes.length > 1) setInc(Math.floor(frame / shotsPerPass) % passes.length);
+      setTurn(Math.min((frame % shotsPerPass) * (360 / shotsPerPass), sweep));
+    } else {
+      // From where the view stands now: that increment, from its first shot.
+      setFrame((inc ?? 0) * shotsPerPass);
+      setPlaying(true);
+    }
+  };
+  const halt = () => setPlaying(false);
+  const step = (d: number) => {
+    // Zoom and increment are two settings, not two modes: stepping the zoom
+    // keeps the increment the view stands at.
+    halt();
+    setIdxRaw((i) => Math.min(Math.max(0, Math.min(i, stops.length - 1) + d), Math.max(0, stops.length - 1)));
+  };
+  const stepInc = (d: number) => {
+    halt();
+    setInc((i) => Math.min(Math.max(0, (i ?? 0) + d), passes.length - 1));
+  };
 
   /* Zoom first, then turn: the stop decides how far out the camera stands, and
      the turn walks that reach around the master. `orbitPoint` keeps the height
      and the ground radius it is handed, so turning never re-frames the shot. */
+  /* ZOOM × INCREMENT. The increment says where along the climb the camera
+     stands; the zoom multiple pulls it in from there (2.2x = 2.2 times closer
+     than that stop's own reach). With no increment picked, the zoom stop's
+     reach is measured from the rig camera, as before. */
+  const zoomMultiple = stop && far ? zoomOf(far, stop.near) : 1;
+  const pullIn = (p: Vec3): Vec3 =>
+    !master || zoomMultiple <= 1.0001 ? p : atDistance(target, p, vecDistance(target, p) / zoomMultiple);
   const zoomed: Vec3 =
-    !master || !stop || stop.key === "rig"
-      ? viewCam.position
-      : atDistance(master.position, viewCam.position, stop.near);
-  const position: Vec3 =
-    canTurn && t > 0 ? orbitPoint(target, zoomed, azimuthOf(target, zoomed) + t) : zoomed;
+    inc !== null && passes[inc]
+      ? pullIn(passes[inc].position)
+      : !master || !stop || stop.key === "rig"
+        ? viewCam.position
+        : atDistance(master.position, viewCam.position, stop.near);
+  const sample = playing ? frameSample(rs, frame) : null;
+  const shownInc = sample ? Math.floor(frame / shotsPerPass) % Math.max(1, passes.length) : inc;
+  const position: Vec3 = sample
+    ? pullIn(sample.position)
+    : canTurn && t > 0
+      ? orbitPoint(target, zoomed, azimuthOf(target, zoomed) + t)
+      : zoomed;
 
   /* KEYS. Esc closes; + / − and up/down step a zoom stop; left/right turn
      around the arc. The two axes used to share the arrows, which left nothing
@@ -304,7 +370,7 @@ export function CameraView({
     w.until = now + 260;
   };
 
-  const tint = which === "end" ? CAMERA_RIG.end : CAMERA_RIG.start;
+  const tint = CAMERA_RIG.start;
   const canIn = clamped < stops.length - 1;
   const canOut = clamped > 0;
 
@@ -327,26 +393,6 @@ export function CameraView({
           <Icon name="camera" size={15} style={{ color: tint }} />
           <span className="type-panel-title truncate text-content">{viewCam.name}</span>
           <span className="type-caption text-content-subtle">Camera view</span>
-
-          {ends?.start && ends?.end && (
-            <div className="ml-3 flex rounded-lg border border-glass/12 p-0.5" role="group" aria-label="Which camera">
-              {(["start", "end"] as const).map((w) => (
-                <button
-                  key={w}
-                  type="button"
-                  data-ui={`camera-view-${w}`}
-                  aria-pressed={which === w}
-                  onClick={() => setWhich(w)}
-                  className={cn(
-                    "type-caption-strong rounded-md px-2.5 py-1 transition-colors",
-                    which === w ? "bg-brand/15 text-brand" : "text-content-muted hover:text-content"
-                  )}
-                >
-                  {w === "start" ? "Start" : "End"}
-                </button>
-              ))}
-            </div>
-          )}
 
           <span className="ml-auto" />
           <GlassGhostButton ui="camera-view-close" size="sm" icon="close" label="Close (Esc)" onClick={onClose} />
@@ -375,12 +421,19 @@ export function CameraView({
             </Suspense>
           </Canvas>
 
-          {stop && master && (
+          {/* What the view is set to: the zoom, the increment when one is
+              picked, and the camera's actual distance from the master. */}
+          {master && stop && (
             <div className="pointer-events-none absolute left-3 top-3 rounded-lg bg-black/45 px-2.5 py-1.5 backdrop-blur-sm">
-              <div className="type-panel-title text-white">{formatZoom(zoomOf(far!, stop.near))}</div>
+              <div data-ui="camera-view-readout" className="type-panel-title text-white">
+                {formatZoom(zoomMultiple)}
+                {shownInc !== null && passes[shownInc] && passes.length > 1 && (
+                  <span className="text-white/85"> · Increment {shownInc + 1} of {passes.length}</span>
+                )}
+              </div>
               <div className="type-caption text-white/70">
-                {stop.near.toFixed(1)} m from {master.name}
-                {t > 0 && ` · turned ${Math.round(t)}°`}
+                {vecDistance(master.position, position).toFixed(1)} m from {master.name}
+                {sample ? ` · frame ${frame + 1} of ${totalFrames}` : t > 0 ? ` · turned ${Math.round(t)}°` : ""}
               </div>
             </div>
           )}
@@ -389,52 +442,90 @@ export function CameraView({
         <footer className="flex flex-col gap-2 px-3 py-3">
           {stops.length > 0 ? (
             <>
-              <div className="flex items-center gap-2">
-                <GlassGhostButton
-                  ui="camera-view-zoom-out"
-                  size="sm"
-                  icon="zoom-out"
-                  label="Zoom out"
-                  disabled={!canOut}
-                  onClick={() => step(-1)}
-                />
-                <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
-                  {stops.map((s, i) => (
-                    <button
-                      key={s.key}
-                      type="button"
-                      data-ui={`camera-view-stop-${s.key}`}
-                      aria-pressed={i === clamped}
-                      onClick={() => setIdx(i)}
-                      className={cn(
-                        "flex shrink-0 flex-col items-start rounded-lg border px-2.5 py-1 text-left transition-colors",
-                        i === clamped
-                          ? "border-brand bg-brand/15"
-                          : "border-glass/12 hover:bg-glass/8",
-                        s.outOfRun && i !== clamped && "opacity-60"
-                      )}
-                    >
-                      <span className={cn("type-label-strong", i === clamped ? "text-brand" : "text-content")}>
-                        {s.title}
-                      </span>
-                      <span className="type-caption text-content-subtle">
-                        {s.note}
-                        {s.outOfRun ? " · not in run" : ""}
-                      </span>
-                    </button>
-                  ))}
+              {/* ZOOM AND INCREMENTS, as two steppers side by side: − / + walks
+                  the zoom stops (rig framing, saved zoom sets, Zoom Distance),
+                  ‹ / › walks the increments along the climb. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div
+                  data-ui="camera-view-zoom"
+                  role="group"
+                  aria-label="Zoom"
+                  className="flex items-center gap-1 rounded-lg border border-glass/12 p-0.5"
+                >
+                  <GlassGhostButton
+                    ui="camera-view-zoom-out"
+                    size="sm"
+                    icon="zoom-out"
+                    label="Zoom out"
+                    disabled={!canOut}
+                    onClick={() => step(-1)}
+                  />
+                  {/* Just the multiple: what the stop is (rig framing, a zoom set,
+                      Zoom Distance) is in the button's title on hover. */}
+                  <span
+                    data-ui="camera-view-zoom-value"
+                    title={stop ? `${stop.note}${stop.outOfRun ? " · not in run" : ""}` : undefined}
+                    className="type-caption-strong min-w-[40px] text-center tabular-nums text-content"
+                  >
+                    {stop && far ? formatZoom(zoomOf(far, stop.near)) : stop?.title}
+                  </span>
+                  <GlassGhostButton
+                    ui="camera-view-zoom-in"
+                    size="sm"
+                    icon="zoom-in"
+                    label="Zoom in"
+                    disabled={!canIn}
+                    onClick={() => step(1)}
+                  />
                 </div>
-                <GlassGhostButton
-                  ui="camera-view-zoom-in"
-                  size="sm"
-                  icon="zoom-in"
-                  label="Zoom in"
-                  disabled={!canIn}
-                  onClick={() => step(1)}
-                />
+              {/* Each increment's view, one at a time — only when the rig has more than one. */}
+              {passes.length > 1 && (
+                <div
+                  data-ui="camera-view-increments"
+                  role="group"
+                  aria-label="Increments"
+                  className="flex items-center gap-1 rounded-lg border border-glass/12 p-0.5"
+                >
+                  <GlassGhostButton
+                    ui="camera-view-inc-prev"
+                    size="sm"
+                    icon="chevron-left"
+                    label="Previous increment"
+                    disabled={(shownInc ?? 0) <= 0 && shownInc !== null}
+                    onClick={() => stepInc(shownInc === null ? 0 : -1)}
+                  />
+                  <span
+                    data-ui="camera-view-inc-value"
+                    title="Increment"
+                    aria-label={shownInc === null ? "No increment selected" : `Increment ${shownInc + 1} of ${passes.length}`}
+                    className="type-caption-strong min-w-[40px] text-center tabular-nums text-content"
+                  >
+                    {shownInc === null ? "–" : shownInc + 1} / {passes.length}
+                  </span>
+                  <GlassGhostButton
+                    ui="camera-view-inc-next"
+                    size="sm"
+                    icon="chevron-right"
+                    label="Next increment"
+                    disabled={shownInc !== null && shownInc >= passes.length - 1}
+                    onClick={() => stepInc(shownInc === null ? 0 : 1)}
+                  />
+                </div>
+              )}
               </div>
               {canTurn && (
                 <div className="flex items-center gap-2">
+                  {/* Play the sweep, as in Scene preview: every frame the rig shoots. */}
+                  <button
+                    type="button"
+                    aria-label={playing ? "Pause sweep" : "Play sweep"}
+                    data-ui="camera-view-play"
+                    disabled={totalFrames <= 1}
+                    onClick={togglePlay}
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-glass/12 bg-glass/8 text-content-muted transition-colors hover:text-content disabled:pointer-events-none disabled:opacity-40"
+                  >
+                    <Icon name={playing ? "pause" : "preview"} size={14} />
+                  </button>
                   <GlassGhostButton
                     ui="camera-view-turn-back"
                     size="sm"
@@ -451,14 +542,17 @@ export function CameraView({
                       min={0}
                       max={Math.round(sweep)}
                       step={1}
-                      value={Math.round(t)}
+                      value={Math.round(sample ? Math.min((frame % shotsPerPass) * (360 / shotsPerPass), sweep) : t)}
                       onChange={(e) => turnTo(parseFloat(e.target.value))}
                       className="h-1 min-w-0 flex-1 cursor-pointer accent-brand"
                     />
                     {/* The arc, not just the angle: "120° of 300°" says both
                         where you are and how much the run actually sweeps. */}
                     <span className="type-caption shrink-0 tabular-nums text-content-subtle">
-                      <span className="text-content">{Math.round(t)}°</span> of {Math.round(sweep)}°
+                      <span className="text-content">
+                        {Math.round(sample ? Math.min((frame % shotsPerPass) * (360 / shotsPerPass), sweep) : t)}°
+                      </span>{" "}
+                      of {Math.round(sweep)}°
                     </span>
                     <button
                       type="button"

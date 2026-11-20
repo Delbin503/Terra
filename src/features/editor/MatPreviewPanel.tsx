@@ -95,6 +95,31 @@ export function MatPreviewPanel({
   const [previewOpen, setPreviewOpen] = useState(false);
 
   const seed = useRef(320);
+  /**
+   * An optional look to aim for — a photo of the material or place the render
+   * should resemble. It sits beside the view, not instead of it: the view is
+   * still what gets rendered.
+   */
+  const [reference, setReference] = useState<{ name: string; url: string } | null>(null);
+  const [refDragOver, setRefDragOver] = useState(false);
+  const refInput = useRef<HTMLInputElement>(null);
+  const refUrl = useRef<string | null>(null);
+  const releaseReference = () => {
+    if (refUrl.current) URL.revokeObjectURL(refUrl.current);
+    refUrl.current = null;
+  };
+  useEffect(() => releaseReference, []);
+  const takeReference = (list: FileList | null) => {
+    const f = list?.[0];
+    if (!f || !f.type.startsWith("image/")) return;
+    releaseReference();
+    refUrl.current = URL.createObjectURL(f);
+    setReference({ name: f.name, url: refUrl.current });
+  };
+  const clearReference = () => {
+    releaseReference();
+    setReference(null);
+  };
   /** true while the viewport is taking the shot */
   const [capture, setCapture] = useState(false);
   const shots = useRef(0);
@@ -185,6 +210,18 @@ export function MatPreviewPanel({
 
   return (
     <>
+      <input
+        ref={refInput}
+        type="file"
+        hidden
+        accept="image/*"
+        data-ui="mat-reference-input"
+        onChange={(e) => {
+          takeReference(e.target.files);
+          e.target.value = "";
+        }}
+      />
+
       <DockPanel
         ui="mat-preview"
         title="MAT Preview"
@@ -194,7 +231,7 @@ export function MatPreviewPanel({
         fitContent
         /* A capture is taller than the empty slot it lands in; grow once so
            the frame and the post-processing switch are both in view. */
-        refitKey={image?.src ? image.name : "empty"}
+        refitKey={`${image?.src ? image.name : "empty"}|${reference?.name ?? ""}`}
         job={job}
         /* The full block lives in the editor's corner now; the shell keeps
            only its collapsed-header spinner. */
@@ -374,6 +411,71 @@ export function MatPreviewPanel({
                 <span className="type-body relative">{capture ? "Capturing…" : "Capture view"}</span>
                 <span className="type-caption relative text-content-subtle">
                   The scene as you see it — no panels
+                </span>
+              </button>
+            )}
+          </section>
+
+          {/* --------------------------------------------------- reference */}
+          <section className="flex flex-col gap-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <span className="type-body shrink-0 text-content-subtle">Reference image</span>
+              <span className="type-caption text-content-subtle">Optional</span>
+            </div>
+
+            {reference ? (
+              <div
+                data-ui="mat-reference"
+                className="flex items-center gap-3 rounded-xl bg-glass/6 p-2"
+              >
+                <img
+                  src={reference.url}
+                  alt=""
+                  className="h-12 w-16 shrink-0 rounded-md object-cover ring-1 ring-glass/10"
+                />
+                <span className="type-body min-w-0 flex-1 truncate text-content">
+                  {reference.name}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${reference.name}`}
+                  data-ui="mat-reference-remove"
+                  disabled={busy}
+                  onClick={clearReference}
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-content-muted transition-colors hover:bg-danger/70 hover:text-white disabled:pointer-events-none disabled:opacity-40"
+                >
+                  <Icon name="trash" size={14} />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                data-ui="mat-reference-upload"
+                disabled={busy}
+                onClick={() => refInput.current?.click()}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setRefDragOver(true);
+                }}
+                onDragLeave={() => setRefDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setRefDragOver(false);
+                  takeReference(e.dataTransfer.files);
+                }}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-xl border border-dashed px-4 py-3 text-left transition-colors disabled:pointer-events-none disabled:opacity-40",
+                  refDragOver
+                    ? "border-brand/60 bg-brand/10 text-content"
+                    : "border-glass/25 bg-glass/5 text-content-subtle hover:border-glass/40 hover:bg-glass/8 hover:text-content"
+                )}
+              >
+                <Icon name="upload" size={18} className="shrink-0 text-content" />
+                <span className="flex min-w-0 flex-col">
+                  <span className="type-body text-content">Upload reference image</span>
+                  <span className="type-caption text-content-subtle">
+                    The look to aim for — drop an image or browse
+                  </span>
                 </span>
               </button>
             )}
