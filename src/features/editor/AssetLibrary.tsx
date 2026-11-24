@@ -545,6 +545,23 @@ export function AssetLibrary({
                     </span>
                   )}
                 />
+                {/* Folded to icons there's no room for the chevron inside the
+                    row, so it sits as a slim button of its own under the icon:
+                    the sub-list still opens and closes from the rail. */}
+                {catsCollapsed && (
+                  <Tooltip label={uploadsOpen ? "Collapse uploads" : "Expand uploads"} side="right" tone="glass">
+                    <button
+                      type="button"
+                      data-ui="asset-uploads-toggle"
+                      aria-label={uploadsOpen ? "Collapse uploads" : "Expand uploads"}
+                      aria-expanded={uploadsOpen}
+                      onClick={() => setUploadsOpen((v) => !v)}
+                      className="grid h-5 w-10 place-items-center rounded-md text-content-muted transition-colors hover:bg-glass/15 hover:text-content"
+                    >
+                      <Icon name="chevron-down" size={14} className={cn("transition-transform", uploadsOpen && "rotate-180")} />
+                    </button>
+                  </Tooltip>
+                )}
                 {uploadsOpen && (
                   <div className={cn("mt-0.5 flex flex-col gap-0.5", catsCollapsed ? "items-center" : "ml-3.5 border-l border-glass/10 pl-2")}>
                     {uploadViews

@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
+import { useHeldTurn } from "./use-held-turn";
 import { cn } from "@/lib/utils";
 import { GlassPanel } from "@/components/glass";
 import { Icon } from "@/components/icons";
@@ -170,6 +171,8 @@ export function SettingControl({
   onClose: () => void;
 }) {
   const [uniform, setUniform] = useState(true);
+  // 360° reads back as 0° from the cameras' positions: keep what was dragged to.
+  const turn = useHeldTurn(camera?.orbit ?? 0);
 
   // Drag offset from the default bottom-centre spot. Kept as a delta so the
   // panel stays centred until the user actually moves it, and so it survives
@@ -259,6 +262,7 @@ export function SettingControl({
           return camera && onOrbit
             ? () => {
                 onRigChange?.({ orbitStart: CAMERA_DEFAULTS.orbitStart, orbitEnd: CAMERA_DEFAULTS.orbitEnd });
+                turn.clear();
                 onOrbit(CAMERA_DEFAULTS.orbitStart);
               }
             : null;
@@ -463,8 +467,12 @@ export function SettingControl({
                 min={0}
                 max={360}
                 step={1}
-                value={Math.round(norm360(camera.orbit))}
-                onChange={(e) => onOrbit(parseFloat(e.target.value))}
+                value={Math.round(turn.value)}
+                onChange={(e) => {
+                  const deg = parseFloat(e.target.value);
+                  turn.hold(deg);
+                  onOrbit(deg);
+                }}
                 className="h-1 flex-1 cursor-pointer accent-brand"
               />
 
@@ -485,7 +493,7 @@ export function SettingControl({
                 Origin · {rig ? Math.round(rig.orbitStart) : 0}°
               </span>
               <span className="type-caption-strong text-content">
-                {Math.round(norm360(camera.orbit))}° now
+                {Math.round(turn.value)}° now
               </span>
               <span className="type-caption text-content-subtle">
                 {rig ? Math.round(orbitSweep(rig.orbitStart, rig.orbitEnd)) : 360}° swept

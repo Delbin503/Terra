@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useHeldTurn } from "./use-held-turn";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui";
@@ -114,6 +115,9 @@ function RigControls({
   onEditing: (edit: CameraEdit) => void;
 }) {
   const { rig: cameraRig, start, end, target } = rig;
+  // The bearing is read back from the cameras, where 360° and 0° are the same
+  // spot: hold what the slider was dragged to so its end doesn't snap to 0.
+  const turn = useHeldTurn(end ? azimuthOf(target, end.position) : 0);
   if (!cameraRig || !start || !end) return null;
 
   const sweep = distance(atDistance(target, start.position, rig.nearDistance), end.position);
@@ -312,8 +316,12 @@ function RigControls({
               min={0}
               max={360}
               step={1}
-              value={Math.round(orbit)}
-              onChange={(e) => focused("orbit", setOrbit)(parseFloat(e.target.value))}
+              value={Math.round(turn.value)}
+              onChange={(e) => {
+                const deg = parseFloat(e.target.value);
+                turn.hold(deg);
+                focused("orbit", setOrbit)(deg);
+              }}
               className="h-1 flex-1 cursor-pointer accent-brand"
             />
             <NumberInput
@@ -336,7 +344,7 @@ function RigControls({
             <span className="type-caption text-content-subtle">
               Origin · {Math.round(cameraRig.orbitStart)}°
             </span>
-            <span className="type-caption-strong text-content">{Math.round(orbit)}° now</span>
+            <span className="type-caption-strong text-content">{Math.round(turn.value)}° now</span>
             <span className="type-caption text-content-subtle">
               {Math.round(orbitSweep(cameraRig.orbitStart, cameraRig.orbitEnd))}° swept
             </span>
