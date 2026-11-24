@@ -86,7 +86,8 @@ export function MatPreviewPanel({
   onJobChange?: (job: DockJob | null) => void;
 }) {
   const [image, setImage] = useState<SourceImage | null>(null);
-  const [postProcess, setPostProcess] = useState(false);
+  /** the panel no longer offers a post-processing switch; every pass is material only */
+  const postProcess = false;
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
@@ -198,12 +199,8 @@ export function MatPreviewPanel({
 
   /* --------------------------------------------------------------- actions */
 
-  // Dropping the view drops the switch with it: post-processing is a statement
-  // about a frame, and leaving it armed for whatever gets captured next is a
-  // setting the user never made.
   const clearImage = () => {
     setImage(null);
-    setPostProcess(false);
     // The dialog is a view OF the image; without one there's nothing to look at.
     setPreviewOpen(false);
   };
@@ -230,7 +227,7 @@ export function MatPreviewPanel({
            below the fold makes the first act after opening it a scroll. */
         fitContent
         /* A capture is taller than the empty slot it lands in; grow once so
-           the frame and the post-processing switch are both in view. */
+           the frame and the reference slot are both in view. */
         refitKey={`${image?.src ? image.name : "empty"}|${reference?.name ?? ""}`}
         job={job}
         /* The full block lives in the editor's corner now; the shell keeps
@@ -480,16 +477,6 @@ export function MatPreviewPanel({
               </button>
             )}
           </section>
-
-          {/* Post-processing has nothing to act on until there's a source, so it
-              stays inert rather than offering a switch that changes nothing. */}
-          <Checkbox
-            ui="mat-post-processing"
-            checked={postProcess}
-            disabled={!hasImage || busy}
-            onChange={setPostProcess}
-            label="Enable Post-processing"
-          />
         </div>
         )}
       </DockPanel>
@@ -630,54 +617,5 @@ export function MatPreviewToast({
         <Icon name="close" size={13} />
       </button>
     </GlassPanel>
-  );
-}
-
-/**
- * A checkbox on glass. Native `<input type=checkbox>` can't be restyled
- * consistently across browsers — the same reason the colour picker overlays a
- * styled swatch — so the input carries the semantics and focus behaviour while
- * a sibling box carries the look.
- */
-function Checkbox({
-  ui,
-  checked,
-  disabled,
-  onChange,
-  label,
-}: {
-  ui: string;
-  checked: boolean;
-  disabled?: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-}) {
-  return (
-    <label
-      className={cn(
-        "flex items-center gap-2.5",
-        disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-      )}
-    >
-      <span className="relative grid h-5 w-5 shrink-0 place-items-center">
-        <input
-          type="checkbox"
-          data-ui={ui}
-          checked={checked}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.checked)}
-          className="peer absolute inset-0 h-full w-full cursor-[inherit] appearance-none rounded-[6px] border border-glass/25 bg-glass/10 outline-none transition-colors checked:border-brand/50 checked:bg-brand/15 focus-visible:ring-2 focus-visible:ring-ring"
-        />
-        {checked && (
-          <Icon
-            name="check"
-            size={13}
-            strokeWidth={3}
-            className="pointer-events-none relative text-brand"
-          />
-        )}
-      </span>
-      <span className="type-body text-content-muted">{label}</span>
-    </label>
   );
 }
