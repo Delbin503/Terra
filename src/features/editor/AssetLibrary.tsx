@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { pauseThumbPreload } from "./thumb-cache";
 import { cn } from "@/lib/utils";
 import { GlassPanel, GlassGhostButton, DropdownLayer } from "@/components/glass";
@@ -293,6 +293,15 @@ export function AssetLibrary({
   // fit across.
   const cols = gridW > 0 ? Math.max(1, Math.floor((gridW + GAP) / (CARD + GAP))) : 6;
   const cell = CARD;
+  /** Cards keep their fixed size; the width left over after the last whole
+   *  column is spread into the gaps, so the row runs edge to edge instead of
+   *  stopping short with a strip of empty space on the right. */
+  const gridStyle: CSSProperties = {
+    gridTemplateColumns: `repeat(${cols}, ${cell}px)`,
+    gridAutoRows: `${cell}px`,
+    gap: GAP,
+    justifyContent: "space-between",
+  };
   /** the grid's visible height: two whole rows, plus the 4px the cards lift on hover */
   const gridH = ROWS_IN_VIEW * cell + (ROWS_IN_VIEW - 1) * GAP + 4;
   const showSpace = category === "utilities" && !!onDefineSpace;
@@ -723,7 +732,7 @@ export function AssetLibrary({
               style={{ height: gridH }}
             >
             {showFolderGrid && (visibleFolders.length > 0 || creatingFolder) ? (
-              <div className="grid content-start" style={{ gridTemplateColumns: `repeat(${cols}, ${cell}px)`, gridAutoRows: `${cell}px`, gap: GAP }}>
+              <div className="grid content-start" style={gridStyle}>
                 {creatingFolder && (
                   <div
                     data-ui="folder-new-tile"
@@ -764,7 +773,7 @@ export function AssetLibrary({
             ) : tiles.length > 0 ? (
                   <div
                     className="grid content-start"
-                    style={{ gridTemplateColumns: `repeat(${cols}, ${cell}px)`, gridAutoRows: `${cell}px`, gap: GAP }}
+                    style={gridStyle}
                   >
                     {pageTiles.map((a) =>
                       a === "space" ? (
