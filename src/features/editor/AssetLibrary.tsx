@@ -1339,14 +1339,13 @@ function SpaceTile({ onPick }: { onPick: () => void }) {
         <SpaceThumb />
       </div>
 
-      {/* The same badge slot the type badge uses, saying the same kind of thing
-          the rig's "Rig" says: what this is for, not what it is made of. */}
+      {/* The same icon-only badge, in the same slot, as every asset card's type badge. */}
       <span
         title="Utility · define an area"
-        className="absolute right-2 top-2 flex h-6 items-center gap-1 rounded-md bg-black/45 px-1.5 text-white/90 backdrop-blur-sm"
+        aria-label="Utility"
+        className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-md bg-black/45 text-white/90 backdrop-blur-sm"
       >
         <Icon name="space" size={12} strokeWidth={2} />
-        <span className="type-caption-strong leading-none">Utility</span>
       </span>
 
       <span className="absolute inset-x-0 bottom-0 scrim-strong p-2 pt-6">
