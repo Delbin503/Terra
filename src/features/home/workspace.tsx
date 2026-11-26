@@ -82,6 +82,8 @@ interface Workspace {
   publishProject: (id: string, category: CommunityCategory) => void;
 
   addFolder: (name: string) => string;
+  /** a new, empty project at the top of the list */
+  addProject: (name: string) => string;
   rename: (kind: "project" | "folder", id: string, name: string) => void;
   toggleFavourite: (kind: "project" | "folder", id: string) => void;
   /** file a project into a folder, and let the folder show it */
@@ -166,6 +168,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           ...list,
         ]);
         notify("project", "Folder Created", `You have created the folder ${name}`);
+        return id;
+      },
+
+      addProject(name) {
+        const id = nextId("p");
+        setProjects((list) => [
+          {
+            id,
+            name,
+            editedLabel: "Edited just now",
+            kind: "FSD",
+            seed: 100 + Math.floor(Math.random() * 900),
+          },
+          ...list,
+        ]);
+        notify("project", "Project Created", `You have created the project ${name}`);
         return id;
       },
 

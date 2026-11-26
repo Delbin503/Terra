@@ -50,7 +50,8 @@ const NAV: NavItem[] = [
 export function Sidebar({
   collapsed,
   onToggle,
-  onCreate,
+  onNewProject,
+  onNewFolder,
   at,
   onNavigate,
   shelf,
@@ -62,7 +63,10 @@ export function Sidebar({
 }: {
   collapsed: boolean;
   onToggle: () => void;
-  onCreate: () => void;
+  /** Create → New Project: the composer, as before */
+  onNewProject: () => void;
+  /** Create → New Folder: the folder-name popup */
+  onNewFolder: () => void;
   /** which destination is showing */
   at: Destination;
   onNavigate: (to: Destination) => void;
@@ -106,24 +110,9 @@ export function Sidebar({
 
       {/* Create — the icon tile carries the brand, the label stays plain text.
           A full-width orange button next to four plain nav rows made the rail
-          top-heavy and left "Create" competing with the greeting for the eye. */}
-      <Tooltip label="Create" hidden={!collapsed}>
-        <button
-          type="button"
-          onClick={onCreate}
-          className={cn(
-            "mb-2 flex items-center gap-2.5 rounded-lg py-1.5 text-left transition-colors hover:bg-glass/15",
-            // Collapsed the row is exactly as wide as the icon tile, so any
-            // horizontal padding pushes the tile off the rail's centre line.
-            collapsed ? "w-full justify-center px-0" : "-mx-1 px-1 pr-3"
-          )}
-        >
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand text-brand-foreground shadow-xs">
-            <Icon name="create" size={18} strokeWidth={2.2} />
-          </span>
-          {!collapsed && <span className="type-body-strong">Create</span>}
-        </button>
-      </Tooltip>
+          top-heavy and left "Create" competing with the greeting for the eye.
+          It opens a small menu: a new project or a new folder. */}
+      <CreateMenu collapsed={collapsed} onNewProject={onNewProject} onNewFolder={onNewFolder} />
 
       <nav className="flex flex-col gap-0.5">
         {NAV.map((item) => (
@@ -335,6 +324,98 @@ function NavButton({
  * in and where to go to join another, which is a better answer than a control
  * that does nothing.
  */
+/** Create, and the two things it can make. */
+function CreateMenu({
+  collapsed,
+  onNewProject,
+  onNewFolder,
+}: {
+  collapsed: boolean;
+  onNewProject: () => void;
+  onNewFolder: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  useDismissable(open, () => setOpen(false), wrap);
+
+  const items: { id: string; icon: IconName; label: string; hint: string; run: () => void }[] = [
+    { id: "project", icon: "file", label: "New Project", hint: "Start a new scene", run: onNewProject },
+    { id: "folder", icon: "folder-add", label: "New Folder", hint: "Group your projects", run: onNewFolder },
+  ];
+
+  return (
+    <div ref={wrap} className="relative mb-2">
+      <Tooltip label="Create" side="right" hidden={!collapsed || open}>
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          data-ui="sidebar-create"
+          onClick={() => setOpen((o) => !o)}
+          className={cn(
+            "flex items-center gap-2.5 rounded-lg py-1.5 text-left transition-colors hover:bg-glass/15",
+            open && "bg-glass/15",
+            // Collapsed the row is exactly as wide as the icon tile, so any
+            // horizontal padding pushes the tile off the rail's centre line.
+            collapsed ? "w-full justify-center px-0" : "-mx-1 w-[calc(100%+0.5rem)] px-1 pr-3"
+          )}
+        >
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand text-brand-foreground shadow-xs">
+            <Icon name="create" size={18} strokeWidth={2.2} />
+          </span>
+          {!collapsed && (
+            <>
+              <span className="type-body-strong flex-1">Create</span>
+              <Icon
+                name="chevron-down"
+                size={14}
+                className={cn("shrink-0 text-content-subtle transition-transform", open && "rotate-180")}
+              />
+            </>
+          )}
+        </button>
+      </Tooltip>
+
+      {open && (
+        <div
+          role="menu"
+          data-ui="sidebar-create-menu"
+          /* The same dropdown skin as the organization menu below. Open, it
+             hangs under the button; folded, it opens to the rail's right. */
+          className={cn(
+            "absolute z-50 w-56 animate-menu-in rounded-xl border border-line/12 bg-surface-overlay p-1.5 shadow-pop",
+            collapsed
+              ? "left-[calc(100%+12px)] top-0 origin-top-left"
+              : "left-0 top-[calc(100%+6px)] origin-top-left"
+          )}
+        >
+          {items.map((it) => (
+            <button
+              key={it.id}
+              type="button"
+              role="menuitem"
+              data-ui={`sidebar-create-${it.id}`}
+              onClick={() => {
+                setOpen(false);
+                it.run();
+              }}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-raised"
+            >
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-glass/10 text-content">
+                <Icon name={it.icon} size={16} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="type-body-dense block truncate text-content">{it.label}</span>
+                <span className="type-caption block truncate text-content-subtle">{it.hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OrgSwitcher() {
   const { org, orgs, switchOrg } = useWorkspace();
   const [open, setOpen] = useState(false);

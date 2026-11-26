@@ -109,6 +109,8 @@ export function ProjectsView({
   onPricing,
   onCreateProject,
   onOpenProject,
+  focus,
+  onFocusHandled,
 }: {
   shelf: Shelf;
   onShelf: (shelf: Shelf) => void;
@@ -120,6 +122,9 @@ export function ProjectsView({
   /** the composer — "New Project" is the same act as Create on the home page */
   onCreateProject: () => void;
   onOpenProject: (project: Project) => void;
+  /** a one-off "open this folder" (or "show the shelf", when null) from the rail's Create menu */
+  focus?: { folderId: string | null } | null;
+  onFocusHandled?: () => void;
 }) {
   const [scope, setScope] = useState<Scope>(() => initialScope(shelf));
   const [layout, setLayout] = useState<Layout>("grid");
@@ -168,6 +173,16 @@ export function ProjectsView({
     setQuery("");
     setRenamingId(null);
   }, [shelf]);
+
+  /* After the shelf reset above, so a Create that switched shelves still lands
+     inside the folder it just made. */
+  useEffect(() => {
+    if (!focus) return;
+    setOpenFolderId(focus.folderId);
+    setQuery("");
+    onFocusHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus]);
 
   /* Confirmations speak once and go. */
   useEffect(() => {

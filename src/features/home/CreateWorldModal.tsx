@@ -65,9 +65,15 @@ const uid = () => `img-${(seq += 1)}`;
 export function CreateWorldModal({
   open,
   onOpenChange,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  /**
+   * Where a named project goes. Left out, it opens in the editor; the rail's
+   * Create → New Project passes this to file it and land on All Projects.
+   */
+  onCreated?: (name: string) => void;
 }) {
   const [mode, setMode] = useState<InputMode>("2d");
   const [prompt, setPrompt] = useState("");
@@ -208,6 +214,10 @@ export function CreateWorldModal({
   function openNamed(name: string) {
     setNaming(null);
     reset();
+    if (onCreated) {
+      onCreated(name);
+      return;
+    }
     window.location.hash = `#editor/${encodeURIComponent(name)}`;
   }
 

@@ -7,6 +7,7 @@ import { AppBackdrop } from "./AppBackdrop";
 import { HomeTopBar } from "./HomeTopBar";
 import { ChatLauncher } from "./ChatLauncher";
 import { CreateWorldModal } from "./CreateWorldModal";
+import { NameFolderDialog } from "./NameFolderDialog";
 import { ProjectCard } from "./ProjectCard";
 import { ProjectsView } from "./ProjectsView";
 import { CommunityView, FeatureCard, WorldCard } from "./CommunityView";
@@ -70,9 +71,27 @@ export function HomePage({
  * breadcrumb to put there and the others do.
  */
 function Shell({ at: landing, runs }: { at: Destination; runs: WorkOrderRunStore }) {
-  const { unread, markNotificationsRead } = useWorkspace();
+  const { unread, markNotificationsRead, addFolder, addProject } = useWorkspace();
   const [collapsed, setCollapsed] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  /**
+   * Where the composer sends a project once it is named. The rail's
+   * Create → New Project files it and lands on All Projects; every other way
+   * into the composer still opens the editor.
+   */
+  const [toProjects, setToProjects] = useState(false);
+  const openComposer = (fromRail = false) => {
+    setToProjects(fromRail);
+    setModalOpen(true);
+  };
+  /** the rail's Create → New Folder popup */
+  const [namingFolder, setNamingFolder] = useState(false);
+  /**
+   * A one-off instruction to the Projects page: open this folder (or none, to
+   * show the shelf itself). Cleared once the page has acted on it, so coming
+   * back to Projects later doesn't re-open it.
+   */
+  const [projectsFocus, setProjectsFocus] = useState<{ folderId: string | null } | null>(null);
   /** the two panels that arrive from the edges */
   const [notifications, setNotifications] = useState(false);
   const [chat, setChat] = useState(false);
@@ -108,7 +127,7 @@ function Shell({ at: landing, runs }: { at: Destination; runs: WorkOrderRunStore
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setModalOpen(true);
+        openComposer();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -122,7 +141,8 @@ function Shell({ at: landing, runs }: { at: Destination; runs: WorkOrderRunStore
       <Sidebar
         collapsed={collapsed}
         onToggle={() => setCollapsed((c) => !c)}
-        onCreate={() => setModalOpen(true)}
+        onNewProject={() => openComposer(true)}
+        onNewFolder={() => setNamingFolder(true)}
         at={at}
         onNavigate={setAt}
         shelf={shelf}
@@ -177,7 +197,7 @@ function Shell({ at: landing, runs }: { at: Destination; runs: WorkOrderRunStore
             ) : (
               <HomeFeed
                 narrow={chat}
-                onCreate={() => setModalOpen(true)}
+                onCreate={() => openComposer()}
                 onSeeProjects={() => setAt("projects")}
                 onOpenNews={setNews}
                 onChat={() => setChat(true)}
@@ -191,7 +211,9 @@ function Shell({ at: landing, runs }: { at: Destination; runs: WorkOrderRunStore
               onHome={() => setAt("home")}
               onChat={() => setChat(true)}
               onPricing={() => setAt("pricing")}
-              onCreateProject={() => setModalOpen(true)}
+              onCreateProject={() => openComposer()}
+              focus={projectsFocus}
+              onFocusHandled={() => setProjectsFocus(null)}
               onOpenProject={() => {
                 window.location.hash = "#editor";
               }}
@@ -228,7 +250,32 @@ function Shell({ at: landing, runs }: { at: Destination; runs: WorkOrderRunStore
         </div>
       </main>
 
-      <CreateWorldModal open={modalOpen} onOpenChange={setModalOpen} />
+      <CreateWorldModal
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+        onCreated={
+          toProjects
+            ? (name) => {
+                addProject(name);
+                setShelf("all");
+                setProjectsFocus({ folderId: null });
+                setAt("projects");
+              }
+            : undefined
+        }
+      />
+
+      <NameFolderDialog
+        open={namingFolder}
+        onCancel={() => setNamingFolder(false)}
+        onConfirm={(name) => {
+          const id = addFolder(name);
+          setNamingFolder(false);
+          setShelf("folders");
+          setProjectsFocus({ folderId: id });
+          setAt("projects");
+        }}
+      />
 
       <NotificationsDrawer
         open={notifications}
@@ -238,7 +285,7 @@ function Shell({ at: landing, runs }: { at: Destination; runs: WorkOrderRunStore
       <AiChatDrawer
         open={chat}
         onClose={() => setChat(false)}
-        onCreateWorld={() => setModalOpen(true)}
+        onCreateWorld={() => openComposer()}
       />
 
       {orders && <WorkOrdersDialog store={runs} onClose={() => setOrders(false)} />}
