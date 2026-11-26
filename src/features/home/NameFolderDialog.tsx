@@ -61,7 +61,8 @@ export function NameFolderDialog({
               placeholder="Folder name"
               aria-label="Folder name"
               data-ui="name-folder-input"
-              className="type-body min-w-0 flex-1 bg-transparent text-content outline-none placeholder:text-content-subtle"
+              // The well shows focus around the whole field; a second ring on the input itself doubled it.
+              className="type-body min-w-0 flex-1 bg-transparent text-content outline-none placeholder:text-content-subtle focus-visible:ring-0 focus-visible:ring-offset-0"
             />
           </label>
 

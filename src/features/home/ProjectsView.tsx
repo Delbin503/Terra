@@ -4,6 +4,7 @@ import { Icon, type IconName } from "@/components/icons";
 import { Button, ConfirmDialog, ContextMenu, Segmented, type MenuItem } from "@/components/ui";
 import { HomeTopBar } from "./HomeTopBar";
 import { ProjectCard, ProjectRow } from "./ProjectCard";
+import { NameFolderDialog } from "./NameFolderDialog";
 import { FolderCard, FolderRow } from "./FolderCard";
 import { MoveDialog, type MoveRequest } from "./MoveDialog";
 import { PublishProjectDialog, type PublishRequest } from "./PublishProjectDialog";
@@ -136,8 +137,8 @@ export function ProjectsView({
   } | null>(null);
   const [query, setQuery] = useState("");
   const [openFolderId, setOpenFolderId] = useState<string | null>(null);
+  /** the New Folder popup */
   const [naming, setNaming] = useState(false);
-  const [draftName, setDraftName] = useState("");
   /** the narrowest a card may be — the slider writes this, the grid reads it */
   const [cardSize, setCardSize] = useState(CARD_SIZE.initial);
   const [menu, setMenu] = useState<MenuAt | null>(null);
@@ -194,11 +195,8 @@ export function ProjectsView({
   const toggleProject = (id: string) => toggleFavourite("project", id);
   const toggleFolder = (id: string) => toggleFavourite("folder", id);
 
-  function createFolder() {
-    const name = draftName.trim();
-    if (!name) return;
+  function createFolder(name: string) {
     addFolder(name);
-    setDraftName("");
     setNaming(false);
   }
 
@@ -477,32 +475,6 @@ export function ProjectsView({
           </div>
         </div>
 
-        {naming && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              createFolder();
-            }}
-            className="field-well mt-4 flex flex-wrap items-center gap-2 rounded-lg p-2"
-          >
-            <Icon name="folder-add" size={16} className="ml-1.5 text-content-muted" />
-            <input
-              autoFocus
-              value={draftName}
-              onChange={(e) => setDraftName(e.target.value)}
-              placeholder="Folder name"
-              aria-label="Folder name"
-              className="type-body h-8 min-w-0 flex-1 bg-transparent text-content outline-none placeholder:text-content-subtle"
-            />
-            <Button variant="ghost" size="sm" type="button" onClick={() => setNaming(false)}>
-              Cancel
-            </Button>
-            <Button variant="brand" size="sm" type="submit" disabled={!draftName.trim()}>
-              Create folder
-            </Button>
-          </form>
-        )}
-
         <div className="mt-5">
           {showingFolders ? (
             shownFolders.length ? (
@@ -646,6 +618,12 @@ export function ProjectsView({
           setPublishing(null);
           setNote(`“${name}” published to Community — find it under ${category[0].toUpperCase()}${category.slice(1)}`);
         }}
+      />
+
+      <NameFolderDialog
+        open={naming}
+        onCancel={() => setNaming(false)}
+        onConfirm={createFolder}
       />
 
       <MoveDialog
